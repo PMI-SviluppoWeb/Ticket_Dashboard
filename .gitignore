@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Dati locali del database
+data/
+
+# Env
+.env
+.env*.local
