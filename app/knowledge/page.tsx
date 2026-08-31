@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KnowledgeDoc, KnowledgeDocRow } from "@/lib/types";
 
@@ -112,19 +111,11 @@ export default function KnowledgePage() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          >
-            ← Dashboard
-          </Link>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">Knowledge Base</h1>
-            <p className="text-xs text-slate-500">
-              Documenti PDF importati, consultabili anche via MCP · {docs.length} documenti
-            </p>
-          </div>
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">Knowledge Base</h1>
+          <p className="text-xs text-slate-500">
+            Documenti PDF importati, consultabili anche via MCP · {docs.length} documenti
+          </p>
         </div>
       </header>
 
