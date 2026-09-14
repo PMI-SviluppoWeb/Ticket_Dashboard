@@ -7,8 +7,8 @@ import StatsCards from "@/components/StatsCards";
 import FiltersBar, { DEFAULT_FILTERS, type Filters } from "@/components/FiltersBar";
 import TicketTable from "@/components/TicketTable";
 import QuickActions from "@/components/QuickActions";
+import NotificationBell from "@/components/NotificationBell";
 import {
-  BellIcon,
   ChevronDownIcon,
   RefreshIcon,
   SearchIcon,
@@ -172,14 +172,7 @@ export default function Dashboard() {
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            className="relative rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-            title="Notifiche"
-          >
-            <BellIcon className="h-5 w-5" />
-            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-red-500" />
-          </button>
+          <NotificationBell />
           <Link
             href="/knowledge"
             className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
