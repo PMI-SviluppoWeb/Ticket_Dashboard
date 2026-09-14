@@ -15,6 +15,20 @@ export const client = createClient({
 });
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS operatori (
+  id             TEXT PRIMARY KEY,
+  nome           TEXT NOT NULL,
+  email          TEXT NOT NULL UNIQUE,
+  password_hash  TEXT NOT NULL,
+  ruolo          TEXT NOT NULL DEFAULT 'operatore' CHECK (ruolo IN ('admin','operatore')),
+  attivo         INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
+  data_creazione TEXT NOT NULL,
+  ultimo_accesso TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_operatori_email ON operatori (email);
+CREATE INDEX IF NOT EXISTS idx_operatori_attivo ON operatori (attivo);
+
 CREATE TABLE IF NOT EXISTS tickets (
   id                   TEXT PRIMARY KEY,
   numero               TEXT NOT NULL UNIQUE,
@@ -38,6 +52,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 CREATE INDEX IF NOT EXISTS idx_tickets_stato     ON tickets (stato);
 CREATE INDEX IF NOT EXISTS idx_tickets_priorita  ON tickets (priorita);
 CREATE INDEX IF NOT EXISTS idx_tickets_data      ON tickets (data_creazione);
+CREATE INDEX IF NOT EXISTS idx_tickets_operatore ON tickets (operatore);
 
 CREATE TABLE IF NOT EXISTS messages (
   id             TEXT PRIMARY KEY,
@@ -67,16 +82,48 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
   dimensione     INTEGER NOT NULL,
   pagine         INTEGER,
   testo          TEXT NOT NULL,
+  links          TEXT DEFAULT '[]',
   data_creazione TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_docs_nome ON knowledge_docs (nome_file);
+
+CREATE TABLE IF NOT EXISTS knowledge_links (
+  id             TEXT PRIMARY KEY,
+  titolo         TEXT NOT NULL,
+  url            TEXT NOT NULL,
+  descrizione    TEXT,
+  categoria      TEXT DEFAULT 'generale',
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_links_categoria ON knowledge_links (categoria);
+
+CREATE TABLE IF NOT EXISTS allegati (
+  id               TEXT PRIMARY KEY,
+  note_tecnica_id  TEXT NOT NULL REFERENCES technical_notes(id) ON DELETE CASCADE,
+  ticket_id        TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  nome_file        TEXT NOT NULL,
+  nome_originale   TEXT NOT NULL,
+  dimensione       INTEGER NOT NULL,
+  tipo_mime        TEXT NOT NULL,
+  data_creazione   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_allegati_note ON allegati (note_tecnica_id);
+CREATE INDEX IF NOT EXISTS idx_allegati_ticket ON allegati (ticket_id);
 `;
 
 const schemaReady = (async () => {
   const statements = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
   for (const stmt of statements) {
     await client.execute(stmt);
+  }
+  // Migration: add links column if missing
+  try {
+    await client.execute("ALTER TABLE knowledge_docs ADD COLUMN links TEXT DEFAULT '[]'");
+  } catch {
+    // Column already exists
   }
 })().catch((err) => {
   console.error("Errore nell'inizializzazione dello schema su Turso:", err);

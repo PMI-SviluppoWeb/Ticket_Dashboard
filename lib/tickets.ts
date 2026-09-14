@@ -1,5 +1,6 @@
 import { db } from "./db";
 import type {
+  Allegato,
   Message,
   Priorita,
   StatoTicket,
@@ -109,6 +110,9 @@ export async function listTickets(opts: {
   if (opts.stato && opts.stato !== "TUTTI") {
     where.push("stato = @stato");
     params.stato = opts.stato;
+  } else {
+    // When showing all tickets, exclude closed ones (they go in the dedicated section)
+    where.push("stato != 'CHIUSO'");
   }
   if (opts.priorita && opts.priorita !== "TUTTE") {
     where.push("priorita = @priorita");
@@ -118,10 +122,18 @@ export async function listTickets(opts: {
     where.push("modulo_software = @modulo");
     params.modulo = opts.modulo;
   }
-  if (opts.operatore) {
+  
+  // Handle special operator filter: "__MY_AND_UNASSIGNED__:nome_operatore"
+  // Shows tickets assigned to operator OR unassigned (NUOVO) tickets
+  if (opts.operatore?.startsWith("__MY_AND_UNASSIGNED__:")) {
+    const operatorName = opts.operatore.replace("__MY_AND_UNASSIGNED__:", "");
+    where.push("(operatore = @operatore OR (operatore IS NULL AND stato = 'NUOVO'))");
+    params.operatore = operatorName;
+  } else if (opts.operatore) {
     where.push("operatore = @operatore");
     params.operatore = opts.operatore;
   }
+  
   const q = opts.q?.trim();
   if (q) {
     where.push(`(
@@ -173,6 +185,17 @@ export async function getTicket(id: string): Promise<Ticket | null> {
        FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
     )
     .all(id)) as unknown as TechnicalNote[];
+
+  // Fetch attachments for each technical note
+  for (const note of noteTecniche) {
+    const allegati = (await db
+      .prepare(
+        `SELECT id, note_tecnica_id, ticket_id, nome_file, nome_originale, dimensione, tipo_mime, data_creazione
+         FROM allegati WHERE note_tecnica_id = ? ORDER BY data_creazione ASC`
+      )
+      .all(note.id)) as unknown as Allegato[];
+    note.allegati = allegati;
+  }
 
   return { ...row, messaggi, note_tecniche: noteTecniche } as unknown as Ticket;
 }

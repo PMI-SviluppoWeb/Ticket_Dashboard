@@ -19,6 +19,18 @@ export interface TechnicalNote {
   soluzione: string;
   operatore: string | null;
   data_creazione: string;
+  allegati: Allegato[];
+}
+
+export interface Allegato {
+  id: string;
+  note_tecnica_id: string;
+  ticket_id: string;
+  nome_file: string;
+  nome_originale: string;
+  dimensione: number;
+  tipo_mime: string;
+  data_creazione: string;
 }
 
 export interface Ticket {
@@ -105,11 +117,17 @@ export interface TicketListResult {
   paginaSize: number;
 }
 
+export interface KnowledgeLink {
+  url: string;
+  title: string;
+}
+
 export interface KnowledgeDocRow {
   id: string;
   nome_file: string;
   dimensione: number;
   pagine: number | null;
+  links: KnowledgeLink[];
   data_creazione: string;
 }
 
@@ -122,4 +140,43 @@ export interface KnowledgeDocInput {
   dimensione: number;
   pagine: number | null;
   testo: string;
+  links?: KnowledgeLink[];
+}
+
+export interface KnowledgeLinkItem {
+  id: string;
+  titolo: string;
+  url: string;
+  descrizione: string | null;
+  categoria: string;
+  data_creazione: string;
+}
+
+export interface KnowledgeLinkInput {
+  titolo: string;
+  url: string;
+  descrizione?: string | null;
+  categoria?: string;
+}
+
+export interface Operator {
+  id: string;
+  nome: string;
+  email: string;
+  ruolo: "admin" | "operatore";
+  attivo: boolean;
+  data_creazione: string;
+  ultimo_accesso: string | null;
+}
+
+export interface OperatorInput {
+  nome: string;
+  email: string;
+  password: string;
+  ruolo?: "admin" | "operatore";
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
 }

@@ -1,21 +1,52 @@
 import { NextResponse } from "next/server";
 import { createTicket, listTickets, getTicketByNumero } from "@/lib/tickets";
+import { getOperatorById } from "@/lib/auth";
 import type { Priorita, StatoTicket, TicketInput } from "@/lib/types";
 
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 const STATI: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
 
+function getOperatorId(request: Request): string | null {
+  return request.headers.get("x-operator-id");
+}
+
+function getOperatorRole(request: Request): string | null {
+  return request.headers.get("x-operator-ruolo");
+}
+
 export async function GET(request: Request) {
+  const operatorId = getOperatorId(request);
+  const operatorRole = getOperatorRole(request);
   const url = new URL(request.url);
 
   const stato = (url.searchParams.get("stato") ?? "TUTTI") as StatoTicket | "TUTTI";
   const priorita = (url.searchParams.get("priorita") ?? "TUTTE") as Priorita | "TUTTE";
   const q = url.searchParams.get("q") ?? "";
   const modulo = url.searchParams.get("modulo") ?? "";
-  const operatore = url.searchParams.get("operatore") ?? "";
+  let operatore = url.searchParams.get("operatore") ?? "";
   const pagina = parseInt(url.searchParams.get("pagina") ?? "1", 10);
   const paginaSize = parseInt(url.searchParams.get("paginaSize") ?? "25", 10);
   const ordina = url.searchParams.get("ordina") ?? "data_desc";
+
+  // Se è admin e passa TUTTI, non filtrare per operatore
+  if (operatore === "TUTTI") {
+    operatore = "";
+  }
+  // Se è admin, non filtrare per operatore (può vedere tutti)
+  else if (operatorRole === "admin") {
+    operatore = "";
+  }
+  // Se è operatore e non ha specificato un filtro operatore, mostra:
+  // - i ticket assegnati a lui
+  // - i ticket non assegnati (NUOVO) che può prendere
+  else if (operatorId && !operatore) {
+    const operator = await getOperatorById(operatorId);
+    if (operator) {
+      // Per gli operatori, usiamo una query custom che include i ticket NUOVO non assegnati
+      // Passiamo un parametro speciale per indicare che vogliamo "miei + disponibili"
+      operatore = `__MY_AND_UNASSIGNED__:${operator.nome}`;
+    }
+  }
 
   const result = await listTickets({
     stato: STATI.includes(stato as StatoTicket) ? (stato as StatoTicket) : "TUTTI",

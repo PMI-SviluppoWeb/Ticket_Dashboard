@@ -6,6 +6,11 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
+  const operatorId = request.headers.get("x-operator-id");
+  if (!operatorId) {
+    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
+  }
+
   const body = (await request.json()) as { ruolo?: string; contenuto?: string };
 
   const contenuto = typeof body.contenuto === "string" ? body.contenuto.trim() : "";

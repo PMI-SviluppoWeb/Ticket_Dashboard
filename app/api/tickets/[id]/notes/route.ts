@@ -5,6 +5,13 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
+  const operatorId = request.headers.get("x-operator-id");
+  const operatorName = request.headers.get("x-operator-email")?.split("@")[0];
+  
+  if (!operatorId) {
+    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
+  }
+
   const body = (await request.json()) as {
     titolo?: string;
     problema?: string;
@@ -32,7 +39,7 @@ export async function POST(
     titolo,
     problema,
     soluzione,
-    operatore: body.operatore ?? null,
+    operatore: body.operatore ?? operatorName ?? null,
   });
 
   return NextResponse.json(await getTicket(params.id));
