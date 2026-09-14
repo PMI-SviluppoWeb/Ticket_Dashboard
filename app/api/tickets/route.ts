@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createTicket, listTickets, getTicketByNumero } from "@/lib/tickets";
 import { getOperatorById } from "@/lib/auth";
+import { createNotification } from "@/lib/notifications";
+import { sendEmail } from "@/lib/email";
+import { emailNuovoTicket } from "@/lib/email-templates";
+import { logEmail } from "@/lib/email-log";
 import type { Priorita, StatoTicket, TicketInput } from "@/lib/types";
 
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
@@ -28,22 +32,13 @@ export async function GET(request: Request) {
   const paginaSize = parseInt(url.searchParams.get("paginaSize") ?? "25", 10);
   const ordina = url.searchParams.get("ordina") ?? "data_desc";
 
-  // Se è admin e passa TUTTI, non filtrare per operatore
   if (operatore === "TUTTI") {
     operatore = "";
-  }
-  // Se è admin, non filtrare per operatore (può vedere tutti)
-  else if (operatorRole === "admin") {
+  } else if (operatorRole === "admin") {
     operatore = "";
-  }
-  // Se è operatore e non ha specificato un filtro operatore, mostra:
-  // - i ticket assegnati a lui
-  // - i ticket non assegnati (NUOVO) che può prendere
-  else if (operatorId && !operatore) {
+  } else if (operatorId && !operatore) {
     const operator = await getOperatorById(operatorId);
     if (operator) {
-      // Per gli operatori, usiamo una query custom che include i ticket NUOVO non assegnati
-      // Passiamo un parametro speciale per indicare che vogliamo "miei + disponibili"
       operatore = `__MY_AND_UNASSIGNED__:${operator.nome}`;
     }
   }
@@ -75,13 +70,20 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!body.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+      return NextResponse.json(
+        { error: "Email del cliente obbligatoria e valida." },
+        { status: 400 }
+      );
+    }
+
     const priorita: Priorita = PRIORITA.includes(body.priorita as Priorita)
       ? (body.priorita as Priorita)
       : "BASSA";
 
     if (body.numero && (await getTicketByNumero(body.numero))) {
       return NextResponse.json(
-        { error: `Numero ticket già esistente: ${body.numero}` },
+        { error: `Numero ticket gia' esistente: ${body.numero}` },
         { status: 409 }
       );
     }
@@ -99,6 +101,36 @@ export async function POST(request: Request) {
       priorita,
       note: body.note,
       messaggi: body.messaggi,
+    });
+
+    await createNotification({
+      titolo: "Nuovo ticket creato",
+      messaggio: `${ticket.numero} - ${ticket.sommario_problema} (${ticket.cliente})`,
+      ticket_id: ticket.id,
+      tipo: "nuovo_ticket",
+    });
+
+    // Send email to client
+    const html = emailNuovoTicket({
+      numero: ticket.numero,
+      cliente: ticket.cliente,
+      sommario: ticket.sommario_problema,
+      descrizione: ticket.descrizione_dettagliata,
+      priorita: ticket.priorita,
+    });
+    const result = await sendEmail({
+      to: body.email,
+      subject: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
+      html,
+    });
+    await logEmail({
+      ticket_id: ticket.id,
+      tipo: "nuovo_ticket",
+      destinatario: body.email,
+      oggetto: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
+      corpo: html,
+      stato: result.ok ? "inviata" : "errore",
+      errore: result.error ?? null,
     });
 
     return NextResponse.json(ticket, { status: 201 });

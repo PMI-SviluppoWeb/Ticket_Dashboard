@@ -79,7 +79,7 @@ export interface TicketInput {
   cliente: string;
   contatto: string;
   telefono?: string | null;
-  email?: string | null;
+  email: string;
   modulo_software: string;
   sommario_problema: string;
   descrizione_dettagliata: string;
@@ -179,4 +179,18 @@ export interface OperatorInput {
 export interface LoginInput {
   email: string;
   password: string;
+}
+
+export type EmailTipo = "nuovo_ticket" | "assegnazione" | "nuova_nota" | "chiusura" | "manuale";
+
+export interface EmailLog {
+  id: string;
+  ticket_id: string;
+  tipo: EmailTipo;
+  destinatario: string;
+  oggetto: string;
+  corpo: string;
+  stato: "inviata" | "errore";
+  errore: string | null;
+  data_creazione: string;
 }

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { getTicket, insertTechnicalNote } from "@/lib/tickets";
+import { sendEmail } from "@/lib/email";
+import { emailNuovaNota } from "@/lib/email-templates";
+import { logEmail } from "@/lib/email-log";
 
 export async function POST(
   request: Request,
@@ -7,7 +10,7 @@ export async function POST(
 ) {
   const operatorId = request.headers.get("x-operator-id");
   const operatorName = request.headers.get("x-operator-email")?.split("@")[0];
-  
+
   if (!operatorId) {
     return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
   }
@@ -41,6 +44,31 @@ export async function POST(
     soluzione,
     operatore: body.operatore ?? operatorName ?? null,
   });
+
+  // Send email to client about new note
+  if (ticket.email) {
+    const noteOperatore = body.operatore ?? operatorName ?? "Operatore";
+    const html = emailNuovaNota({
+      numero: ticket.numero,
+      cliente: ticket.cliente,
+      titoloNota: titolo,
+      operatore: noteOperatore,
+    });
+    const result = await sendEmail({
+      to: ticket.email,
+      subject: `[Support Desk] Aggiornamento ticket ${ticket.numero}`,
+      html,
+    });
+    await logEmail({
+      ticket_id: ticket.id,
+      tipo: "nuova_nota",
+      destinatario: ticket.email,
+      oggetto: `[Support Desk] Aggiornamento ticket ${ticket.numero}`,
+      corpo: html,
+      stato: result.ok ? "inviata" : "errore",
+      errore: result.error ?? null,
+    });
+  }
 
   return NextResponse.json(await getTicket(params.id));
 }

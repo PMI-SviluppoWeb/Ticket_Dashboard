@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   Allegato,
+  EmailLog,
   Priorita,
   RuoloMessaggio,
   StatoTicket,
@@ -78,6 +79,13 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
+  // Email state
+  const [emailLog, setEmailLog] = useState<EmailLog[]>([]);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [emailOggetto, setEmailOggetto] = useState("");
+  const [emailMessaggio, setEmailMessaggio] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/tickets/${id}`);
@@ -123,6 +131,46 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     loadOperatori();
     loadCurrentUser();
   }, [load, loadOperatori, loadCurrentUser]);
+
+  const loadEmailLog = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/tickets/${id}/email`);
+      if (res.ok) {
+        const data = await res.json();
+        setEmailLog(data.log ?? []);
+      }
+    } catch {
+      // Ignore
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (ticket) loadEmailLog();
+  }, [ticket, loadEmailLog]);
+
+  const sendManualEmail = useCallback(async () => {
+    if (!emailOggetto.trim() || !emailMessaggio.trim()) return;
+    setSendingEmail(true);
+    try {
+      const res = await fetch(`/api/tickets/${id}/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oggetto: emailOggetto, messaggio: emailMessaggio }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Errore invio email.");
+      }
+      setEmailOggetto("");
+      setEmailMessaggio("");
+      setShowEmailForm(false);
+      await loadEmailLog();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore invio email.");
+    } finally {
+      setSendingEmail(false);
+    }
+  }, [id, emailOggetto, emailMessaggio, loadEmailLog]);
 
   useEffect(() => {
     if (!ticket) return;
@@ -1159,6 +1207,13 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Email Cliente
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">{ticket.email}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                     Problema Originale
                   </p>
                   <p className="mt-0.5 text-sm text-slate-600 leading-relaxed">
@@ -1193,6 +1248,74 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Email Log */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-800">Email Inviate</h3>
+                {ticket.stato !== "CHIUSO" && ticket.email && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEmailForm(!showEmailForm)}
+                    className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    {showEmailForm ? "Annulla" : "Invia Email"}
+                  </button>
+                )}
+              </div>
+
+              {showEmailForm && (
+                <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                  <input
+                    type="text"
+                    value={emailOggetto}
+                    onChange={(e) => setEmailOggetto(e.target.value)}
+                    placeholder="Oggetto email"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none"
+                  />
+                  <textarea
+                    value={emailMessaggio}
+                    onChange={(e) => setEmailMessaggio(e.target.value)}
+                    placeholder="Messaggio da inviare al cliente..."
+                    rows={4}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none resize-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={sendManualEmail}
+                    disabled={sendingEmail || !emailOggetto.trim() || !emailMessaggio.trim()}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {sendingEmail ? "Invio in corso..." : "Invia"}
+                  </button>
+                </div>
+              )}
+
+              {emailLog.length === 0 ? (
+                <p className="text-xs text-slate-400">Nessuna email inviata.</p>
+              ) : (
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {emailLog.map((e) => (
+                    <div key={e.id} className="rounded-lg border border-slate-100 p-2">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-[10px] font-semibold uppercase ${
+                          e.stato === "inviata" ? "text-green-600" : "text-red-600"
+                        }`}>
+                          {e.tipo.replace("_", " ")}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(e.data_creazione).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-slate-500 truncate">{e.oggetto}</p>
+                      {e.errore && (
+                        <p className="mt-0.5 text-[10px] text-red-500">{e.errore}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* AI Insight Card */}

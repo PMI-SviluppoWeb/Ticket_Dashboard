@@ -112,6 +112,34 @@ CREATE TABLE IF NOT EXISTS allegati (
 
 CREATE INDEX IF NOT EXISTS idx_allegati_note ON allegati (note_tecnica_id);
 CREATE INDEX IF NOT EXISTS idx_allegati_ticket ON allegati (ticket_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id             TEXT PRIMARY KEY,
+  titolo         TEXT NOT NULL,
+  messaggio      TEXT NOT NULL,
+  ticket_id      TEXT,
+  tipo           TEXT NOT NULL DEFAULT 'info',
+  letta          INTEGER NOT NULL DEFAULT 0 CHECK (letta IN (0,1)),
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_letta ON notifications (letta);
+CREATE INDEX IF NOT EXISTS idx_notifications_data  ON notifications (data_creazione);
+
+CREATE TABLE IF NOT EXISTS email_log (
+  id             TEXT PRIMARY KEY,
+  ticket_id      TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  tipo           TEXT NOT NULL,
+  destinatario   TEXT NOT NULL,
+  oggetto        TEXT NOT NULL,
+  corpo          TEXT NOT NULL,
+  stato          TEXT NOT NULL DEFAULT 'inviata' CHECK (stato IN ('inviata','errore')),
+  errore         TEXT,
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_log_ticket ON email_log (ticket_id);
+CREATE INDEX IF NOT EXISTS idx_email_log_tipo   ON email_log (tipo);
 `;
 
 const schemaReady = (async () => {
@@ -124,6 +152,13 @@ const schemaReady = (async () => {
     await client.execute("ALTER TABLE knowledge_docs ADD COLUMN links TEXT DEFAULT '[]'");
   } catch {
     // Column already exists
+  }
+  // Migration: make email NOT NULL on tickets (set default for existing nulls)
+  try {
+    await client.execute("UPDATE tickets SET email = 'sconosciuto@placeholder.it' WHERE email IS NULL");
+    await client.execute("ALTER TABLE tickets ALTER COLUMN email TEXT NOT NULL");
+  } catch {
+    // Column already NOT NULL or migration not needed
   }
 })().catch((err) => {
   console.error("Errore nell'inizializzazione dello schema su Turso:", err);
