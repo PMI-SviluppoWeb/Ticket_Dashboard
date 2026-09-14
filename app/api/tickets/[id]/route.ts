@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
+import { join } from "path";
+import { readFile } from "fs/promises";
 import { deleteTicket, getTicket, updateTicket } from "@/lib/tickets";
 import { getOperatorById } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { emailAssegnazione, emailChiusura } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
-import type { Priorita, StatoTicket, TicketUpdate } from "@/lib/types";
+import type { Priorita, StatoTicket, TicketUpdate, TechnicalNote, Allegato } from "@/lib/types";
+
+const UPLOADS_DIR = join(process.cwd(), "uploads");
 
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 const STATI: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
@@ -110,16 +115,54 @@ export async function PATCH(
     }
 
     if (body.stato === "CHIUSO") {
+      // Fetch technical notes for the closure summary
+      const noteTecniche = (await db
+        .prepare(
+          `SELECT id, titolo, soluzione, operatore FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC`
+        )
+        .all(params.id)) as unknown as TechnicalNote[];
+
+      // Fetch all attachments for the ticket
+      const allegati = (await db
+        .prepare(
+          `SELECT nome_originale FROM allegati WHERE ticket_id = ? ORDER BY data_creazione ASC`
+        )
+        .all(params.id)) as unknown as Allegato[];
+
+      // Build email attachments from disk
+      const emailAttachments: { filename: string; path: string }[] = [];
+      const allAllegati = (await db
+        .prepare(
+          `SELECT nome_file, nome_originale FROM allegati WHERE ticket_id = ? ORDER BY data_creazione ASC`
+        )
+        .all(params.id)) as unknown as { nome_file: string; nome_originale: string }[];
+      for (const a of allAllegati) {
+        const filePath = join(UPLOADS_DIR, a.nome_file);
+        try {
+          await readFile(filePath);
+          emailAttachments.push({ filename: a.nome_originale, path: filePath });
+        } catch {
+          // File not found on disk, skip
+        }
+      }
+
       const html = emailChiusura({
         numero: ticket.numero,
         cliente: ticket.cliente,
         sommario: ticket.sommario_problema,
         dataChiusura: ticket.data_chiusura ?? new Date().toLocaleString("it-IT"),
+        noteTecniche: noteTecniche.map((n) => ({
+          titolo: n.titolo,
+          soluzione: n.soluzione,
+          operatore: n.operatore ?? "Operatore",
+        })),
+        allegati: allegati.map((a) => a.nome_originale),
       });
       const result = await sendEmail({
         to: ticketEmail,
         subject: `[Support Desk] Ticket ${ticket.numero} chiuso`,
         html,
+        attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
       });
       await logEmail({
         ticket_id: ticket.id,

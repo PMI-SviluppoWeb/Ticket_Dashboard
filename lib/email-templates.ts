@@ -82,8 +82,22 @@ export function emailNuovaNota(opts: {
   numero: string;
   cliente: string;
   titoloNota: string;
+  soluzione?: string;
   operatore: string;
+  allegati?: string[];
 }): string {
+  let attachmentsHtml = "";
+  if (opts.allegati && opts.allegati.length > 0) {
+    const rows = opts.allegati
+      .map((a) => `<li style="margin:4px 0;font-size:13px;color:#475569">${a}</li>`)
+      .join("");
+    attachmentsHtml = `
+      <div style="margin-top:16px">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#1e293b">File allegati (${opts.allegati.length}):</p>
+        <ul style="margin:0;padding-left:20px">${rows}</ul>
+      </div>`;
+  }
+
   return wrap("Aggiornamento Ticket", `
     <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
@@ -99,7 +113,13 @@ export function emailNuovaNota(opts: {
         <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.operatore}</td>
       </tr>
     </table>
-    <p style="margin:0;font-size:13px;color:#64748b">
+    ${opts.soluzione ? `
+    <div style="margin-bottom:16px">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#1e293b">Dettaglio intervento:</p>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap">${opts.soluzione}</div>
+    </div>` : ""}
+    ${attachmentsHtml}
+    <p style="margin:16px 0 0;font-size:13px;color:#64748b">
       Per maggiori dettagli accedi alla piattaforma di supporto.
     </p>
   `);
@@ -110,7 +130,40 @@ export function emailChiusura(opts: {
   cliente: string;
   sommario: string;
   dataChiusura: string;
+  noteTecniche?: { titolo: string; soluzione: string; operatore: string }[];
+  allegati?: string[];
 }): string {
+  let notesHtml = "";
+  if (opts.noteTecniche && opts.noteTecniche.length > 0) {
+    const rows = opts.noteTecniche
+      .map(
+        (n) => `
+      <div style="margin-bottom:12px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#1e293b">${n.titolo}</p>
+        <p style="margin:0 0 6px;font-size:11px;color:#94a3b8">Operatore: ${n.operatore}</p>
+        <div style="font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap">${n.soluzione}</div>
+      </div>`
+      )
+      .join("");
+    notesHtml = `
+      <div style="margin-top:16px">
+        <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1e293b">Riepilogo interventi:</p>
+        ${rows}
+      </div>`;
+  }
+
+  let attachmentsHtml = "";
+  if (opts.allegati && opts.allegati.length > 0) {
+    const items = opts.allegati
+      .map((a) => `<li style="margin:4px 0;font-size:13px;color:#475569">${a}</li>`)
+      .join("");
+    attachmentsHtml = `
+      <div style="margin-top:16px">
+        <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1e293b">File allegati (${opts.allegati.length}):</p>
+        <ul style="margin:0;padding-left:20px">${items}</ul>
+      </div>`;
+  }
+
   return wrap("Ticket Chiuso", `
     <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
@@ -130,10 +183,12 @@ export function emailChiusura(opts: {
         <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.dataChiusura}</td>
       </tr>
     </table>
-    <p style="margin:0 0 16px;font-size:14px">
+    ${notesHtml}
+    ${attachmentsHtml}
+    <p style="margin:16px 0 0;font-size:14px">
       Se il problema non e' stato risolto in modo soddisfacente, puoi riaprire un ticket contattando il supporto.
     </p>
-    <p style="margin:0;font-size:13px;color:#64748b">
+    <p style="margin:8px 0 0;font-size:13px;color:#64748b">
       Grazie per averci contattato.
     </p>
   `);

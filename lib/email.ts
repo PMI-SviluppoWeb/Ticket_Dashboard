@@ -1,6 +1,8 @@
 import nodemailer from "nodemailer";
+import { join } from "path";
 
 const port = Number(process.env.SMTP_PORT ?? 587);
+const UPLOADS_DIR = join(process.cwd(), "uploads");
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST ?? "smtp.gmail.com",
@@ -24,6 +26,7 @@ export async function sendEmail(opts: {
   to: string;
   subject: string;
   html: string;
+  attachments?: { filename: string; path: string }[];
 }): Promise<EmailResult> {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     return { ok: false, error: "Configurazione SMTP mancante." };
@@ -35,6 +38,7 @@ export async function sendEmail(opts: {
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
+      attachments: opts.attachments,
     });
     return { ok: true };
   } catch (err) {

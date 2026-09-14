@@ -1,0 +1,99 @@
+import { NextResponse } from "next/server";
+import { join } from "path";
+import { readFile } from "fs/promises";
+import { getTicket } from "@/lib/tickets";
+import { db } from "@/lib/db";
+import { sendEmail } from "@/lib/email";
+import { emailNuovaNota } from "@/lib/email-templates";
+import { logEmail } from "@/lib/email-log";
+import type { TechnicalNote, Allegato } from "@/lib/types";
+
+const UPLOADS_DIR = join(process.cwd(), "uploads");
+
+export async function POST(
+  request: Request,
+  { params }: { params: { id: string; noteId: string } }
+) {
+  const operatorId = request.headers.get("x-operator-id");
+
+  if (!operatorId) {
+    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
+  }
+
+  const ticket = await getTicket(params.id);
+  if (!ticket) {
+    return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
+  }
+
+  if (!ticket.email) {
+    return NextResponse.json({ error: "Ticket senza email." }, { status: 400 });
+  }
+
+  // Fetch the technical note
+  const note = (await db
+    .prepare(
+      `SELECT id, ticket_id, titolo, problema, soluzione, operatore, data_creazione
+       FROM technical_notes WHERE id = @noteId AND ticket_id = @ticketId`
+    )
+    .get({ noteId: params.noteId, ticketId: params.id })) as unknown as TechnicalNote | undefined;
+
+  if (!note) {
+    return NextResponse.json({ error: "Nota non trovata." }, { status: 404 });
+  }
+
+  // Fetch attachments for this note
+  const allegati = (await db
+    .prepare(
+      `SELECT id, note_tecnica_id, ticket_id, nome_file, nome_originale, dimensione, tipo_mime, data_creazione
+       FROM allegati WHERE note_tecnica_id = @noteId ORDER BY data_creazione ASC`
+    )
+    .all({ noteId: params.noteId })) as unknown as Allegato[];
+
+  // Build email attachments from disk
+  const emailAttachments: { filename: string; path: string }[] = [];
+  for (const allegato of allegati) {
+    const filePath = join(UPLOADS_DIR, allegato.nome_file);
+    try {
+      await readFile(filePath);
+      emailAttachments.push({
+        filename: allegato.nome_originale,
+        path: filePath,
+      });
+    } catch {
+      // File not found on disk, skip
+    }
+  }
+
+  const noteOperatore = note.operatore ?? "Operatore";
+  const html = emailNuovaNota({
+    numero: ticket.numero,
+    cliente: ticket.cliente,
+    titoloNota: note.titolo,
+    soluzione: note.soluzione,
+    operatore: noteOperatore,
+    allegati: allegati.map((a) => a.nome_originale),
+  });
+
+  const result = await sendEmail({
+    to: ticket.email,
+    subject: `[Support Desk] Aggiornamento ticket ${ticket.numero}`,
+    html,
+    attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
+  });
+
+  await logEmail({
+    ticket_id: ticket.id,
+    tipo: "nuova_nota",
+    destinatario: ticket.email,
+    oggetto: `[Support Desk] Aggiornamento ticket ${ticket.numero}`,
+    corpo: html,
+    stato: result.ok ? "inviata" : "errore",
+    errore: result.error ?? null,
+  });
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, attachments: allegati.length });
+}

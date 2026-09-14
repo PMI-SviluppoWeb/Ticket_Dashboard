@@ -298,6 +298,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       }
       
       // Upload pending files if any
+      let filesUploaded = 0;
       if (pendingFiles.length > 0 && noteId) {
         for (const file of pendingFiles) {
           const formData = new FormData();
@@ -305,12 +306,20 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
           formData.append("noteId", noteId);
           formData.append("ticketId", id);
           
-          await fetch("/api/uploads", {
+          const res = await fetch("/api/uploads", {
             method: "POST",
             body: formData,
           });
+          if (res.ok) filesUploaded++;
         }
         setPendingFiles([]);
+      }
+
+      // Send email notification after files are uploaded (only for new notes)
+      if (noteId && !editingNote) {
+        await fetch(`/api/tickets/${id}/notes/${noteId}/send-email`, {
+          method: "POST",
+        });
       }
       
       setEditingNote(null);
