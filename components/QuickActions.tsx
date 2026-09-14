@@ -5,20 +5,25 @@ import {
   FlameIcon,
   RefreshIcon,
   RotateCcwIcon,
+  UserIcon,
 } from "@/components/icons";
 
 interface QuickActionsProps {
   lastUpdate: Date | null;
   onRefresh: () => void;
   onFilterUrgenti: () => void;
+  onFilterChiusi?: () => void;
   onResetFilters: () => void;
+  currentOperator?: string;
 }
 
 export default function QuickActions({
   lastUpdate,
   onRefresh,
   onFilterUrgenti,
+  onFilterChiusi,
   onResetFilters,
+  currentOperator = "",
 }: QuickActionsProps) {
   const actions = [
     {
@@ -30,6 +35,13 @@ export default function QuickActions({
       label: "Ticket urgenti",
       icon: FlameIcon,
       onClick: onFilterUrgenti,
+    },
+    {
+      label: "Ticket chiusi",
+      icon: () => (
+        <span className="text-emerald-600">✓</span>
+      ),
+      onClick: onFilterChiusi,
     },
     {
       label: "Reset filtri",
@@ -84,6 +96,17 @@ export default function QuickActions({
             ? ` · ultimo controllo ${lastUpdate.toLocaleTimeString("it-IT")}`
             : ""}
         </p>
+        {currentOperator && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <p className="flex items-center gap-2 text-xs text-slate-500">
+              <UserIcon className="h-3.5 w-3.5" />
+              <span>Operatore: {currentOperator}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              I tuoi ticket sono filtrati automaticamente
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

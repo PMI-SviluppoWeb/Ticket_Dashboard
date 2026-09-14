@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
+  Allegato,
   Priorita,
   RuoloMessaggio,
   StatoTicket,
@@ -9,11 +10,40 @@ import type {
   Ticket,
 } from "@/lib/types";
 import { PRIORITY_STYLES, STATUS_STYLES } from "@/components/badges";
+import {
+  InfoIcon,
+  SparklesIcon,
+  CheckCircleIcon,
+  AlertCircleIcon,
+  ChevronDownIcon,
+  TrashIcon,
+  EditIcon,
+  BookIcon,
+  UserIcon,
+} from "@/components/icons";
+
+const STATI_MAP: Record<StatoTicket, string> = {
+  NUOVO: "New",
+  IN_CORSO: "In Progress",
+  RISOLTO: "Resolved",
+  CHIUSO: "Closed",
+};
+
+const PRIORITA_MAP: Record<Priorita, string> = {
+  BASSA: "Low",
+  MEDIA: "Medium",
+  ALTA: "High",
+};
 
 const STATUS_OPTIONS: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
 const PRIORITY_OPTIONS: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 
-type Tab = "panoramica" | "chat" | "note";
+interface Operator {
+  id: string;
+  nome: string;
+  email: string;
+  ruolo: string;
+}
 
 interface TicketPageProps {
   id: string;
@@ -26,32 +56,34 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<Tab>("panoramica");
+  const [saved, setSaved] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   const [note, setNote] = useState("");
-  const [operatore, setOperatore] = useState("");
+  const [selectedOperatore, setSelectedOperatore] = useState("");
   const [contatto, setContatto] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
+  const [selectedStato, setSelectedStato] = useState<StatoTicket>("NUOVO");
+  const [selectedPriorita, setSelectedPriorita] = useState<Priorita>("BASSA");
 
-  const [messaggio, setMessaggio] = useState("");
-  const [ruoloMessaggio, setRuoloMessaggio] = useState<RuoloMessaggio>("assistant");
-
-  const [noteForm, setNoteForm] = useState({
-    titolo: "",
-    problema: "",
-    soluzione: "",
-    operatore: "",
-  });
+  const [operatori, setOperatori] = useState<Operator[]>([]);
+  const [currentUser, setCurrentUser] = useState<{ nome: string; ruolo: string } | null>(null);
+  const [noteForm, setNoteForm] = useState({ titolo: "", problema: "", soluzione: "" });
   const [editingNote, setEditingNote] = useState<TechnicalNote | null>(null);
   const [expandedNote, setExpandedNote] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState<File | null>(null);
+  const [uploadingNoteId, setUploadingNoteId] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/tickets/${id}`);
       if (!res.ok) throw new Error(`Errore ${res.status}`);
-      setTicket((await res.json()) as Ticket);
+      const data = (await res.json()) as Ticket;
+      setTicket(data);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di caricamento del ticket.");
@@ -60,20 +92,53 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     }
   }, [id]);
 
+  const loadOperatori = useCallback(async () => {
+    try {
+      const res = await fetch("/api/operatori");
+      if (res.ok) {
+        const data = await res.json();
+        setOperatori(data.operatori ?? []);
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  const loadCurrentUser = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.operator) {
+          setCurrentUser({ nome: data.operator.nome, ruolo: data.operator.ruolo });
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadOperatori();
+    loadCurrentUser();
+  }, [load, loadOperatori, loadCurrentUser]);
 
   useEffect(() => {
     if (!ticket) return;
     setNote(ticket.note ?? "");
-    setOperatore(ticket.operatore ?? "");
+    setSelectedOperatore(ticket.operatore ?? "");
     setContatto(ticket.contatto ?? "");
     setTelefono(ticket.telefono ?? "");
     setEmail(ticket.email ?? "");
+    setSelectedStato(ticket.stato);
+    setSelectedPriorita(ticket.priorita);
     setError("");
     setConfirmDelete(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setConfirmClose(false);
+    setSaved(false);
+    setEditingNote(null);
+    setNoteForm({ titolo: "", problema: "", soluzione: "" });
   }, [ticket?.id]);
 
   const mutate = useCallback(
@@ -87,14 +152,15 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         const data = await res.json().catch(() => ({}));
         throw new Error((data as { error?: string }).error ?? "Errore di aggiornamento.");
       }
-      setTicket((await res.json()) as Ticket);
+      return (await res.json()) as Ticket;
     },
     []
   );
 
   const updateTicket = useCallback(
     async (patch: Partial<Ticket>) => {
-      await mutate(`/api/tickets/${id}`, "PATCH", patch);
+      const updated = await mutate(`/api/tickets/${id}`, "PATCH", patch);
+      setTicket(updated);
     },
     [id, mutate]
   );
@@ -114,96 +180,42 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     []
   );
 
-  const setStato = useCallback(
-    (stato: StatoTicket) => {
-      if (ticket && stato !== ticket.stato) void run(() => updateTicket({ stato }));
-    },
-    [ticket, run, updateTicket]
-  );
-
-  const setPriorita = useCallback(
-    (priorita: Priorita) => {
-      if (ticket && priorita !== ticket.priorita) void run(() => updateTicket({ priorita }));
-    },
-    [ticket, run, updateTicket]
-  );
-
-  const takeCharge = useCallback(() => {
-    void run(() =>
-      updateTicket({
-        operatore: operatore.trim() || "Operatore",
-        stato: "IN_CORSO",
-      })
-    );
-  }, [run, updateTicket, operatore]);
-
-  const saveNoteInterne = useCallback(() => {
-    void run(() => updateTicket({ note: note.trim() || null }));
-  }, [run, updateTicket, note]);
-
-  const saveRecapiti = useCallback(() => {
-    void run(() =>
-      updateTicket({
+  const handleSaveAll = useCallback(() => {
+    void run(async () => {
+      await updateTicket({
+        stato: selectedStato,
+        priorita: selectedPriorita,
+        note: note.trim() || null,
+        operatore: selectedOperatore || null,
         contatto: contatto.trim(),
         telefono: telefono.trim() || null,
         email: email.trim() || null,
-      })
-    );
-  }, [run, updateTicket, contatto, telefono, email]);
-
-  const sendMessage = useCallback(() => {
-    const testo = messaggio.trim();
-    if (!testo) return;
-    void run(async () => {
-      await mutate(`/api/tickets/${id}/messages`, "POST", {
-        ruolo: ruoloMessaggio,
-        contenuto: testo,
       });
-      setMessaggio("");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
     });
-  }, [run, mutate, id, messaggio, ruoloMessaggio]);
+  }, [run, updateTicket, selectedStato, selectedPriorita, note, selectedOperatore, contatto, telefono, email]);
 
-  const startEditNote = useCallback((n: TechnicalNote) => {
-    setEditingNote(n);
-    setNoteForm({
-      titolo: n.titolo,
-      problema: n.problema,
-      soluzione: n.soluzione,
-      operatore: n.operatore ?? "",
-    });
-  }, []);
+  const handleCancel = useCallback(() => {
+    if (!ticket) return;
+    setNote(ticket.note ?? "");
+    setSelectedOperatore(ticket.operatore ?? "");
+    setContatto(ticket.contatto ?? "");
+    setTelefono(ticket.telefono ?? "");
+    setEmail(ticket.email ?? "");
+    setSelectedStato(ticket.stato);
+    setSelectedPriorita(ticket.priorita);
+    setError("");
+    setPendingFiles([]);
+  }, [ticket]);
 
-  const resetNoteForm = useCallback(() => {
-    setEditingNote(null);
-    setNoteForm({ titolo: "", problema: "", soluzione: "", operatore: "" });
-  }, []);
-
-  const saveNoteTecnica = useCallback(() => {
-    const titolo = noteForm.titolo.trim();
-    const soluzione = noteForm.soluzione.trim();
-    if (!titolo || !soluzione) return;
+  const handleCloseTicket = useCallback(() => {
     void run(async () => {
-      const payload = {
-        titolo,
-        problema: noteForm.problema.trim(),
-        soluzione,
-        operatore: noteForm.operatore.trim() || null,
-      };
-      if (editingNote) {
-        await mutate(`/api/tickets/${id}/notes/${editingNote.id}`, "PATCH", payload);
-      } else {
-        await mutate(`/api/tickets/${id}/notes`, "POST", payload);
-      }
-      resetNoteForm();
+      await updateTicket({ stato: "CHIUSO" });
+      setSelectedStato("CHIUSO");
+      setConfirmClose(false);
     });
-  }, [run, mutate, id, noteForm, editingNote, resetNoteForm]);
-
-  const removeNote = useCallback(
-    (noteId: string) => {
-      void run(() => mutate(`/api/tickets/${id}/notes/${noteId}`, "DELETE"));
-    },
-    [run, mutate, id]
-  );
+  }, [run, updateTicket]);
 
   const elimina = useCallback(() => {
     void run(async () => {
@@ -216,20 +228,138 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     });
   }, [run, id, onDeleted]);
 
-  const eta = useMemo(() => {
-    if (!ticket?.data_creazione) return "";
-    const parts = ticket.data_creazione.split(/[/\s:]/);
-    if (parts.length < 5) return "";
-    const [d, m, y, h, min] = parts.map(Number);
-    const created = new Date(y, m - 1, d, h, min);
-    const diff = Date.now() - created.getTime();
-    const giorni = Math.floor(diff / 86400000);
-    const ore = Math.floor(diff / 3600000);
-    if (giorni > 0) return `${giorni} g`;
-    if (ore > 0) return `${ore} h`;
-    const minuti = Math.max(1, Math.floor(diff / 60000));
-    return `${minuti} min`;
-  }, [ticket?.data_creazione]);
+  // Technical Notes functions
+  const saveNoteTecnica = useCallback(() => {
+    const titolo = noteForm.titolo.trim();
+    const soluzione = noteForm.soluzione.trim();
+    if (!titolo || !soluzione) return;
+    void run(async () => {
+      const payload = {
+        titolo,
+        problema: noteForm.problema.trim(),
+        soluzione,
+        operatore: selectedOperatore || null,
+      };
+      
+      let noteId = editingNote?.id;
+      if (editingNote) {
+        await mutate(`/api/tickets/${id}/notes/${editingNote.id}`, "PATCH", payload);
+      } else {
+        const newNote = await mutate(`/api/tickets/${id}/notes`, "POST", payload);
+        noteId = (newNote as unknown as { note_tecniche?: { id: string }[] })?.note_tecniche?.slice(-1)?.[0]?.id;
+      }
+      
+      // Upload pending files if any
+      if (pendingFiles.length > 0 && noteId) {
+        for (const file of pendingFiles) {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("noteId", noteId);
+          formData.append("ticketId", id);
+          
+          await fetch("/api/uploads", {
+            method: "POST",
+            body: formData,
+          });
+        }
+        setPendingFiles([]);
+      }
+      
+      setEditingNote(null);
+      setNoteForm({ titolo: "", problema: "", soluzione: "" });
+      // Reload ticket to get updated notes
+      await load();
+    });
+  }, [run, mutate, id, noteForm, editingNote, selectedOperatore, pendingFiles, load]);
+
+  const startEditNote = useCallback((n: TechnicalNote) => {
+    setEditingNote(n);
+    setNoteForm({ titolo: n.titolo, problema: n.problema, soluzione: n.soluzione });
+  }, []);
+
+  const removeNote = useCallback(
+    (noteId: string) => {
+      void run(async () => {
+        await mutate(`/api/tickets/${id}/notes/${noteId}`, "DELETE");
+        await load();
+      });
+    },
+    [run, mutate, id, load]
+  );
+
+  // File upload handlers
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>, noteId: string) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadingFile(file);
+      setUploadingNoteId(noteId);
+      setUploadProgress(0);
+    }
+  }, []);
+
+  const uploadFile = useCallback(async () => {
+    if (!uploadingFile || !uploadingNoteId || !ticket) return;
+
+    const formData = new FormData();
+    formData.append("file", uploadingFile);
+    formData.append("noteId", uploadingNoteId);
+    formData.append("ticketId", ticket.id);
+
+    setUploadProgress(10);
+
+    try {
+      const res = await fetch("/api/uploads", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? "Errore di caricamento.");
+      }
+
+      setUploadProgress(100);
+      setUploadingFile(null);
+      setUploadingNoteId(null);
+      setUploadProgress(0);
+
+      // Reload ticket to get updated attachments
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore di caricamento file.");
+      setUploadingFile(null);
+      setUploadingNoteId(null);
+      setUploadProgress(0);
+    }
+  }, [uploadingFile, uploadingNoteId, ticket, load]);
+
+  const cancelUpload = useCallback(() => {
+    setUploadingFile(null);
+    setUploadingNoteId(null);
+    setUploadProgress(0);
+  }, []);
+
+  const deleteAttachment = useCallback(
+    (attachmentId: string) => {
+      void run(async () => {
+        const res = await fetch(`/api/uploads/${attachmentId}`, { method: "DELETE" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error((data as { error?: string }).error ?? "Errore di eliminazione.");
+        }
+        await load();
+      });
+    },
+    [run, load]
+  );
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const isImageFile = (mimeType: string) => mimeType.startsWith("image/");
 
   if (loading && !ticket) {
     return (
@@ -254,63 +384,78 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     );
   }
 
-  const TABS: Array<{ key: Tab; label: string }> = [
-    { key: "panoramica", label: "Panoramica & Recapiti" },
-    { key: "chat", label: `Chat (${ticket.messaggi.length})` },
-    { key: "note", label: `Note tecniche (${ticket.note_tecniche.length})` },
-  ];
-
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-3">
+    <div className="flex h-full flex-col bg-slate-50">
+      {/* Header */}
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+        <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={onBack}
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
           >
-            ‹ Dashboard
+            ‹ Indietro
           </button>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-800">{ticket.numero}</h1>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLES[ticket.stato]}`}>
-                {ticket.stato}
+            <h1 className="flex items-center gap-2 text-xl font-bold text-slate-900">
+              Modifica Ticket
+              <span className="inline-block rounded-md bg-slate-100 px-2.5 py-0.5 text-sm font-semibold text-slate-600">
+                {ticket.numero}
               </span>
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_STYLES[ticket.priorita]}`}>
-                {ticket.priorita}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Creato: {ticket.data_creazione}
-              {eta ? ` · ${eta} fa` : ""}
-              {ticket.operatore ? ` · Operatore: ${ticket.operatore}` : ""}
+            </h1>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Aggiorna i dettagli per {ticket.cliente}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          >
-            Aggiorna
-          </button>
+        <div className="flex items-center gap-3">
+          {/* Close Ticket Button */}
+          {!confirmClose ? (
+            <button
+              type="button"
+              onClick={() => setConfirmClose(true)}
+              disabled={ticket.stato === "CHIUSO"}
+              className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {ticket.stato === "CHIUSO" ? "Già Chiuso" : "Chiudi Ticket"}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5">
+              <span className="text-sm font-medium text-amber-700">Confermi chiusura?</span>
+              <button
+                type="button"
+                onClick={() => setConfirmClose(false)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseTicket}
+                disabled={saving}
+                className="rounded-lg bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {saving ? "Chiusura..." : "Chiudi"}
+              </button>
+            </div>
+          )}
+
+          {/* Delete Button */}
           {!confirmDelete ? (
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition"
             >
               Elimina
             </button>
           ) : (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1">
-              <span className="text-xs font-medium text-red-700">Confermi?</span>
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5">
+              <span className="text-sm font-medium text-red-700">Confermi?</span>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
               >
                 Annulla
               </button>
@@ -318,289 +463,339 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 type="button"
                 onClick={elimina}
                 disabled={saving}
-                className="rounded-lg bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                className="rounded-lg bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
                 Elimina
               </button>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
+          >
+            {ticket.stato === "CHIUSO" ? "Chiudi" : "Annulla"}
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveAll}
+            disabled={saving || ticket.stato === "CHIUSO"}
+            className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:opacity-50 transition flex items-center gap-2"
+          >
+            {saving ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Salvataggio...
+              </>
+            ) : saved ? (
+              <>
+                <CheckCircleIcon className="h-4 w-4" />
+                Salvato!
+              </>
+            ) : (
+              "Salva Modifiche"
+            )}
+          </button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl space-y-4 p-4">
-          {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>
-          )}
-
-          <div className="flex gap-1.5">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                className={`rounded-t-lg border-b-2 px-4 py-2 text-sm font-medium transition ${
-                  tab === t.key
-                    ? "border-blue-600 bg-white text-blue-700"
-                    : "border-transparent bg-slate-100 text-slate-500 hover:bg-slate-200"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {error && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm font-medium text-red-700">
+            <AlertCircleIcon className="h-5 w-5" />
+            {error}
           </div>
+        )}
 
-          {tab === "panoramica" && (
-            <div className="space-y-4">
-              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="mb-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Gestione
-                </h2>
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Stato</label>
-                    <div className="flex gap-1.5">
-                      {STATUS_OPTIONS.map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setStato(s)}
-                          disabled={s === ticket.stato || saving}
-                          className={`flex-1 rounded-lg border px-2 py-1 text-xs font-medium transition disabled:opacity-100 ${
-                            s === ticket.stato
-                              ? "border-blue-600 bg-blue-600 text-white"
-                              : "border-slate-300 text-slate-600 hover:bg-slate-50"
-                          }`}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Priorità</label>
-                    <div className="flex gap-1.5">
-                      {PRIORITY_OPTIONS.map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => setPriorita(p)}
-                          disabled={p === ticket.priorita || saving}
-                          className={`flex-1 rounded-lg border px-2 py-1 text-xs font-medium transition ${
-                            p === ticket.priorita
-                              ? "border-blue-600 bg-blue-600 text-white"
-                              : "border-slate-300 text-slate-600 hover:bg-slate-50"
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Operatore</label>
-                    <div className="flex gap-2">
-                      <input
-                        value={operatore}
-                        onChange={(e) => setOperatore(e.target.value)}
-                        placeholder="Nome operatore"
-                        className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={takeCharge}
-                        disabled={saving}
-                        className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                      >
-                        Prendi in carico
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </section>
+        {/* Warning: Ticket is closed */}
+        {ticket.stato === "CHIUSO" && (
+          <div className="mb-4 rounded-lg border border-slate-300 bg-slate-100 p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircleIcon className="h-5 w-5 shrink-0 text-slate-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-slate-800">
+                  Ticket Chiuso
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Questo ticket è stato chiuso il {ticket.data_chiusura}. 
+                  Non è più possibile assegnarlo o modificare i suoi dati.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="mb-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Recapiti
-                </h2>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Cliente</label>
-                    <input
-                      value={ticket.cliente}
-                      readOnly
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Nome contatto</label>
-                    <input
-                      value={contatto}
-                      onChange={(e) => setContatto(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Telefono</label>
-                    <input
-                      value={telefono}
-                      onChange={(e) => setTelefono(e.target.value)}
-                      placeholder="Es. 391 123 4567"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Email</label>
-                    <input
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Es. nome@azienda.it"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Modulo software</label>
-                    <span className="inline-block rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                      {ticket.modulo_software}
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-3 flex justify-end">
+        {/* Warning: Not assigned to you */}
+        {ticket.stato !== "CHIUSO" &&
+         currentUser?.ruolo !== "admin" && 
+         ticket.operatore && 
+         ticket.operatore !== currentUser?.nome && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircleIcon className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-amber-800">
+                  Questo ticket non è assegnato a te
+                </h3>
+                <p className="mt-1 text-sm text-amber-700">
+                  Assegnato a: <strong>{ticket.operatore}</strong>. 
+                  Puoi visualizzare i dettagli ma le modifiche saranno limitate.
+                </p>
+                <div className="mt-3 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={saveRecapiti}
+                    onClick={() => {
+                      void run(async () => {
+                        await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
+                        setSelectedOperatore(currentUser?.nome ?? "");
+                      });
+                    }}
                     disabled={saving}
-                    className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition"
                   >
-                    {saving ? "Salvataggio…" : "Salva recapiti"}
+                    {saving ? (
+                      <>
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        Collaborando...
+                      </>
+                    ) : (
+                      <>
+                        <UserIcon className="h-4 w-4" />
+                        Collabora
+                      </>
+                    )}
+                  </button>
+                  <span className="text-xs text-amber-600">
+                    Unendoti al ticket potrai modificare e aggiungere note
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Info: Unassigned ticket */}
+        {ticket.stato !== "CHIUSO" &&
+         currentUser?.ruolo !== "admin" && !ticket.operatore && (
+          <div className="mb-4 rounded-lg border border-blue-300 bg-blue-50 p-4">
+            <div className="flex items-start gap-3">
+              <InfoIcon className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-blue-800">
+                  Questo ticket è disponibile
+                </h3>
+                <p className="mt-1 text-sm text-blue-700">
+                  Nessun operatore assegnato. Puoi prendere in carico questo ticket.
+                </p>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void run(async () => {
+                        await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
+                        setSelectedOperatore(currentUser?.nome ?? "");
+                      });
+                    }}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition"
+                  >
+                    {saving ? (
+                      <>
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        Assegnamento...
+                      </>
+                    ) : (
+                      <>
+                        <UserIcon className="h-4 w-4" />
+                        Prendi in carico
+                      </>
+                    )}
                   </button>
                 </div>
-              </section>
+              </div>
+            </div>
+          </div>
+        )}
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Sommario
-                </h2>
-                <p className="text-sm font-medium text-slate-800">{ticket.sommario_problema}</p>
-                <h2 className="mt-4 mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Descrizione
-                </h2>
-                <p className="rounded-lg bg-slate-50 p-3 text-sm leading-relaxed whitespace-pre-wrap text-slate-700">
-                  {ticket.descrizione_dettagliata}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          {/* Left column - Form */}
+          <div className="space-y-5 xl:col-span-2">
+            {/* Ticket Classification */}
+            <div className={`rounded-xl bg-white p-5 shadow-sm border border-slate-200 ${ticket.stato === "CHIUSO" ? "opacity-60" : ""}`}>
+              <h2 className="mb-4 text-sm font-bold text-slate-800">Classificazione Ticket</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Stato del Ticket
+                  </label>
+                  <div className="relative rounded-lg bg-slate-100 p-0.5">
+                    <select
+                      value={selectedStato}
+                      onChange={(e) => setSelectedStato(e.target.value as StatoTicket)}
+                      disabled={ticket.stato === "CHIUSO"}
+                      className="w-full appearance-none rounded-lg border-0 bg-white px-3 py-2.5 pr-8 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {STATI_MAP[s]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Priorità
+                  </label>
+                  <div className="relative rounded-lg bg-slate-100 p-0.5">
+                    <select
+                      value={selectedPriorita}
+                      onChange={(e) => setSelectedPriorita(e.target.value as Priorita)}
+                      disabled={ticket.stato === "CHIUSO"}
+                      className="w-full appearance-none rounded-lg border-0 bg-white px-3 py-2.5 pr-8 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    >
+                      {PRIORITY_OPTIONS.map((p) => (
+                        <option key={p} value={p}>
+                          {PRIORITA_MAP[p]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Operator Selection */}
+            <div className={`rounded-xl bg-white p-5 shadow-sm border border-slate-200 ${ticket.stato === "CHIUSO" ? "opacity-60" : ""}`}>
+              <h2 className="mb-4 text-sm font-bold text-slate-800">Assegnazione Operatore</h2>
+              
+              {ticket.stato === "CHIUSO" ? (
+                <p className="text-sm text-slate-500">
+                  Ticket chiuso - non è possibile modificare l&apos;assegnazione.
                 </p>
-              </section>
+              ) : currentUser?.ruolo === "admin" ? (
+                // Admin: dropdown completo
+                <div className="relative rounded-lg bg-slate-100 p-0.5">
+                  <select
+                    value={selectedOperatore}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedOperatore(val);
+                      // Auto-change status when assigning/releasing
+                      if (val) {
+                        setSelectedStato("IN_CORSO");
+                      }
+                    }}
+                    className="w-full appearance-none rounded-lg border-0 bg-white px-3 py-2.5 pr-8 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">-- Non assegnato --</option>
+                    {operatori.map((op) => (
+                      <option key={op.id} value={op.nome}>
+                        {op.nome} ({op.ruolo})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+              ) : (
+                // Operatore: solo pulsante "Prendi in carico" o stato assegnazione
+                <div>
+                  {ticket.operatore === currentUser?.nome ? (
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex items-center gap-2 rounded-lg bg-green-50 px-4 py-2.5 text-sm font-medium text-green-700">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        Assegnato a te
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void run(async () => {
+                            await updateTicket({ operatore: null, stato: "NUOVO" });
+                            setSelectedOperatore("");
+                          });
+                        }}
+                        disabled={saving}
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 transition disabled:opacity-50"
+                      >
+                        {saving ? "Rilascio..." : "Rilascia"}
+                      </button>
+                    </div>
+                  ) : ticket.operatore ? (
+                    <span className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2.5 text-sm text-slate-600">
+                      <span className="h-2 w-2 rounded-full bg-slate-400" />
+                      Assegnato a: <strong>{ticket.operatore}</strong>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void run(async () => {
+                          await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
+                          setSelectedOperatore(currentUser?.nome ?? "");
+                        });
+                      }}
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 transition disabled:opacity-50"
+                    >
+                      {saving ? (
+                        <>
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          Assegnamento...
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-lg">+</span>
+                          Prendi in carico
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Note interne
-                </h2>
+            {/* Action Taken / Internal Notes */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h2 className="mb-4 text-sm font-bold text-slate-800">
+                Azioni Intraprese / Note Interne
+              </h2>
+              <div className="rounded-lg bg-slate-100 p-0.5">
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   rows={4}
-                  placeholder="Note visibili solo al team tecnico…"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="Descrivi le azioni intraprese per risolvere il problema..."
+                  className="w-full rounded-lg border-0 bg-white px-4 py-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
-                <div className="mt-2 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={saveNoteInterne}
-                    disabled={saving}
-                    className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {saving ? "Salvataggio…" : "Salva note interne"}
-                  </button>
-                </div>
-              </section>
+              </div>
             </div>
-          )}
 
-          {tab === "chat" && (
-            <section className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="mb-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                Conversazione con l'utente
-              </h2>
-              <div className="max-h-[55vh] flex-1 space-y-3 overflow-y-auto pr-1">
-                {ticket.messaggi.length === 0 && (
-                  <p className="text-xs text-slate-400">Nessun messaggio allegato al ticket.</p>
-                )}
-                {ticket.messaggi.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`flex ${m.ruolo === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                        m.ruolo === "user"
-                          ? "rounded-br-sm bg-blue-600 text-white"
-                          : "rounded-bl-sm bg-slate-100 text-slate-700"
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{m.contenuto}</p>
-                      <p
-                        className={`mt-1 text-[10px] ${m.ruolo === "user" ? "text-blue-200" : "text-slate-400"}`}
-                      >
-                        {m.ruolo === "user" ? "Utente" : "Assistente"} · {m.data_creazione}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="text-xs font-medium text-slate-500">Invia come:</span>
-                  {(["assistant", "user"] as RuoloMessaggio[]).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setRuoloMessaggio(r)}
-                      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        ruoloMessaggio === r
-                          ? "bg-blue-600 text-white"
-                          : "border border-slate-300 text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {r === "assistant" ? "Assistente" : "Utente"}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <textarea
-                    value={messaggio}
-                    onChange={(e) => setMessaggio(e.target.value)}
-                    rows={2}
-                    placeholder="Scrivi un messaggio…"
-                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={sendMessage}
-                    disabled={saving || messaggio.trim().length === 0}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {saving ? "Invio…" : "Invia"}
-                  </button>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {tab === "note" && (
-            <div className="space-y-4">
-              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="mb-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  {editingNote ? "Modifica nota tecnica" : "Nuova nota tecnica"}
+            {/* Technical Notes Section */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                  <BookIcon className="h-4 w-4 text-violet-600" />
+                  Note Tecniche ({ticket.note_tecniche.length})
                 </h2>
+              </div>
+
+              {/* Add/Edit Note Form */}
+              <div className="mb-4 rounded-lg bg-slate-50 p-4 border border-slate-200">
+                <h3 className="mb-3 text-xs font-semibold text-slate-600">
+                  {editingNote ? "Modifica Nota Tecnica" : "Nuova Nota Tecnica"}
+                </h3>
                 <div className="space-y-3">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">
-                      Titolo *
-                    </label>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Titolo *</label>
                     <input
                       value={noteForm.titolo}
                       onChange={(e) => setNoteForm((f) => ({ ...f, titolo: e.target.value }))}
                       placeholder="Es. Errore all'avvio: arresto improvviso"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                   <div>
@@ -611,8 +806,8 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       value={noteForm.problema}
                       onChange={(e) => setNoteForm((f) => ({ ...f, problema: e.target.value }))}
                       rows={2}
-                      placeholder="Descrizione del problema e del contesto…"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="Descrizione del problema..."
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                     />
                   </div>
                   <div>
@@ -623,107 +818,437 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       value={noteForm.soluzione}
                       onChange={(e) => setNoteForm((f) => ({ ...f, soluzione: e.target.value }))}
                       rows={3}
-                      placeholder="Come è stato risolto il problema (finirà nella knowledge base)…"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="Come è stato risolto il problema..."
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                     />
                   </div>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-xs font-medium text-slate-500">
-                        Operatore
-                      </label>
+
+                  {/* File Upload Section */}
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">
+                      Allegati (opzionale)
+                    </label>
+                    <div className="rounded-lg border-2 border-dashed border-violet-200 bg-white p-4 text-center hover:border-violet-400 transition">
                       <input
-                        value={noteForm.operatore}
-                        onChange={(e) => setNoteForm((f) => ({ ...f, operatore: e.target.value }))}
-                        placeholder="Nome del tecnico"
-                        className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        type="file"
+                        id="note-file-input"
+                        className="hidden"
+                        multiple
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z,.dwg,.dxf,.sql,.json,.xml,.csv"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (files.length > 0) {
+                            setPendingFiles((prev) => [...prev, ...files]);
+                          }
+                          e.target.value = "";
+                        }}
                       />
+                      <label
+                        htmlFor="note-file-input"
+                        className="cursor-pointer text-violet-600 hover:text-violet-700"
+                      >
+                        <span className="text-2xl">📎</span>
+                        <p className="mt-1 text-xs font-medium text-slate-600">
+                          Clicca per aggiungere file
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          Immagini, PDF, documenti, file CAD, SQL...
+                        </p>
+                      </label>
                     </div>
+
+                    {/* Pending Files List */}
+                    {pendingFiles.length > 0 && (
+                      <div className="mt-2 space-y-2">
+                        {pendingFiles.map((file, idx) => (
+                          <div
+                            key={`${file.name}-${idx}`}
+                            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
+                          >
+                            <div className="h-8 w-8 shrink-0 rounded bg-violet-100 flex items-center justify-center text-[10px] font-bold text-violet-600">
+                              {file.name.split(".").pop()?.toUpperCase() || "?"}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-slate-700 truncate">{file.name}</p>
+                              <p className="text-[10px] text-slate-400">{formatFileSize(file.size)}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
+                              className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <TrashIcon className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={saveNoteTecnica}
                       disabled={saving || !noteForm.titolo.trim() || !noteForm.soluzione.trim()}
-                      className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                      className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
                     >
-                      {saving ? "Salvataggio…" : editingNote ? "Aggiorna nota" : "Salva nota"}
+                      {saving ? "Salvataggio..." : editingNote ? "Aggiorna Nota" : "Aggiungi Nota"}
                     </button>
                     {editingNote && (
                       <button
                         type="button"
-                        onClick={resetNoteForm}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => {
+                          setEditingNote(null);
+                          setNoteForm({ titolo: "", problema: "", soluzione: "" });
+                          setPendingFiles([]);
+                        }}
+                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                       >
                         Annulla
                       </button>
                     )}
                   </div>
                 </div>
-              </section>
+              </div>
 
+              {/* Notes List */}
               {ticket.note_tecniche.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-400">
-                  Nessuna nota tecnica. Le note salvate alimenteranno la knowledge base.
+                <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-400">
+                  Nessuna nota tecnica presente.
                 </p>
               ) : (
-                ticket.note_tecniche.map((n) => (
-                  <article key={n.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <h3 className="text-sm font-semibold text-slate-800">{n.titolo}</h3>
-                        <p className="mt-0.5 text-[11px] text-slate-400">
-                          {n.data_creazione}
-                          {n.operatore ? ` · ${n.operatore}` : ""}
-                        </p>
+                <div className="space-y-3">
+                  {ticket.note_tecniche.map((n) => (
+                    <div
+                      key={n.id}
+                      className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-sm font-semibold text-slate-800">{n.titolo}</h4>
+                          <p className="mt-0.5 text-[11px] text-slate-400">
+                            {n.data_creazione}
+                            {n.operatore ? ` · ${n.operatore}` : ""}
+                          </p>
+                          {/* Attachments count badge - always visible */}
+                          {n.allegati && n.allegati.length > 0 && (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                              📎 {n.allegati.length} {n.allegati.length === 1 ? "allegato" : "allegati"}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 gap-1.5">
+                          <label className="cursor-pointer rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-100 transition flex items-center gap-1">
+                            📎 Allega
+                            <input
+                              type="file"
+                              className="hidden"
+                              id={`file-${n.id}`}
+                              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z,.dwg,.dxf,.sql,.json,.xml,.csv"
+                              onChange={(e) => handleFileSelect(e, n.id)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedNote(expandedNote === n.id ? null : n.id)}
+                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                          >
+                            {expandedNote === n.id ? "▼" : "▶"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => startEditNote(n)}
+                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                          >
+                            <EditIcon className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeNote(n.id)}
+                            className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                          >
+                            <TrashIcon className="h-3 w-3" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex shrink-0 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setExpandedNote(expandedNote === n.id ? null : n.id)}
-                          className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                        >
-                          {expandedNote === n.id ? "Comprimi" : "Espandi"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => startEditNote(n)}
-                          className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                        >
-                          Modifica
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeNote(n.id)}
-                          className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                        >
-                          Elimina
-                        </button>
-                      </div>
+
+                      {/* Upload Progress - always visible when uploading */}
+                      {uploadingNoteId === n.id && uploadingFile && (
+                        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-violet-700 truncate max-w-[200px]">
+                              {uploadingFile.name}
+                            </span>
+                            <span className="text-[10px] text-violet-500">
+                              {formatFileSize(uploadingFile.size)}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-violet-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-violet-600 transition-all duration-300"
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              type="button"
+                              onClick={uploadFile}
+                              disabled={saving}
+                              className="rounded bg-violet-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                            >
+                              {saving ? "Caricamento..." : "Carica"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelUpload}
+                              className="rounded border border-slate-300 px-3 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+                            >
+                              Annulla
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Attachments List - always visible when there are attachments */}
+                      {n.allegati && n.allegati.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {n.allegati.map((allegato) => (
+                            <div
+                              key={allegato.id}
+                              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
+                            >
+                              {isImageFile(allegato.tipo_mime) ? (
+                                <div className="h-8 w-8 shrink-0 rounded bg-slate-100 flex items-center justify-center overflow-hidden">
+                                  <img
+                                    src={`/api/uploads/${allegato.id}`}
+                                    alt={allegato.nome_originale}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="h-8 w-8 shrink-0 rounded bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-600">
+                                  {allegato.nome_originale.split(".").pop()?.toUpperCase() || "?"}
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <a
+                                  href={`/api/uploads/${allegato.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-medium text-blue-600 hover:underline truncate block"
+                                >
+                                  {allegato.nome_originale}
+                                </a>
+                                <p className="text-[10px] text-slate-400">
+                                  {formatFileSize(allegato.dimensione)}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => deleteAttachment(allegato.id)}
+                                className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                title="Elimina allegato"
+                              >
+                                <TrashIcon className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Expanded Details */}
+                      {expandedNote === n.id && (
+                        <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                          {n.problema && (
+                            <div>
+                              <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                                Problema
+                              </h5>
+                              <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-600">
+                                {n.problema}
+                              </p>
+                            </div>
+                          )}
+                          <div>
+                            <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-emerald-600 uppercase">
+                              Soluzione
+                            </h5>
+                            <p className="rounded-lg bg-emerald-50 p-2.5 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">
+                              {n.soluzione}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    {expandedNote === n.id && (
-                      <div className="mt-3 space-y-2">
-                        <div>
-                          <h4 className="mb-0.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                            Problema
-                          </h4>
-                          <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-600">
-                            {n.problema || "—"}
-                          </p>
-                        </div>
-                        <div>
-                          <h4 className="mb-0.5 text-[11px] font-semibold tracking-wide text-emerald-600 uppercase">
-                            Soluzione
-                          </h4>
-                          <p className="rounded-lg bg-emerald-50 p-2.5 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">
-                            {n.soluzione}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </article>
-                ))
+                  ))}
+                </div>
               )}
             </div>
-          )}
+
+            {/* Contact Details */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h2 className="mb-4 text-sm font-bold text-slate-800">Dettagli Contatto</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Nome Contatto
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <input
+                      value={contatto}
+                      onChange={(e) => setContatto(e.target.value)}
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Telefono
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <input
+                      value={telefono}
+                      onChange={(e) => setTelefono(e.target.value)}
+                      placeholder="Es. 391 123 4567"
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Email
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <input
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Es. nome@azienda.it"
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right column - Context + AI */}
+          <div className="space-y-5">
+            {/* Ticket Context */}
+            <div className="rounded-xl bg-slate-100 p-5 shadow-sm">
+              <div className="mb-4 flex items-center gap-2">
+                <InfoIcon className="h-5 w-5 text-slate-600" />
+                <h3 className="text-sm font-bold text-slate-800">Contesto Ticket</h3>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    ID Ticket
+                  </p>
+                  <span className="mt-1 inline-block rounded-md bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm">
+                    {ticket.numero}
+                  </span>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Nome Cliente
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium text-slate-700">{ticket.cliente}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Problema Originale
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600 leading-relaxed">
+                    {ticket.sommario_problema}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Segnalato il
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">{ticket.data_creazione}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Modulo Software
+                  </p>
+                  <span className="mt-1 inline-block rounded-md bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                    {ticket.modulo_software}
+                  </span>
+                </div>
+
+                {ticket.operatore && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Operatore Assegnato
+                    </p>
+                    <span className="mt-1 inline-block rounded-md bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
+                      {ticket.operatore}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* AI Insight Card */}
+            <div className="rounded-xl bg-gradient-to-br from-violet-50 to-purple-50 p-5 shadow-sm border border-violet-100">
+              <div className="mb-3 flex items-center gap-2">
+                <SparklesIcon className="h-5 w-5 text-violet-600" />
+                <h3 className="text-sm font-bold text-violet-800">AI Insight</h3>
+              </div>
+              <p className="text-sm leading-relaxed text-violet-700">
+                Basandosi su ticket simili per {ticket.cliente}, questo problema è spesso risolto
+                pulendo la cache di sistema e reinstallando i driver principali dello schermo.
+                Considera di consultare l&apos;ultima knowledge base del vendor per errori correlati.
+              </p>
+            </div>
+
+            {/* Status Summary */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h3 className="mb-3 text-sm font-bold text-slate-800">Riepilogo</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Stato:</span>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                      STATUS_STYLES[ticket.stato]
+                    }`}
+                  >
+                    {STATI_MAP[ticket.stato]}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Priorità:</span>
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${
+                      PRIORITY_STYLES[ticket.priorita]
+                    }`}
+                  >
+                    {PRIORITA_MAP[ticket.priorita]}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Note interne:</span>
+                  <span className="text-xs text-slate-600">
+                    {ticket.note ? `${ticket.note.length} caratteri` : "Nessuna"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Note tecniche:</span>
+                  <span className="text-xs text-slate-600">{ticket.note_tecniche.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Messaggi:</span>
+                  <span className="text-xs text-slate-600">{ticket.messaggi.length}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -2,21 +2,52 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   BookIcon,
   GridIcon,
   HeadsetIcon,
   HelpCircleIcon,
-  TicketIcon,
+  UserIcon,
+  LogOutIcon,
+  UserCircleIcon,
+  UserPlusIcon,
 } from "@/components/icons";
-
-const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", icon: GridIcon, exact: true },
-  { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false },
-];
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [operator, setOperator] = useState<{ nome: string; email: string; ruolo: string } | null>(null);
+
+  const NAV_ITEMS = [
+    { href: "/", label: "Dashboard", icon: GridIcon, exact: true },
+    { href: "/operatore", label: "I Miei Ticket", icon: UserCircleIcon, exact: false },
+    { href: "/admin", label: "Operatori", icon: UserPlusIcon, exact: false },
+    { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false },
+  ];
+
+  useEffect(() => {
+    const loadOperator = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          setOperator(data.operator);
+        }
+      } catch {
+        // Ignore
+      }
+    };
+    loadOperator();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.href = "/login";
+    } catch {
+      // Ignore
+    }
+  };
 
   return (
     <aside className="hidden w-56 shrink-0 flex-col bg-slate-900 text-slate-300 md:flex">
@@ -54,21 +85,21 @@ export default function Sidebar() {
             </Link>
           );
         })}
-        <Link
-          href="/"
-          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-            pathname.startsWith("/tickets")
-              ? "bg-blue-600 text-white shadow-md shadow-blue-950/50"
-              : "text-slate-300 hover:bg-slate-800 hover:text-white"
-          }`}
-        >
-          <TicketIcon className="h-4 w-4" />
-          Ticket
-        </Link>
       </nav>
 
-      {/* Link secondari in basso */}
-      <div className="flex flex-col gap-1 px-3 pb-5">
+      {/* Utente corrente in basso */}
+      <div className="flex flex-col gap-1 px-3 pb-5 border-t border-slate-800 mt-auto">
+        {operator && (
+          <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white">
+              <UserIcon className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-white truncate">{operator.nome}</p>
+              <p className="text-[11px] text-slate-400 truncate">{operator.email}</p>
+            </div>
+          </div>
+        )}
         <Link
           href="/knowledge"
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white"
@@ -76,6 +107,13 @@ export default function Sidebar() {
           <HelpCircleIcon className="h-4 w-4" />
           Help Center
         </Link>
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-red-400 text-left w-full"
+        >
+          <LogOutIcon className="h-4 w-4" />
+          Esci
+        </button>
         <p className="px-3 pt-2 text-[10px] uppercase tracking-wider text-slate-600">
           v1.0 · Aggiornamento live
         </p>

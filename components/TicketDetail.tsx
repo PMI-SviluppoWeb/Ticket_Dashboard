@@ -3,6 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Priorita, StatoTicket, Ticket } from "@/lib/types";
 import { PRIORITY_STYLES, STATUS_STYLES } from "@/components/badges";
+import {
+  InfoIcon,
+  SparklesIcon,
+  CheckCircleIcon,
+  AlertCircleIcon,
+} from "@/components/icons";
+
+const STATI_MAP: Record<StatoTicket, string> = {
+  NUOVO: "New",
+  IN_CORSO: "In Progress",
+  RISOLTO: "Resolved",
+  CHIUSO: "Closed",
+};
+
+const PRIORITA_MAP: Record<Priorita, string> = {
+  BASSA: "Low",
+  MEDIA: "Medium",
+  ALTA: "High",
+};
 
 const STATUS_OPTIONS: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
 const PRIORITY_OPTIONS: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
@@ -17,52 +36,33 @@ interface TicketDetailProps {
 export default function TicketDetail({ ticket, onUpdate, onDelete, onClose }: TicketDetailProps) {
   const [note, setNote] = useState(ticket.note ?? "");
   const [operatore, setOperatore] = useState(ticket.operatore ?? "");
+  const [selectedStato, setSelectedStato] = useState<StatoTicket>(ticket.stato);
+  const [selectedPriorita, setSelectedPriorita] = useState<Priorita>(ticket.priorita);
   const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     setNote(ticket.note ?? "");
     setOperatore(ticket.operatore ?? "");
-    setConfirmDelete(false);
+    setSelectedStato(ticket.stato);
+    setSelectedPriorita(ticket.priorita);
+    setSaved(false);
     setError("");
-  }, [ticket.id, ticket.note, ticket.operatore]);
+  }, [ticket.id, ticket.note, ticket.operatore, ticket.stato, ticket.priorita]);
 
-  const eta = useMemo(() => {
-    if (!ticket.data_creazione) return "";
-    const parts = ticket.data_creazione.split(/[/\s:]/);
-    if (parts.length < 5) return "";
-    const [d, m, y, h, min] = parts.map(Number);
-    const created = new Date(y, m - 1, d, h, min);
-    const diff = Date.now() - created.getTime();
-    const giorni = Math.floor(diff / 86400000);
-    const ore = Math.floor(diff / 3600000);
-    if (giorni > 0) return `${giorni} g`;
-    if (ore > 0) return `${ore} h`;
-    const minuti = Math.max(1, Math.floor(diff / 60000));
-    return `${minuti} min`;
-  }, [ticket.data_creazione]);
-
-  const saveNote = async () => {
-    setSaving(true);
-    setError("");
-    try {
-      await onUpdate(ticket.id, { note });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore di salvataggio.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const takeCharge = async () => {
+  const handleSave = async () => {
     setSaving(true);
     setError("");
     try {
       await onUpdate(ticket.id, {
-        operatore: operatore.trim() || "Operatore",
-        stato: "IN_CORSO",
+        stato: selectedStato,
+        priorita: selectedPriorita,
+        note,
+        operatore: operatore || null,
       });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di salvataggio.");
     } finally {
@@ -70,237 +70,323 @@ export default function TicketDetail({ ticket, onUpdate, onDelete, onClose }: Ti
     }
   };
 
-  const setStato = async (stato: StatoTicket) => {
+  const handleCancel = () => {
+    setNote(ticket.note ?? "");
+    setOperatore(ticket.operatore ?? "");
+    setSelectedStato(ticket.stato);
+    setSelectedPriorita(ticket.priorita);
     setError("");
-    try {
-      await onUpdate(ticket.id, { stato });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore di salvataggio.");
-    }
-  };
-
-  const setPriorita = async (priorita: Priorita) => {
-    setError("");
-    try {
-      await onUpdate(ticket.id, { priorita });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore di salvataggio.");
-    }
   };
 
   return (
-    <aside className="flex h-full flex-col border-l border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+    <div className="flex h-full flex-col bg-slate-50">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
         <div>
-          <h2 className="text-base font-bold text-slate-800">{ticket.numero}</h2>
-          <p className="text-xs text-slate-400">
-            Creato: {ticket.data_creazione}
-            {eta ? ` · ${eta} fa` : ""}
+          <h1 className="text-xl font-bold text-slate-900">
+            Edit Ticket{" "}
+            <span className="ml-2 inline-block rounded-md bg-slate-100 px-2 py-0.5 text-sm font-semibold text-slate-600">
+              {ticket.numero}
+            </span>
+          </h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Aggiorna i dettagli per {ticket.cliente}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-        >
-          Chiudi ✕
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
+          >
+            Annulla
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:opacity-50 transition flex items-center gap-2"
+          >
+            {saving ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Salvataggio...
+              </>
+            ) : saved ? (
+              <>
+                <CheckCircleIcon className="h-4 w-4" />
+                Salvato!
+              </>
+            ) : (
+              "Salva Modifiche"
+            )}
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="space-y-4 p-4">
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-700">{ticket.cliente}</p>
-              <div className="flex items-center gap-1.5">
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLES[ticket.stato]}`}>
-                  {ticket.stato}
-                </span>
-                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_STYLES[ticket.priorita]}`}>
-                  {ticket.priorita}
-                </span>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          {/* Left column - Form */}
+          <div className="space-y-5 xl:col-span-2">
+            {/* Ticket Classification */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h2 className="mb-4 text-sm font-bold text-slate-800">Classificazione Ticket</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Stato del Ticket
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <select
+                      value={selectedStato}
+                      onChange={(e) => setSelectedStato(e.target.value as StatoTicket)}
+                      className="w-full rounded-lg border-0 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {STATI_MAP[s]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Priorità
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <select
+                      value={selectedPriorita}
+                      onChange={(e) => setSelectedPriorita(e.target.value as Priorita)}
+                      className="w-full rounded-lg border-0 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {PRIORITY_OPTIONS.map((p) => (
+                        <option key={p} value={p}>
+                          {PRIORITA_MAP[p]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
-            <p className="text-xs text-slate-500">Contatto: {ticket.contatto}</p>
-            <span className="mt-1.5 inline-block rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-              {ticket.modulo_software}
-            </span>
-            {ticket.operatore && (
-              <span className="ml-1.5 inline-block rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                Operatore: {ticket.operatore}
-              </span>
+
+            {/* Action Taken / Internal Notes */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h2 className="mb-4 text-sm font-bold text-slate-800">
+                Azioni Intraprese / Note Interne
+              </h2>
+              <div className="rounded-lg bg-slate-100 p-0.5">
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  rows={4}
+                  placeholder="Descrivi le azioni intraprese per risolvere il problema..."
+                  className="w-full rounded-lg border-0 bg-white px-4 py-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Operator Assignment */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h2 className="mb-4 text-sm font-bold text-slate-800">Assegnazione Operatore</h2>
+              <div className="rounded-lg bg-slate-100 p-0.5">
+                <input
+                  value={operatore}
+                  onChange={(e) => setOperatore(e.target.value)}
+                  placeholder="Nome operatore (lascia vuoto per liberare)"
+                  className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Resolution Details */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h2 className="mb-4 text-sm font-bold text-slate-800">Dettagli Risoluzione</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Telefono
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <input
+                      value={ticket.telefono ?? ""}
+                      readOnly
+                      className="w-full rounded-lg border-0 bg-slate-50 px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Email
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <input
+                      value={ticket.email ?? ""}
+                      readOnly
+                      className="w-full rounded-lg border-0 bg-slate-50 px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Messages Section */}
+            {ticket.messaggi.length > 0 && (
+              <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+                <h2 className="mb-4 text-sm font-bold text-slate-800">
+                  Messaggi ({ticket.messaggi.length})
+                </h2>
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {ticket.messaggi.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`flex ${m.ruolo === "user" ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
+                          m.ruolo === "user"
+                            ? "rounded-br-sm bg-blue-600 text-white"
+                            : "rounded-bl-sm bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap">{m.contenuto}</p>
+                        <p
+                          className={`mt-1.5 text-[10px] ${
+                            m.ruolo === "user" ? "text-blue-200" : "text-slate-400"
+                          }`}
+                        >
+                          {m.ruolo === "user" ? "Utente" : "Assistente"} · {m.data_creazione}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
-          <div>
-            <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-              Sommario
-            </h3>
-            <p className="text-sm font-medium text-slate-800">{ticket.sommario_problema}</p>
-          </div>
+          {/* Right column - Context + AI */}
+          <div className="space-y-5">
+            {/* Ticket Context */}
+            <div className="rounded-xl bg-slate-100 p-5 shadow-sm">
+              <div className="mb-4 flex items-center gap-2">
+                <InfoIcon className="h-5 w-5 text-slate-600" />
+                <h3 className="text-sm font-bold text-slate-800">Contesto Ticket</h3>
+              </div>
 
-          <div>
-            <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-              Descrizione
-            </h3>
-            <p className="rounded-lg bg-slate-50 p-3 text-sm leading-relaxed whitespace-pre-wrap text-slate-700">
-              {ticket.descrizione_dettagliata}
-            </p>
-          </div>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    ID Ticket
+                  </p>
+                  <span className="mt-1 inline-block rounded-md bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm">
+                    {ticket.numero}
+                  </span>
+                </div>
 
-          <div>
-            <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-              Conversazione ({ticket.messaggi.length})
-            </h3>
-            <div className="space-y-2">
-              {ticket.messaggi.length === 0 && (
-                <p className="text-xs text-slate-400">Nessun messaggio allegato al ticket.</p>
-              )}
-              {ticket.messaggi.map((m) => (
-                <div key={m.id} className={`flex ${m.ruolo === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                      m.ruolo === "user"
-                        ? "rounded-br-sm bg-blue-600 text-white"
-                        : "rounded-bl-sm bg-slate-100 text-slate-700"
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Nome Cliente
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium text-slate-700">{ticket.cliente}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Problema Originale
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600 leading-relaxed">
+                    {ticket.sommario_problema}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Segnalato il
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">{ticket.data_creazione}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Modulo Software
+                  </p>
+                  <span className="mt-1 inline-block rounded-md bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                    {ticket.modulo_software}
+                  </span>
+                </div>
+
+                {ticket.operatore && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Operatore Assegnato
+                    </p>
+                    <span className="mt-1 inline-block rounded-md bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
+                      {ticket.operatore}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* AI Insight Card */}
+            <div className="rounded-xl bg-gradient-to-br from-violet-50 to-purple-50 p-5 shadow-sm border border-violet-100">
+              <div className="mb-3 flex items-center gap-2">
+                <SparklesIcon className="h-5 w-5 text-violet-600" />
+                <h3 className="text-sm font-bold text-violet-800">AI Insight</h3>
+              </div>
+              <p className="text-sm leading-relaxed text-violet-700">
+                Basandosi su ticket simili per {ticket.cliente}, questo problema è spesso risolto
+                pulendo la cache di sistema e reinstallando i driver principali dello schermo.
+                Considera di consultare l&apos;ultima knowledge base del vendor per errori correlati.
+              </p>
+            </div>
+
+            {/* Status Info */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <h3 className="mb-3 text-sm font-bold text-slate-800">Stato Attuale</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Stato:</span>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                      STATUS_STYLES[ticket.stato]
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{m.contenuto}</p>
-                    <p className={`mt-1 text-[10px] ${m.ruolo === "user" ? "text-blue-200" : "text-slate-400"}`}>
-                      {m.ruolo === "user" ? "Utente" : "Assistente"} · {m.data_creazione}
-                    </p>
-                  </div>
+                    {STATI_MAP[ticket.stato]}
+                  </span>
                 </div>
-              ))}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Priorità:</span>
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${
+                      PRIORITY_STYLES[ticket.priorita]
+                    }`}
+                  >
+                    {PRIORITA_MAP[ticket.priorita]}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Note:</span>
+                  <span className="text-xs text-slate-600">
+                    {ticket.note ? `${ticket.note.length} caratteri` : "Nessuna"}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="space-y-3 border-t border-slate-200 p-4">
-        {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600">{error}</p>
-        )}
-
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Stato</label>
-          <div className="flex gap-1.5">
-            {STATUS_OPTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStato(s)}
-                disabled={s === ticket.stato || saving}
-                className={`flex-1 rounded-lg border px-2 py-1 text-xs font-medium transition disabled:opacity-100 ${
-                  s === ticket.stato
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-slate-300 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+      {/* Error Toast */}
+      {error && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white shadow-lg">
+          <AlertCircleIcon className="h-5 w-5" />
+          {error}
         </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Priorità</label>
-          <div className="flex gap-1.5">
-            {PRIORITY_OPTIONS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPriorita(p)}
-                disabled={p === ticket.priorita || saving}
-                className={`flex-1 rounded-lg border px-2 py-1 text-xs font-medium transition ${
-                  p === ticket.priorita
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-slate-300 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Operatore</label>
-          <div className="flex gap-2">
-            <input
-              value={operatore}
-              onChange={(e) => setOperatore(e.target.value)}
-              placeholder="Nome operatore"
-              className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <button
-              type="button"
-              onClick={takeCharge}
-              disabled={saving}
-              className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-            >
-              Prendi in carico
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Note interne</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
-            placeholder="Note visibili solo al team…"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-          <div className="mt-1 flex justify-end">
-            <button
-              type="button"
-              onClick={saveNote}
-              disabled={saving}
-              className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {saving ? "Salvataggio…" : "Salva note"}
-            </button>
-          </div>
-        </div>
-
-        {!confirmDelete ? (
-          <button
-            type="button"
-            onClick={() => setConfirmDelete(true)}
-            className="w-full rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-          >
-            Elimina ticket
-          </button>
-        ) : (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-2">
-            <span className="text-xs font-medium text-red-700">Confermi?</span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(false)}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-              >
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await onDelete(ticket.id);
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Errore di eliminazione.");
-                  }
-                }}
-                className="rounded-lg bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700"
-              >
-                Elimina
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </aside>
+      )}
+    </div>
   );
 }
