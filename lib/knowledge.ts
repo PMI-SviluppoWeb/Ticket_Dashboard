@@ -1,8 +1,8 @@
 import { db } from "./db";
-import type { KnowledgeDoc, KnowledgeDocInput, KnowledgeDocRow } from "./types";
+import type { KnowledgeDoc, KnowledgeDocInput, KnowledgeDocRow, KnowledgeLink } from "./types";
 
-const ROW_FIELDS = `id, nome_file, dimensione, pagine, data_creazione`;
-const FULL_FIELDS = `id, nome_file, dimensione, pagine, testo, data_creazione`;
+const ROW_FIELDS = `id, nome_file, dimensione, pagine, links, data_creazione`;
+const FULL_FIELDS = `id, nome_file, dimensione, pagine, testo, links, data_creazione`;
 
 function now(): string {
   return new Date().toLocaleString("it-IT", {
@@ -14,14 +14,26 @@ function now(): string {
   });
 }
 
+function parseLinks(links: unknown): KnowledgeLink[] {
+  if (typeof links === "string") {
+    try {
+      return JSON.parse(links);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(links)) return links as KnowledgeLink[];
+  return [];
+}
+
 export async function insertKnowledgeDoc(
   input: KnowledgeDocInput
 ): Promise<KnowledgeDoc> {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO knowledge_docs (id, nome_file, dimensione, pagine, testo, data_creazione)
-       VALUES (@id, @nome_file, @dimensione, @pagine, @testo, @data_creazione)`
+      `INSERT INTO knowledge_docs (id, nome_file, dimensione, pagine, testo, links, data_creazione)
+       VALUES (@id, @nome_file, @dimensione, @pagine, @testo, @links, @data_creazione)`
     )
     .run({
       id,
@@ -29,6 +41,7 @@ export async function insertKnowledgeDoc(
       dimensione: input.dimensione,
       pagine: input.pagine,
       testo: input.testo,
+      links: JSON.stringify(input.links ?? []),
       data_creazione: now(),
     });
   return (await getKnowledgeDoc(id))!;
@@ -49,14 +62,30 @@ export async function listKnowledgeDocs(q?: string): Promise<KnowledgeDocRow[]> 
        ORDER BY data_creazione DESC, rowid DESC`
     )
     .all(params);
-  return rows as unknown as KnowledgeDocRow[];
+  return (rows as unknown as Array<Omit<KnowledgeDocRow, "links"> & { links: unknown }>).map((r) => ({
+    ...r,
+    links: parseLinks(r.links),
+  }));
 }
 
 export async function getKnowledgeDoc(id: string): Promise<KnowledgeDoc | null> {
   const row = await db
     .prepare(`SELECT ${FULL_FIELDS} FROM knowledge_docs WHERE id = ?`)
-    .get(id);
-  return (row as KnowledgeDoc | undefined) ?? null;
+    .get(id) as unknown as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return { ...row, links: parseLinks(row.links) } as KnowledgeDoc;
+}
+
+export async function updateKnowledgeDoc(
+  id: string,
+  patch: { links?: Array<{ url: string; title: string }> }
+): Promise<KnowledgeDoc | null> {
+  if (patch.links !== undefined) {
+    await db
+      .prepare(`UPDATE knowledge_docs SET links = @links WHERE id = @id`)
+      .run({ id, links: JSON.stringify(patch.links) });
+  }
+  return getKnowledgeDoc(id);
 }
 
 export async function deleteKnowledgeDoc(id: string): Promise<boolean> {
