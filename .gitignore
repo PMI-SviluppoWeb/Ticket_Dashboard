@@ -14,3 +14,7 @@ uploads/
 # Env
 .env
 .env*.local
+
+# Screenshot e log
+screen/
+dev.log

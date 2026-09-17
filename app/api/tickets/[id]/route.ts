@@ -78,9 +78,11 @@ export async function PATCH(
   }
   if (body.note !== undefined) patch.note = body.note;
   if (body.operatore !== undefined) patch.operatore = body.operatore;
+  if (body.cliente !== undefined) patch.cliente = body.cliente;
   if (body.contatto !== undefined) patch.contatto = body.contatto;
   if (body.telefono !== undefined) patch.telefono = body.telefono;
   if (body.email !== undefined) patch.email = body.email;
+  if (body.tempo_effettivo_minuti !== undefined) patch.tempo_effettivo_minuti = body.tempo_effettivo_minuti;
 
   const ticket = await updateTicket(params.id, patch);
   if (!ticket) {

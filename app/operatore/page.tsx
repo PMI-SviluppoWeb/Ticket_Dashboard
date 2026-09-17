@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Stats, TicketRow } from "@/lib/types";
 import StatsCards from "@/components/StatsCards";
 import FiltersBar, { DEFAULT_FILTERS, type Filters } from "@/components/FiltersBar";
@@ -20,6 +21,7 @@ import {
 const PAGE_SIZE = 25;
 
 export default function OperatoreDashboard() {
+  const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [moduli, setModuli] = useState<string[]>([]);
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -38,12 +40,16 @@ export default function OperatoreDashboard() {
       const res = await fetch("/api/auth/me");
       if (res.ok) {
         const data = await res.json();
+        if (data.operator?.ruolo === "admin") {
+          router.push("/");
+          return;
+        }
         setOperator(data.operator);
       }
     } catch {
       // Ignore
     }
-  }, []);
+  }, [router]);
 
   const loadStats = useCallback(async () => {
     try {

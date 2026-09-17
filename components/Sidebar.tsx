@@ -12,6 +12,7 @@ import {
   LogOutIcon,
   UserCircleIcon,
   UserPlusIcon,
+  BarChartIcon,
 } from "@/components/icons";
 
 export default function Sidebar() {
@@ -20,10 +21,18 @@ export default function Sidebar() {
 
   const NAV_ITEMS = [
     { href: "/", label: "Dashboard", icon: GridIcon, exact: true },
-    { href: "/operatore", label: "I Miei Ticket", icon: UserCircleIcon, exact: false },
-    { href: "/admin", label: "Operatori", icon: UserPlusIcon, exact: false },
+    { href: "/operatore", label: "I Miei Ticket", icon: UserCircleIcon, exact: false, operatoreOnly: true },
+    { href: "/admin", label: "Operatori", icon: UserPlusIcon, exact: false, adminOnly: true },
+    { href: "/admin/dashboard", label: "Dashboard Admin", icon: BarChartIcon, exact: false, adminOnly: true },
     { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false },
   ];
+
+  const isAdmin = operator?.ruolo === "admin";
+  const visibleNav = NAV_ITEMS.filter((item) => {
+    if (item.adminOnly && !isAdmin) return false;
+    if (item.operatoreOnly && isAdmin) return false;
+    return true;
+  });
 
   useEffect(() => {
     const loadOperator = async () => {
@@ -66,7 +75,7 @@ export default function Sidebar() {
 
       {/* Navigazione principale */}
       <nav className="mt-2 flex flex-1 flex-col gap-1 px-3">
-        {NAV_ITEMS.map((item) => {
+        {visibleNav.map((item) => {
           const active = item.exact
             ? pathname === item.href
             : pathname.startsWith(item.href);

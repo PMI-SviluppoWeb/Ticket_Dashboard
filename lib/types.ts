@@ -50,6 +50,9 @@ export interface Ticket {
   data_creazione: string;
   data_aggiornamento: string;
   data_chiusura: string | null;
+  data_inizio_lavoro: string | null;
+  tempo_stimato_minuti: number | null;
+  tempo_effettivo_minuti: number | null;
   messaggi: Message[];
   note_tecniche: TechnicalNote[];
 }
@@ -71,6 +74,9 @@ export interface TicketRow {
   data_creazione: string;
   data_aggiornamento: string;
   data_chiusura: string | null;
+  data_inizio_lavoro: string | null;
+  tempo_stimato_minuti: number | null;
+  tempo_effettivo_minuti: number | null;
 }
 
 export interface TicketInput {
@@ -93,9 +99,11 @@ export interface TicketUpdate {
   priorita?: Priorita;
   note?: string | null;
   operatore?: string | null;
+  cliente?: string;
   contatto?: string;
   telefono?: string | null;
   email?: string | null;
+  tempo_effettivo_minuti?: number | null;
 }
 
 export interface Stats {
@@ -179,6 +187,56 @@ export interface OperatorInput {
 export interface LoginInput {
   email: string;
   password: string;
+}
+
+export interface Articolo {
+  id: string;
+  codice: string;
+  nome: string;
+  descrizione: string | null;
+  categoria: string | null;
+  prezzo: number | null;
+  unita_misura: string;
+  attivo: boolean;
+  data_creazione: string;
+}
+
+export interface ArticoloInput {
+  codice: string;
+  nome: string;
+  descrizione?: string | null;
+  categoria?: string | null;
+  prezzo?: number | null;
+  unita_misura?: string;
+}
+
+export interface Cliente {
+  id: string;
+  ragione_sociale: string;
+  nome_contatto: string | null;
+  email: string | null;
+  telefono: string | null;
+  indirizzo: string | null;
+  citta: string | null;
+  provincia: string | null;
+  cap: string | null;
+  partita_iva: string | null;
+  note: string | null;
+  attivo: boolean;
+  data_creazione: string;
+}
+
+export interface ClienteInput {
+  ragione_sociale: string;
+  nome_contatto?: string | null;
+  email?: string | null;
+  telefono?: string | null;
+  indirizzo?: string | null;
+  citta?: string | null;
+  provincia?: string | null;
+  cap?: string | null;
+  partita_iva?: string | null;
+  note?: string | null;
 }
 
 export type EmailTipo = "nuovo_ticket" | "assegnazione" | "nuova_nota" | "chiusura" | "manuale";

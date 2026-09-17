@@ -34,8 +34,7 @@ function LoginForm() {
         return;
       }
 
-      router.push(redirect);
-      router.refresh();
+      window.location.href = redirect;
     } catch {
       setError("Errore di connessione. Riprova.");
     } finally {

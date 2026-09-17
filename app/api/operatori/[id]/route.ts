@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin, updateOperator, deactivateOperator, activateOperator } from "@/lib/auth";
+import { requireAdmin, updateOperator, deactivateOperator, activateOperator, deleteOperator } from "@/lib/auth";
 
 export async function PATCH(
   request: Request,
@@ -46,9 +46,11 @@ export async function DELETE(
     const { id } = await params;
 
     const body = await request.json().catch(() => ({}));
-    const { attivo } = body as { attivo?: boolean };
+    const { attivo, permanente } = body as { attivo?: boolean; permanente?: boolean };
 
-    if (attivo === true) {
+    if (permanente) {
+      await deleteOperator(id);
+    } else if (attivo === true) {
       await activateOperator(id);
     } else {
       await deactivateOperator(id);

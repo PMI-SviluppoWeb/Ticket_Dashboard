@@ -63,6 +63,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
   const [note, setNote] = useState("");
   const [selectedOperatore, setSelectedOperatore] = useState("");
+  const [cliente, setCliente] = useState("");
   const [contatto, setContatto] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
@@ -86,6 +87,10 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [emailMessaggio, setEmailMessaggio] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
 
+  // Time tracking state
+  const [tempoEffettivo, setTempoEffettivo] = useState("");
+  const [savingTempo, setSavingTempo] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/tickets/${id}`);
@@ -93,6 +98,18 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       const data = (await res.json()) as Ticket;
       setTicket(data);
       setError("");
+      // Initialize actual time from ticket data
+      if (data.tempo_effettivo_minuti !== null && data.tempo_effettivo_minuti !== undefined) {
+        const ore = Math.floor(data.tempo_effettivo_minuti / 60);
+        const minuti = data.tempo_effettivo_minuti % 60;
+        setTempoEffettivo(`${ore}:${String(minuti).padStart(2, "0")}`);
+      } else if (data.tempo_stimato_minuti !== null && data.tempo_stimato_minuti !== undefined) {
+        const ore = Math.floor(data.tempo_stimato_minuti / 60);
+        const minuti = data.tempo_stimato_minuti % 60;
+        setTempoEffettivo(`${ore}:${String(minuti).padStart(2, "0")}`);
+      } else {
+        setTempoEffettivo("");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di caricamento del ticket.");
     } finally {
@@ -176,6 +193,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     if (!ticket) return;
     setNote(ticket.note ?? "");
     setSelectedOperatore(ticket.operatore ?? "");
+    setCliente(ticket.cliente ?? "");
     setContatto(ticket.contatto ?? "");
     setTelefono(ticket.telefono ?? "");
     setEmail(ticket.email ?? "");
@@ -235,6 +253,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         priorita: selectedPriorita,
         note: note.trim() || null,
         operatore: selectedOperatore || null,
+        cliente: cliente.trim(),
         contatto: contatto.trim(),
         telefono: telefono.trim() || null,
         email: email.trim() || null,
@@ -242,12 +261,13 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
-  }, [run, updateTicket, selectedStato, selectedPriorita, note, selectedOperatore, contatto, telefono, email]);
+  }, [run, updateTicket, selectedStato, selectedPriorita, note, selectedOperatore, cliente, contatto, telefono, email]);
 
   const handleCancel = useCallback(() => {
     if (!ticket) return;
     setNote(ticket.note ?? "");
     setSelectedOperatore(ticket.operatore ?? "");
+    setCliente(ticket.cliente ?? "");
     setContatto(ticket.contatto ?? "");
     setTelefono(ticket.telefono ?? "");
     setEmail(ticket.email ?? "");
@@ -255,7 +275,41 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     setSelectedPriorita(ticket.priorita);
     setError("");
     setPendingFiles([]);
+    // Reset actual time
+    if (ticket.tempo_effettivo_minuti !== null && ticket.tempo_effettivo_minuti !== undefined) {
+      const ore = Math.floor(ticket.tempo_effettivo_minuti / 60);
+      const minuti = ticket.tempo_effettivo_minuti % 60;
+      setTempoEffettivo(`${ore}:${String(minuti).padStart(2, "0")}`);
+    } else if (ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined) {
+      const ore = Math.floor(ticket.tempo_stimato_minuti / 60);
+      const minuti = ticket.tempo_stimato_minuti % 60;
+      setTempoEffettivo(`${ore}:${String(minuti).padStart(2, "0")}`);
+    } else {
+      setTempoEffettivo("");
+    }
   }, [ticket]);
+
+  const saveTempoEffettivo = useCallback(() => {
+    if (!tempoEffettivo.trim()) return;
+    void run(async () => {
+      // Parse "HH:MM" format
+      const parts = tempoEffettivo.split(":");
+      let minutiTotali: number;
+      if (parts.length === 2) {
+        const ore = parseInt(parts[0], 10) || 0;
+        const minuti = parseInt(parts[1], 10) || 0;
+        minutiTotali = ore * 60 + minuti;
+      } else {
+        // Assume decimal hours like "1.5"
+        const ore = parseFloat(tempoEffettivo) || 0;
+        minutiTotali = Math.round(ore * 60);
+      }
+      if (minutiTotali <= 0) return;
+      await updateTicket({ tempo_effettivo_minuti: minutiTotali } as Partial<Ticket>);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    });
+  }, [tempoEffettivo, run, updateTicket]);
 
   const handleCloseTicket = useCallback(() => {
     void run(async () => {
@@ -1148,39 +1202,57 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    Cliente / Azienda
+                  </label>
+                  <div className="rounded-lg bg-slate-100 p-0.5">
+                    <input
+                      value={cliente}
+                      onChange={(e) => setCliente(e.target.value)}
+                      placeholder="Nome azienda"
+                      disabled={ticket.stato === "CHIUSO"}
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
                     Nome Contatto
                   </label>
                   <div className="rounded-lg bg-slate-100 p-0.5">
                     <input
                       value={contatto}
                       onChange={(e) => setContatto(e.target.value)}
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Nome della persona"
+                      disabled={ticket.stato === "CHIUSO"}
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                     />
                   </div>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Telefono
+                    Recapito Telefonico
                   </label>
                   <div className="rounded-lg bg-slate-100 p-0.5">
                     <input
                       value={telefono}
                       onChange={(e) => setTelefono(e.target.value)}
                       placeholder="Es. 391 123 4567"
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={ticket.stato === "CHIUSO"}
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                     />
                   </div>
                 </div>
-                <div className="sm:col-span-2">
+                <div>
                   <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Email
+                    Email del Contatto
                   </label>
                   <div className="rounded-lg bg-slate-100 p-0.5">
                     <input
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Es. nome@azienda.it"
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={ticket.stato === "CHIUSO"}
+                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                     />
                   </div>
                 </div>
@@ -1190,6 +1262,40 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
           {/* Right column - Context + AI */}
           <div className="space-y-5">
+            {/* Client Contact Details */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <div className="mb-4 flex items-center gap-2">
+                <UserIcon className="h-5 w-5 text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-800">Dettagli Cliente</h3>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Azienda
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold text-slate-800">{ticket.cliente}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Persona di Contatto
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium text-slate-700">{ticket.contatto || "Non specificato"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Recapito Telefonico
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">{ticket.telefono || "Non fornito"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Email del Contatto
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">{ticket.email || "Non fornita"}</p>
+                </div>
+              </div>
+            </div>
+
             {/* Ticket Context */}
             <div className="rounded-xl bg-slate-100 p-5 shadow-sm">
               <div className="mb-4 flex items-center gap-2">
@@ -1255,6 +1361,136 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       {ticket.operatore}
                     </span>
                   </div>
+                )}
+              </div>
+            </div>
+
+            {/* Time Tracking */}
+            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+              <div className="mb-4 flex items-center gap-2">
+                <svg className="h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <h3 className="text-sm font-bold text-slate-800">Gestione Tempo</h3>
+              </div>
+
+              <div className="space-y-3">
+                {/* Data inizio lavoro */}
+                {ticket.data_inizio_lavoro && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Inizio Lavoro
+                    </p>
+                    <p className="mt-0.5 text-sm text-slate-600">{ticket.data_inizio_lavoro}</p>
+                  </div>
+                )}
+
+                {/* Data chiusura */}
+                {ticket.data_chiusura && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Chiusura
+                    </p>
+                    <p className="mt-0.5 text-sm text-slate-600">{ticket.data_chiusura}</p>
+                  </div>
+                )}
+
+                {/* Tempo stimato (auto-calculated) */}
+                {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Tempo Stimato (calcolato)
+                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-md bg-blue-100 px-2.5 py-1 text-sm font-bold text-blue-700">
+                        {Math.floor(ticket.tempo_stimato_minuti / 60)}h {ticket.tempo_stimato_minuti % 60}m
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        ({ticket.tempo_stimato_minuti} min)
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tempo effettivo (editable) */}
+                {ticket.stato === "CHIUSO" && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Tempo Effettivo (modificabile)
+                    </p>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={tempoEffettivo}
+                        onChange={(e) => setTempoEffettivo(e.target.value)}
+                        placeholder="es. 2:30"
+                        className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-slate-500">ore:minuti</span>
+                      <button
+                        type="button"
+                        onClick={saveTempoEffettivo}
+                        disabled={savingTempo || !tempoEffettivo.trim()}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition"
+                      >
+                        {savingTempo ? "Salvataggio..." : "Salva"}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      Formato: ore:minuti (es. 2:30) o decimale (es. 2.5)
+                    </p>
+                  </div>
+                )}
+
+                {/* Show actual time if set and ticket is closed */}
+                {ticket.stato === "CHIUSO" && ticket.tempo_effettivo_minuti !== null && ticket.tempo_effettivo_minuti !== undefined && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600">
+                      Tempo Finale
+                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-md bg-emerald-100 px-2.5 py-1 text-sm font-bold text-emerald-700">
+                        {Math.floor(ticket.tempo_effettivo_minuti / 60)}h {ticket.tempo_effettivo_minuti % 60}m
+                      </span>
+                      {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
+                        <span className={`text-[10px] font-medium ${
+                          ticket.tempo_effettivo_minuti > ticket.tempo_stimato_minuti
+                            ? "text-red-500"
+                            : "text-emerald-500"
+                        }`}>
+                          {ticket.tempo_effettivo_minuti > ticket.tempo_stimato_minuti ? "+" : ""}
+                          {ticket.tempo_effettivo_minuti - ticket.tempo_stimato_minuti}m vs stimato
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* In progress: show live elapsed time */}
+                {ticket.stato === "IN_CORSO" && ticket.data_inizio_lavoro && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600">
+                      In Lavoro Da
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-slate-700">
+                      {(() => {
+                        const start = new Date(ticket.data_inizio_lavoro.replace(/(\d{2})\/(\d{2})\/(\d{4}), (\d{2}):(\d{2})/, "$3-$2-$1T$4:$5:00"));
+                        const now = new Date();
+                        const diff = now.getTime() - start.getTime();
+                        const hours = Math.floor(diff / 3600000);
+                        const mins = Math.floor((diff % 3600000) / 60000);
+                        return `${hours}h ${mins}m`;
+                      })()}
+                    </p>
+                  </div>
+                )}
+
+                {/* No time data */}
+                {!ticket.data_inizio_lavoro && ticket.stato !== "CHIUSO" && (
+                  <p className="text-xs text-slate-400 italic">
+                    Il timer partirà quando il ticket verrà preso in carico.
+                  </p>
                 )}
               </div>
             </div>

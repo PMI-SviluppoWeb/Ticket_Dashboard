@@ -46,7 +46,10 @@ CREATE TABLE IF NOT EXISTS tickets (
   operatore            TEXT,
   data_creazione       TEXT NOT NULL,
   data_aggiornamento   TEXT NOT NULL,
-  data_chiusura        TEXT
+  data_chiusura        TEXT,
+  data_inizio_lavoro   TEXT,
+  tempo_stimato_minuti INTEGER,
+  tempo_effettivo_minuti INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_tickets_stato     ON tickets (stato);
@@ -140,6 +143,40 @@ CREATE TABLE IF NOT EXISTS email_log (
 
 CREATE INDEX IF NOT EXISTS idx_email_log_ticket ON email_log (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_log_tipo   ON email_log (tipo);
+
+CREATE TABLE IF NOT EXISTS articoli (
+  id             TEXT PRIMARY KEY,
+  codice         TEXT NOT NULL UNIQUE,
+  nome           TEXT NOT NULL,
+  descrizione    TEXT,
+  categoria      TEXT,
+  prezzo         REAL,
+  unita_misura   TEXT DEFAULT 'pezzo',
+  attivo         INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_articoli_codice   ON articoli (codice);
+CREATE INDEX IF NOT EXISTS idx_articoli_categoria ON articoli (categoria);
+
+CREATE TABLE IF NOT EXISTS clienti (
+  id               TEXT PRIMARY KEY,
+  ragione_sociale  TEXT NOT NULL,
+  nome_contatto    TEXT,
+  email            TEXT,
+  telefono         TEXT,
+  indirizzo        TEXT,
+  citta            TEXT,
+  provincia        TEXT,
+  cap              TEXT,
+  partita_iva      TEXT,
+  note             TEXT,
+  attivo           INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
+  data_creazione   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clienti_ragione_sociale ON clienti (ragione_sociale);
+CREATE INDEX IF NOT EXISTS idx_clienti_citta           ON clienti (citta);
 `;
 
 const schemaReady = (async () => {
@@ -159,6 +196,84 @@ const schemaReady = (async () => {
     await client.execute("ALTER TABLE tickets ALTER COLUMN email TEXT NOT NULL");
   } catch {
     // Column already NOT NULL or migration not needed
+  }
+  // Migration: fix contact data - extract phone and email from contatto field
+  try {
+    // Find tickets where contatto contains email or phone patterns
+    const ticketsWithMixedContact = await client.execute(
+      `SELECT id, contatto, telefono, email FROM tickets
+       WHERE contatto LIKE '%@%'
+          OR contatto LIKE '%+39%'
+          OR contatto LIKE '%0039%'
+          OR (contatto GLOB '*[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*' AND contatto != 'Non fornito')
+          OR email = 'sconosciuto@placeholder.it'`
+    );
+    for (const row of ticketsWithMixedContact.rows) {
+      const contatto = (row.contatto as string) || "";
+      let telefono = (row.telefono as string) || null;
+      let email = (row.email as string) || null;
+      let nomeContatto = contatto;
+
+      // Reset placeholder email
+      if (email === "sconosciuto@placeholder.it") {
+        email = null;
+      }
+
+      // Extract email if present in contatto
+      const emailMatch = contatto.match(/[\w.+-]+@[\w.-]+\.\w{2,}/);
+      if (emailMatch && !email) {
+        email = emailMatch[0];
+        nomeContatto = nomeContatto.replace(emailMatch[0], "").replace(/[<>]/g, "").trim();
+      }
+
+      // Extract phone if present in contatto
+      const phoneMatch = contatto.match(/(?:\+39|0039)\s*[\d\s\-]{8,15}|(?<!\d)[\d\s\-]{8,15}(?!\d)/);
+      if (phoneMatch && !telefono) {
+        telefono = phoneMatch[0].trim();
+        nomeContatto = nomeContatto.replace(phoneMatch[0], "").trim();
+      }
+
+      // Clean up separators and extra spaces
+      nomeContatto = nomeContatto.replace(/[-–—,;|/\\]+/g, " ").replace(/\s{2,}/g, " ").trim();
+      if (!nomeContatto) nomeContatto = "Non fornito";
+
+      await client.execute({
+        sql: `UPDATE tickets SET contatto = :contatto, telefono = :telefono, email = :email WHERE id = :id`,
+        args: [nomeContatto, telefono, email || null, row.id as string],
+      });
+    }
+  } catch {
+    // Migration not needed or already applied
+  }
+  // Migration: add time tracking columns
+  try {
+    await client.execute("ALTER TABLE tickets ADD COLUMN data_inizio_lavoro TEXT");
+  } catch { /* Column already exists */ }
+  try {
+    await client.execute("ALTER TABLE tickets ADD COLUMN tempo_stimato_minuti INTEGER");
+  } catch { /* Column already exists */ }
+  try {
+    await client.execute("ALTER TABLE tickets ADD COLUMN tempo_effettivo_minuti INTEGER");
+  } catch { /* Column already exists */ }
+
+  // Seed: popola tabella clienti con dati di esempio se vuota
+  try {
+    const { rows } = await client.execute("SELECT COUNT(*) AS cnt FROM clienti");
+    const count = (rows[0] as Record<string, unknown>)?.cnt as number;
+    if (count === 0) {
+      const now = new Date().toISOString();
+      await client.executeMultiple(`
+        INSERT INTO clienti (id, ragione_sociale, nome_contatto, email, telefono, indirizzo, citta, provincia, cap, partita_iva, attivo, data_creazione)
+        VALUES
+          ('CLI-001', 'Rossi & Figli S.r.l.', 'Marco Rossi', 'marco.rossi@rossifigli.it', '02 1234567', 'Via Roma 10', 'Milano', 'MI', '20100', 'IT01234567890', 1, '${now}'),
+          ('CLI-002', 'Bianchi Distribuzioni S.p.A.', 'Laura Bianchi', 'laura.bianchi@bianchidist.it', '06 9876543', 'Corso Italia 25', 'Roma', 'RM', '00100', 'IT09876543210', 1, '${now}'),
+          ('CLI-003', 'Verdi Cloud Services', 'Giuseppe Verdi', 'giuseppe.verdi@verdicloud.it', '011 5551234', 'Via Torino 42', 'Torino', 'TO', '10100', 'IT11223344556', 1, '${now}'),
+          ('CLI-004', 'Neri Techno Solutions', 'Francesca Neri', 'francesca.neri@neritech.it', '055 6789012', 'Via Firenze 8', 'Firenze', 'FI', '50100', 'IT66778899001', 1, '${now}'),
+          ('CLI-005', 'Gialli & Partners', 'Alessandro Gialli', 'alessandro.gialli@giallipartners.it', '081 3456789', 'Via Napoli 15', 'Napoli', 'NA', '80100', 'IT55443322110', 1, '${now}');
+      `);
+    }
+  } catch {
+    // Seeding non necessario o tabella già popolata
   }
 })().catch((err) => {
   console.error("Errore nell'inizializzazione dello schema su Turso:", err);

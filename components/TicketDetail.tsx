@@ -332,7 +332,7 @@ export default function TicketDetail({ ticket, onUpdate, onDelete, onClose }: Ti
             </div>
 
             {/* AI Insight Card */}
-            <div className="rounded-xl bg-gradient-to-br from-violet-50 to-purple-50 p-5 shadow-sm border border-violet-100">
+            {/* <div className="rounded-xl bg-gradient-to-br from-violet-50 to-purple-50 p-5 shadow-sm border border-violet-100">
               <div className="mb-3 flex items-center gap-2">
                 <SparklesIcon className="h-5 w-5 text-violet-600" />
                 <h3 className="text-sm font-bold text-violet-800">AI Insight</h3>
@@ -342,7 +342,7 @@ export default function TicketDetail({ ticket, onUpdate, onDelete, onClose }: Ti
                 pulendo la cache di sistema e reinstallando i driver principali dello schermo.
                 Considera di consultare l&apos;ultima knowledge base del vendor per errori correlati.
               </p>
-            </div>
+            </div> */}
 
             {/* Status Info */}
             <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">

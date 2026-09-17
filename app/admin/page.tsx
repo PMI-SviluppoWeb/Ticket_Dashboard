@@ -10,7 +10,9 @@ import {
   LoaderIcon,
   LockClosedIcon,
   HeadsetIcon,
+  BarChartIcon,
 } from "@/components/icons";
+import Link from "next/link";
 
 interface Operator {
   id: string;
@@ -36,12 +38,6 @@ export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Switch admin state
-  const [switchEmail, setSwitchEmail] = useState("");
-  const [switchPassword, setSwitchPassword] = useState("");
-  const [switching, setSwitching] = useState(false);
-  const [switchError, setSwitchError] = useState<string | null>(null);
-
   // Admin panel state
   const [operatori, setOperatori] = useState<Operator[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +48,7 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmPermanentDelete, setConfirmPermanentDelete] = useState<string | null>(null);
   const seqRef = useRef(0);
 
   // Check current user on mount
@@ -99,31 +96,6 @@ export default function AdminPage() {
       return () => clearTimeout(t);
     }
   }, [success]);
-
-  const handleSwitchAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSwitching(true);
-    setSwitchError(null);
-    try {
-      const res = await fetch("/api/auth/switch-admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: switchEmail, password: switchPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Errore durante il login admin.");
-      }
-      setCurrentOperator(data.operator);
-      setIsAdmin(true);
-      setSwitchEmail("");
-      setSwitchPassword("");
-    } catch (err) {
-      setSwitchError(err instanceof Error ? err.message : "Errore sconosciuto.");
-    } finally {
-      setSwitching(false);
-    }
-  };
 
   const handleExitAdmin = async () => {
     try {
@@ -227,6 +199,27 @@ export default function AdminPage() {
     }
   };
 
+  const handlePermanentDelete = async (id: string) => {
+    setConfirmPermanentDelete(id);
+  };
+
+  const confirmPermanentDeleteAction = async () => {
+    if (!confirmPermanentDelete) return;
+    try {
+      const res = await fetch(`/api/operatori/${confirmPermanentDelete}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permanente: true }),
+      });
+      if (!res.ok) throw new Error("Errore durante l'eliminazione.");
+      setSuccess("Operatore eliminato definitivamente.");
+      setConfirmPermanentDelete(null);
+      fetchOperators();
+    } catch {
+      setError("Impossibile eliminare l'operatore.");
+    }
+  };
+
   const formatDate = (d: string | null) => {
     if (!d) return "Mai";
     return new Date(d).toLocaleString("it-IT", {
@@ -270,61 +263,26 @@ export default function AdminPage() {
     );
   }
 
-  // Not admin → show switch modal
+  // Not admin → show access denied
   if (!isAdmin) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 shadow-sm text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
             <LockClosedIcon className="h-6 w-6 text-amber-600" />
           </div>
-          <h2 className="text-center text-lg font-semibold text-slate-900">Area riservata agli amministratori</h2>
-          <p className="mt-2 text-center text-sm text-slate-500">
-            La gestione operatori è accessibile solo con le credenziali di amministratore.
-            Inserisci la password admin per accedere.
+          <h2 className="text-lg font-semibold text-slate-900">Area riservata agli amministratori</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            La gestione operatori è accessibile solo con un account amministratore.
+            Effettua il login con le credenziali admin per accedere a questa pagina.
           </p>
-
-          {switchError && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              <AlertCircleIcon className="h-4 w-4 shrink-0" />
-              {switchError}
-            </div>
-          )}
-
-          <form onSubmit={handleSwitchAdmin} className="mt-6 space-y-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Email Admin</label>
-              <input
-                type="email"
-                required
-                value={switchEmail}
-                onChange={(e) => setSwitchEmail(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="email@admin.it"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Password Admin</label>
-              <input
-                type="password"
-                required
-                value={switchPassword}
-                onChange={(e) => setSwitchPassword(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="Password admin"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={switching}
-              className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50"
-            >
-              {switching ? <LoaderIcon className="h-4 w-4 animate-spin" /> : <LockClosedIcon className="h-4 w-4" />}
-              Accedi come Admin
-            </button>
-          </form>
-
-          <p className="mt-4 text-center text-xs text-slate-400">
+          <a
+            href="/login?redirect=/admin"
+            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 transition"
+          >
+            Vai al Login
+          </a>
+          <p className="mt-4 text-xs text-slate-400">
             Sei loggato come <strong>{currentOperator.nome}</strong> ({currentOperator.email})
           </p>
         </div>
@@ -348,6 +306,13 @@ export default function AdminPage() {
             <span className="text-xs text-slate-400">
               Sessione admin: <strong>{currentOperator.nome}</strong>
             </span>
+            <Link
+              href="/admin/dashboard"
+              className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+            >
+              <BarChartIcon className="h-4 w-4" />
+              Dashboard
+            </Link>
             <button
               onClick={handleExitAdmin}
               className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
@@ -529,6 +494,15 @@ export default function AdminPage() {
                             >
                               <TrashIcon className="h-4 w-4" />
                             </button>
+                            {isActive && (
+                              <button
+                                onClick={() => handlePermanentDelete(op.id)}
+                                className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-700 transition"
+                                title="Elimina definitivamente"
+                              >
+                                <TrashIcon className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -560,6 +534,35 @@ export default function AdminPage() {
                   className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition"
                 >
                   Disattiva
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Permanent Delete Confirmation Modal */}
+        {confirmPermanentDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+                <TrashIcon className="h-6 w-6 text-red-600" />
+              </div>
+              <h3 className="text-center text-lg font-semibold text-slate-900">Elimina definitivamente?</h3>
+              <p className="mt-2 text-center text-sm text-slate-600">
+                Questa azione è <strong>irreversibile</strong>. L'operatore verrà eliminato permanentemente dal sistema e non potrà più essere recuperato.
+              </p>
+              <div className="mt-5 flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setConfirmPermanentDelete(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={confirmPermanentDeleteAction}
+                  className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 transition"
+                >
+                  Elimina Definitivamente
                 </button>
               </div>
             </div>

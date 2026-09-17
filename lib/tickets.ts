@@ -19,7 +19,8 @@ export const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 const ROW_FIELDS = `
   id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
   descrizione_dettagliata, priorita, stato, note, operatore,
-  data_creazione, data_aggiornamento, data_chiusura
+  data_creazione, data_aggiornamento, data_chiusura,
+  data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti
 `;
 
 function now(): string {
@@ -237,6 +238,10 @@ export async function updateTicket(id: string, patch: TicketUpdate): Promise<Tic
     fields.push("operatore = @operatore");
     params.operatore = next.operatore;
   }
+  if (next.cliente !== undefined) {
+    fields.push("cliente = @cliente");
+    params.cliente = next.cliente;
+  }
   if (next.contatto !== undefined) {
     fields.push("contatto = @contatto");
     params.contatto = next.contatto;
@@ -249,19 +254,59 @@ export async function updateTicket(id: string, patch: TicketUpdate): Promise<Tic
     fields.push("email = @email");
     params.email = next.email;
   }
+  if (next.tempo_effettivo_minuti !== undefined) {
+    fields.push("tempo_effettivo_minuti = @tempo_effettivo_minuti");
+    params.tempo_effettivo_minuti = next.tempo_effettivo_minuti !== null ? String(next.tempo_effettivo_minuti) : null;
+  }
 
   const finalStato = next.stato ?? existing.stato;
+
+  // Time tracking: set data_inizio_lavoro when transitioning to IN_CORSO
+  if (finalStato === "IN_CORSO" && existing.stato !== "IN_CORSO") {
+    fields.push("data_inizio_lavoro = COALESCE(data_inizio_lavoro, @data_inizio_lavoro)");
+    params.data_inizio_lavoro = ts;
+  }
+
+  // Time tracking: calculate tempo_stimato_minuti when closing
   if (finalStato === "CHIUSO" || finalStato === "RISOLTO") {
     fields.push("data_chiusura = COALESCE(data_chiusura, @data_chiusura)");
     params.data_chiusura = ts;
+
+    // Auto-calculate estimated time if not already set
+    if (existing.tempo_stimato_minuti === null && existing.data_inizio_lavoro) {
+      const startTime = parseItalianDate(existing.data_inizio_lavoro);
+      const endTime = parseItalianDate(ts);
+      if (startTime && endTime) {
+        const diffMs = endTime - startTime;
+        const diffMinuti = Math.max(1, Math.round(diffMs / 60000));
+        fields.push("tempo_stimato_minuti = @tempo_stimato_minuti");
+        params.tempo_stimato_minuti = String(diffMinuti);
+      }
+    }
   } else if (existing.stato === "CHIUSO" || existing.stato === "RISOLTO") {
     fields.push("data_chiusura = NULL");
+    // Clear time tracking fields when reopening
+    fields.push("tempo_stimato_minuti = NULL");
+    fields.push("tempo_effettivo_minuti = NULL");
   }
 
   await db
     .prepare(`UPDATE tickets SET ${fields.join(", ")} WHERE id = @id`)
     .run(params);
   return getTicket(id);
+}
+
+function parseItalianDate(dateStr: string): number | null {
+  try {
+    // Format: "14/09/2026, 17:30"
+    const [datePart, timePart] = dateStr.split(", ");
+    if (!datePart || !timePart) return null;
+    const [day, month, year] = datePart.split("/").map(Number);
+    const [hour, minute] = timePart.split(":").map(Number);
+    return new Date(year, month - 1, day, hour, minute).getTime();
+  } catch {
+    return null;
+  }
 }
 
 export async function deleteTicket(id: string): Promise<boolean> {

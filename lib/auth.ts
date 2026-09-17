@@ -262,6 +262,10 @@ export async function activateOperator(id: string): Promise<void> {
   await db.prepare(`UPDATE operatori SET attivo = 1 WHERE id = @id`).run({ id });
 }
 
+export async function deleteOperator(id: string): Promise<void> {
+  await db.prepare(`DELETE FROM operatori WHERE id = @id`).run({ id });
+}
+
 export { verifyJWT };
 
 export type { Operator, SessionPayload };
