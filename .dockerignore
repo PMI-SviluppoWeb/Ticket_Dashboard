@@ -1,0 +1,13 @@
+node_modules
+.next
+.env
+.env.local
+.env*.local
+data/
+uploads/
+screen/
+docs/
+dev.log
+.git
+.gitignore
+README.md
