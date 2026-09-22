@@ -7,12 +7,14 @@
     "build": "next build",
     "start": "next start -p 3001 -H 0.0.0.0",
     "lint": "next lint",
-    "worker": "npx tsx scripts/start-worker.ts"
+    "worker": "npx tsx scripts/start-worker.ts",
+    "sync-clienti": "npx tsx scripts/sync-clienti.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
     "dotenv": "^16.4.7",
     "imapflow": "^1.0.170",
+    "mssql": "^12.7.2",
     "next": "^14.2.5",
     "nodemailer": "^10.0.10",
     "postal-mime": "^2.7.5",
