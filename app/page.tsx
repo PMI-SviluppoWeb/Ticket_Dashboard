@@ -269,7 +269,7 @@ export default function Dashboard() {
         </div>
 
         {/* Ticket Chiusi - Caricamento indipendente */}
-        <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+        {/* <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
             <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700">
@@ -320,7 +320,7 @@ export default function Dashboard() {
               </p>
             )}
           </div>
-        </div>
+        </div> */}
       </main>
     </div>
   );

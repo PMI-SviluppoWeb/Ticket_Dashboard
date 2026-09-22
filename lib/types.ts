@@ -239,6 +239,36 @@ export interface ClienteInput {
   note?: string | null;
 }
 
+export interface EmailInbox {
+  id: string;
+  message_id: string;
+  from_email: string;
+  from_nome: string | null;
+  subject: string;
+  body_preview: string | null;
+  body_html: string | null;
+  ticket_id: string | null;
+  stato: "processata" | "errore" | "ignorata";
+  data_creazione: string;
+}
+
+export type EmailIntent =
+  | "technical_issue"
+  | "billing_issue"
+  | "account_access"
+  | "feature_request"
+  | "complaint"
+  | "question"
+  | "other";
+
+export interface EmailClassification {
+  intent: EmailIntent;
+  priorita: Priorita;
+  sommario: string;
+  modulo_suggerito: string;
+  requiresHumanReview: boolean;
+}
+
 export type EmailTipo = "nuovo_ticket" | "assegnazione" | "nuova_nota" | "chiusura" | "manuale";
 
 export interface EmailLog {

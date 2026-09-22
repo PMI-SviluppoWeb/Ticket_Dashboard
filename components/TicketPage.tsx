@@ -24,16 +24,36 @@ import {
 } from "@/components/icons";
 
 const STATI_MAP: Record<StatoTicket, string> = {
-  NUOVO: "New",
-  IN_CORSO: "In Progress",
-  RISOLTO: "Resolved",
-  CHIUSO: "Closed",
+  NUOVO: "Nuovo",
+  IN_CORSO: "In Lavorazione",
+  RISOLTO: "Risolto",
+  CHIUSO: "Chiuso",
+};
+
+const STATI_COLORS: Record<StatoTicket, string> = {
+  NUOVO: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  IN_CORSO: "bg-blue-50 text-blue-700 border border-blue-200",
+  RISOLTO: "bg-violet-50 text-violet-700 border border-violet-200",
+  CHIUSO: "bg-slate-100 text-slate-600 border border-slate-200",
+};
+
+const STATI_DOT: Record<StatoTicket, string> = {
+  NUOVO: "bg-emerald-500",
+  IN_CORSO: "bg-blue-500",
+  RISOLTO: "bg-violet-500",
+  CHIUSO: "bg-slate-400",
 };
 
 const PRIORITA_MAP: Record<Priorita, string> = {
-  BASSA: "Low",
-  MEDIA: "Medium",
-  ALTA: "High",
+  BASSA: "Bassa",
+  MEDIA: "Media",
+  ALTA: "Alta",
+};
+
+const PRIORITA_COLORS: Record<Priorita, string> = {
+  BASSA: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  MEDIA: "bg-amber-50 text-amber-700 border border-amber-200",
+  ALTA: "bg-red-50 text-red-700 border border-red-200",
 };
 
 const STATUS_OPTIONS: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
@@ -50,6 +70,15 @@ interface TicketPageProps {
   id: string;
   onBack: () => void;
   onDeleted: () => void;
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
@@ -80,14 +109,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
-  // Email state
   const [emailLog, setEmailLog] = useState<EmailLog[]>([]);
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [emailOggetto, setEmailOggetto] = useState("");
   const [emailMessaggio, setEmailMessaggio] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
 
-  // Time tracking state
   const [tempoEffettivo, setTempoEffettivo] = useState("");
   const [savingTempo, setSavingTempo] = useState(false);
 
@@ -98,7 +125,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       const data = (await res.json()) as Ticket;
       setTicket(data);
       setError("");
-      // Initialize actual time from ticket data
       if (data.tempo_effettivo_minuti !== null && data.tempo_effettivo_minuti !== undefined) {
         const ore = Math.floor(data.tempo_effettivo_minuti / 60);
         const minuti = data.tempo_effettivo_minuti % 60;
@@ -124,9 +150,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         const data = await res.json();
         setOperatori(data.operatori ?? []);
       }
-    } catch {
-      // Ignore
-    }
+    } catch { /* */ }
   }, []);
 
   const loadCurrentUser = useCallback(async () => {
@@ -138,9 +162,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
           setCurrentUser({ nome: data.operator.nome, ruolo: data.operator.ruolo });
         }
       }
-    } catch {
-      // Ignore
-    }
+    } catch { /* */ }
   }, []);
 
   useEffect(() => {
@@ -156,9 +178,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         const data = await res.json();
         setEmailLog(data.log ?? []);
       }
-    } catch {
-      // Ignore
-    }
+    } catch { /* */ }
   }, [id]);
 
   useEffect(() => {
@@ -275,7 +295,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     setSelectedPriorita(ticket.priorita);
     setError("");
     setPendingFiles([]);
-    // Reset actual time
     if (ticket.tempo_effettivo_minuti !== null && ticket.tempo_effettivo_minuti !== undefined) {
       const ore = Math.floor(ticket.tempo_effettivo_minuti / 60);
       const minuti = ticket.tempo_effettivo_minuti % 60;
@@ -292,7 +311,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const saveTempoEffettivo = useCallback(() => {
     if (!tempoEffettivo.trim()) return;
     void run(async () => {
-      // Parse "HH:MM" format
       const parts = tempoEffettivo.split(":");
       let minutiTotali: number;
       if (parts.length === 2) {
@@ -300,7 +318,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         const minuti = parseInt(parts[1], 10) || 0;
         minutiTotali = ore * 60 + minuti;
       } else {
-        // Assume decimal hours like "1.5"
         const ore = parseFloat(tempoEffettivo) || 0;
         minutiTotali = Math.round(ore * 60);
       }
@@ -330,7 +347,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     });
   }, [run, id, onDeleted]);
 
-  // Technical Notes functions
   const saveNoteTecnica = useCallback(() => {
     const titolo = noteForm.titolo.trim();
     const soluzione = noteForm.soluzione.trim();
@@ -342,7 +358,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         soluzione,
         operatore: selectedOperatore || null,
       };
-      
       let noteId = editingNote?.id;
       if (editingNote) {
         await mutate(`/api/tickets/${id}/notes/${editingNote.id}`, "PATCH", payload);
@@ -350,8 +365,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         const newNote = await mutate(`/api/tickets/${id}/notes`, "POST", payload);
         noteId = (newNote as unknown as { note_tecniche?: { id: string }[] })?.note_tecniche?.slice(-1)?.[0]?.id;
       }
-      
-      // Upload pending files if any
       let filesUploaded = 0;
       if (pendingFiles.length > 0 && noteId) {
         for (const file of pendingFiles) {
@@ -359,26 +372,16 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
           formData.append("file", file);
           formData.append("noteId", noteId);
           formData.append("ticketId", id);
-          
-          const res = await fetch("/api/uploads", {
-            method: "POST",
-            body: formData,
-          });
+          const res = await fetch("/api/uploads", { method: "POST", body: formData });
           if (res.ok) filesUploaded++;
         }
         setPendingFiles([]);
       }
-
-      // Send email notification after files are uploaded (only for new notes)
       if (noteId && !editingNote) {
-        await fetch(`/api/tickets/${id}/notes/${noteId}/send-email`, {
-          method: "POST",
-        });
+        await fetch(`/api/tickets/${id}/notes/${noteId}/send-email`, { method: "POST" });
       }
-      
       setEditingNote(null);
       setNoteForm({ titolo: "", problema: "", soluzione: "" });
-      // Reload ticket to get updated notes
       await load();
     });
   }, [run, mutate, id, noteForm, editingNote, selectedOperatore, pendingFiles, load]);
@@ -398,7 +401,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     [run, mutate, id, load]
   );
 
-  // File upload handlers
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>, noteId: string) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -410,31 +412,21 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
   const uploadFile = useCallback(async () => {
     if (!uploadingFile || !uploadingNoteId || !ticket) return;
-
     const formData = new FormData();
     formData.append("file", uploadingFile);
     formData.append("noteId", uploadingNoteId);
     formData.append("ticketId", ticket.id);
-
     setUploadProgress(10);
-
     try {
-      const res = await fetch("/api/uploads", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/uploads", { method: "POST", body: formData });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error((data as { error?: string }).error ?? "Errore di caricamento.");
       }
-
       setUploadProgress(100);
       setUploadingFile(null);
       setUploadingNoteId(null);
       setUploadProgress(0);
-
-      // Reload ticket to get updated attachments
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di caricamento file.");
@@ -474,20 +466,23 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
   if (loading && !ticket) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-slate-400">Caricamento ticket…</p>
+      <div className="flex h-full items-center justify-center bg-slate-50">
+        <div className="flex items-center gap-3 text-slate-400">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+          <span className="text-sm font-medium">Caricamento ticket...</span>
+        </div>
       </div>
     );
   }
 
   if (!ticket) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-slate-50 p-8">
         <p className="text-sm text-slate-500">Ticket non trovato.</p>
         <button
           type="button"
           onClick={onBack}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+          className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition shadow-sm"
         >
           Torna alla dashboard
         </button>
@@ -495,506 +490,401 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     );
   }
 
+  const isClosed = ticket.stato === "CHIUSO";
+
   return (
-    <div className="flex h-full flex-col bg-slate-50">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
-          >
-            ‹ Indietro
-          </button>
-          <div>
-            <h1 className="flex items-center gap-2 text-xl font-bold text-slate-900">
-              Modifica Ticket
-              <span className="inline-block rounded-md bg-slate-100 px-2.5 py-0.5 text-sm font-semibold text-slate-600">
-                {ticket.numero}
-              </span>
-            </h1>
-            <p className="mt-0.5 text-sm text-slate-500">
-              Aggiorna i dettagli per {ticket.cliente}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Close Ticket Button */}
-          {!confirmClose ? (
-            <button
-              type="button"
-              onClick={() => setConfirmClose(true)}
-              disabled={ticket.stato === "CHIUSO"}
-              className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {ticket.stato === "CHIUSO" ? "Già Chiuso" : "Chiudi Ticket"}
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5">
-              <span className="text-sm font-medium text-amber-700">Confermi chiusura?</span>
-              <button
-                type="button"
-                onClick={() => setConfirmClose(false)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={handleCloseTicket}
-                disabled={saving}
-                className="rounded-lg bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-              >
-                {saving ? "Chiusura..." : "Chiudi"}
-              </button>
-            </div>
-          )}
-
-          {/* Delete Button */}
-          {!confirmDelete ? (
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(true)}
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition"
-            >
-              Elimina
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5">
-              <span className="text-sm font-medium text-red-700">Confermi?</span>
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(false)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={elimina}
-                disabled={saving}
-                className="rounded-lg bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                Elimina
-              </button>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleCancel}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
-          >
-            {ticket.stato === "CHIUSO" ? "Chiudi" : "Annulla"}
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveAll}
-            disabled={saving || ticket.stato === "CHIUSO"}
-            className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:opacity-50 transition flex items-center gap-2"
-          >
-            {saving ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Salvataggio...
-              </>
-            ) : saved ? (
-              <>
-                <CheckCircleIcon className="h-4 w-4" />
-                Salvato!
-              </>
-            ) : (
-              "Salva Modifiche"
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex h-full flex-col bg-slate-50/70">
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-6">
+        {/* Error banner */}
         {error && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm font-medium text-red-700">
-            <AlertCircleIcon className="h-5 w-5" />
+          <div className="flex items-center gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm font-medium text-red-700">
+            <AlertCircleIcon className="h-4 w-4 shrink-0" />
             {error}
           </div>
         )}
 
-        {/* Warning: Ticket is closed */}
-        {ticket.stato === "CHIUSO" && (
-          <div className="mb-4 rounded-lg border border-slate-300 bg-slate-100 p-4">
-            <div className="flex items-start gap-3">
-              <CheckCircleIcon className="h-5 w-5 shrink-0 text-slate-600 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-slate-800">
-                  Ticket Chiuso
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Questo ticket è stato chiuso il {ticket.data_chiusura}. 
-                  Non è più possibile assegnarlo o modificare i suoi dati.
-                </p>
-              </div>
-            </div>
+        {/* Closed ticket banner */}
+        {isClosed && (
+          <div className="flex items-center gap-2.5 rounded-xl bg-slate-100 border border-slate-200 px-4 py-3 text-sm text-slate-600">
+            <CheckCircleIcon className="h-4 w-4 shrink-0 text-slate-500" />
+            Ticket chiuso il {ticket.data_chiusura}. Modifiche non consentite.
           </div>
         )}
 
-        {/* Warning: Not assigned to you */}
-        {ticket.stato !== "CHIUSO" &&
-         currentUser?.ruolo !== "admin" && 
-         ticket.operatore && 
-         ticket.operatore !== currentUser?.nome && (
-          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircleIcon className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-amber-800">
-                  Questo ticket non è assegnato a te
-                </h3>
-                <p className="mt-1 text-sm text-amber-700">
-                  Assegnato a: <strong>{ticket.operatore}</strong>. 
-                  Puoi visualizzare i dettagli ma le modifiche saranno limitate.
-                </p>
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void run(async () => {
-                        await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
-                        setSelectedOperatore(currentUser?.nome ?? "");
-                      });
-                    }}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition"
-                  >
-                    {saving ? (
-                      <>
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        Collaborando...
-                      </>
-                    ) : (
-                      <>
-                        <UserIcon className="h-4 w-4" />
-                        Collabora
-                      </>
-                    )}
-                  </button>
-                  <span className="text-xs text-amber-600">
-                    Unendoti al ticket potrai modificare e aggiungere note
-                  </span>
-                </div>
-              </div>
+        {/* ========== TICKET HEADER ========== */}
+        <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm">
+          {/* Row 1: Breadcrumb & sync status */}
+          <div className="flex items-center justify-between gap-4 pb-4 border-b border-slate-100 text-xs">
+            <nav className="flex items-center gap-2 text-slate-500 font-medium">
+              <button type="button" onClick={onBack} className="hover:text-blue-600 transition-colors">
+                Dashboard
+              </button>
+              <span className="text-slate-300">&rsaquo;</span>
+              <span className="text-slate-800 font-semibold">{ticket.numero}</span>
+            </nav>
+            <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
+              <span className={`inline-block w-2 h-2 rounded-full ${STATI_DOT[ticket.stato]}`} />
+              {STATI_MAP[ticket.stato]}
             </div>
           </div>
-        )}
 
-        {/* Info: Unassigned ticket */}
-        {ticket.stato !== "CHIUSO" &&
-         currentUser?.ruolo !== "admin" && !ticket.operatore && (
-          <div className="mb-4 rounded-lg border border-blue-300 bg-blue-50 p-4">
-            <div className="flex items-start gap-3">
-              <InfoIcon className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-blue-800">
-                  Questo ticket è disponibile
-                </h3>
-                <p className="mt-1 text-sm text-blue-700">
-                  Nessun operatore assegnato. Puoi prendere in carico questo ticket.
-                </p>
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void run(async () => {
-                        await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
-                        setSelectedOperatore(currentUser?.nome ?? "");
-                      });
-                    }}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition"
-                  >
-                    {saving ? (
-                      <>
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        Assegnamento...
-                      </>
-                    ) : (
-                      <>
-                        <UserIcon className="h-4 w-4" />
-                        Prendi in carico
-                      </>
-                    )}
-                  </button>
-                </div>
+          {/* Row 2: Title, badges, actions */}
+          <div className="py-5 flex items-start justify-between gap-6">
+            <div className="space-y-3 min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="font-mono font-bold text-xs bg-slate-900 text-white px-2.5 py-1 rounded-md tracking-wider">
+                  #{ticket.numero}
+                </span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATI_COLORS[ticket.stato]}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${STATI_DOT[ticket.stato]}`} />
+                  {STATI_MAP[ticket.stato]}
+                </span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${PRIORITA_COLORS[ticket.priorita]}`}>
+                  Priorita: {PRIORITA_MAP[ticket.priorita]}
+                </span>
               </div>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          {/* Left column - Form */}
-          <div className="space-y-5 xl:col-span-2">
-            {/* Ticket Classification */}
-            <div className={`rounded-xl bg-white p-5 shadow-sm border border-slate-200 ${ticket.stato === "CHIUSO" ? "opacity-60" : ""}`}>
-              <h2 className="mb-4 text-sm font-bold text-slate-800">Classificazione Ticket</h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Stato del Ticket
-                  </label>
-                  <div className="relative rounded-lg bg-slate-100 p-0.5">
-                    <select
-                      value={selectedStato}
-                      onChange={(e) => setSelectedStato(e.target.value as StatoTicket)}
-                      disabled={ticket.stato === "CHIUSO"}
-                      className="w-full appearance-none rounded-lg border-0 bg-white px-3 py-2.5 pr-8 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
-                    >
-                      {STATUS_OPTIONS.map((s) => (
-                        <option key={s} value={s}>
-                          {STATI_MAP[s]}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Priorità
-                  </label>
-                  <div className="relative rounded-lg bg-slate-100 p-0.5">
-                    <select
-                      value={selectedPriorita}
-                      onChange={(e) => setSelectedPriorita(e.target.value as Priorita)}
-                      disabled={ticket.stato === "CHIUSO"}
-                      className="w-full appearance-none rounded-lg border-0 bg-white px-3 py-2.5 pr-8 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
-                    >
-                      {PRIORITY_OPTIONS.map((p) => (
-                        <option key={p} value={p}>
-                          {PRIORITA_MAP[p]}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  </div>
-                </div>
-              </div>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight leading-snug break-words">
+                {ticket.sommario_problema}
+              </h1>
             </div>
 
-            {/* Operator Selection */}
-            <div className={`rounded-xl bg-white p-5 shadow-sm border border-slate-200 ${ticket.stato === "CHIUSO" ? "opacity-60" : ""}`}>
-              <h2 className="mb-4 text-sm font-bold text-slate-800">Assegnazione Operatore</h2>
-              
-              {ticket.stato === "CHIUSO" ? (
-                <p className="text-sm text-slate-500">
-                  Ticket chiuso - non è possibile modificare l&apos;assegnazione.
-                </p>
-              ) : currentUser?.ruolo === "admin" ? (
-                // Admin: dropdown completo
-                <div className="relative rounded-lg bg-slate-100 p-0.5">
-                  <select
-                    value={selectedOperatore}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedOperatore(val);
-                      // Auto-change status when assigning/releasing
-                      if (val) {
-                        setSelectedStato("IN_CORSO");
-                      }
-                    }}
-                    className="w-full appearance-none rounded-lg border-0 bg-white px-3 py-2.5 pr-8 text-sm font-medium text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">-- Non assegnato --</option>
-                    {operatori.map((op) => (
-                      <option key={op.id} value={op.nome}>
-                        {op.nome} ({op.ruolo})
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                </div>
-              ) : (
-                // Operatore: solo pulsante "Prendi in carico" o stato assegnazione
-                <div>
-                  {ticket.operatore === currentUser?.nome ? (
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex items-center gap-2 rounded-lg bg-green-50 px-4 py-2.5 text-sm font-medium text-green-700">
-                        <span className="h-2 w-2 rounded-full bg-green-500" />
-                        Assegnato a te
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void run(async () => {
-                            await updateTicket({ operatore: null, stato: "NUOVO" });
-                            setSelectedOperatore("");
-                          });
-                        }}
-                        disabled={saving}
-                        className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 transition disabled:opacity-50"
-                      >
-                        {saving ? "Rilascio..." : "Rilascia"}
-                      </button>
-                    </div>
-                  ) : ticket.operatore ? (
-                    <span className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2.5 text-sm text-slate-600">
-                      <span className="h-2 w-2 rounded-full bg-slate-400" />
-                      Assegnato a: <strong>{ticket.operatore}</strong>
-                    </span>
+            {/* Action buttons stack */}
+            <div className="flex flex-col gap-2 flex-shrink-0 w-64">
+              {!isClosed && ticket.stato !== "IN_CORSO" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void run(async () => {
+                      const op = currentUser?.nome ?? null;
+                      await updateTicket({ operatore: op, stato: "IN_CORSO" });
+                      setSelectedOperatore(op ?? "");
+                      setSelectedStato("IN_CORSO");
+                    });
+                  }}
+                  disabled={saving}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/25 transition-all disabled:opacity-50"
+                >
+                  {saving ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void run(async () => {
-                          await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
-                          setSelectedOperatore(currentUser?.nome ?? "");
-                        });
-                      }}
-                      disabled={saving}
-                      className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 transition disabled:opacity-50"
-                    >
-                      {saving ? (
-                        <>
-                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          Assegnamento...
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-lg">+</span>
-                          Prendi in carico
-                        </>
-                      )}
-                    </button>
+                    <span className="text-base">+</span>
                   )}
+                  Prendi in carico
+                </button>
+              )}
+
+              {ticket.email && (
+                <button
+                  type="button"
+                  onClick={() => setShowEmailForm(!showEmailForm)}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors shadow-sm"
+                >
+                  <span className="text-blue-600">&#9993;</span>
+                  {showEmailForm ? "Chiudi Email" : "Invia Email / Rispondi"}
+                </button>
+              )}
+
+              {!confirmClose ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClose(true)}
+                  disabled={isClosed}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isClosed ? "Gi Chiuso" : "Chiudi Ticket"}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 w-full">
+                  <button
+                    type="button"
+                    onClick={handleCloseTicket}
+                    disabled={saving}
+                    className="flex-1 rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {saving ? "Chiusura..." : "Conferma"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClose(false)}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              )}
+
+              {/* Delete button */}
+              {!confirmDelete ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors"
+                >
+                  Elimina Ticket
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 w-full">
+                  <button
+                    type="button"
+                    onClick={elimina}
+                    disabled={saving}
+                    className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {saving ? "Eliminazione..." : "Conferma Elimina"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Annulla
+                  </button>
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Action Taken / Internal Notes */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <h2 className="mb-4 text-sm font-bold text-slate-800">
-                Azioni Intraprese / Note Interne
-              </h2>
-              <div className="rounded-lg bg-slate-100 p-0.5">
+          {/* Row 3: Metadata bar */}
+          <div className="flex flex-wrap items-center gap-y-2 gap-x-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
+            <div className="flex items-center gap-1.5 font-medium text-slate-700">
+              <span className="text-slate-400">&#128196;</span>
+              <span>Modulo:</span>
+              <span className="font-mono font-semibold bg-slate-100 px-2 py-0.5 rounded text-slate-800 border border-slate-200">{ticket.modulo_software}</span>
+            </div>
+            <span className="text-slate-300">&bull;</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">&#128197;</span>
+              <span>Ricevuto: <strong className="text-slate-700 font-semibold">{ticket.data_creazione}</strong></span>
+            </div>
+            {ticket.operatore && (
+              <>
+                <span className="text-slate-300">&bull;</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">&#128100;</span>
+                  <span>Operatore: <strong className="text-slate-700 font-semibold">{ticket.operatore}</strong></span>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        {/* Unassigned ticket CTA */}
+        {!isClosed && currentUser?.ruolo !== "admin" && !ticket.operatore && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <InfoIcon className="h-5 w-5 shrink-0 text-blue-500" />
+              <div>
+                <p className="text-sm font-semibold text-blue-800">Questo ticket e disponibile</p>
+                <p className="text-xs text-blue-600">Nessun operatore assegnato. Puoi prendere in carico.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void run(async () => {
+                  await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
+                  setSelectedOperatore(currentUser?.nome ?? "");
+                  setSelectedStato("IN_CORSO");
+                });
+              }}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition"
+            >
+              {saving ? "Assegnamento..." : "Prendi in carico"}
+            </button>
+          </div>
+        )}
+
+        {/* Assigned to another operator */}
+        {!isClosed && currentUser?.ruolo !== "admin" && ticket.operatore && ticket.operatore !== currentUser?.nome && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircleIcon className="h-5 w-5 shrink-0 text-amber-500" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Assegnato a <strong>{ticket.operatore}</strong></p>
+                <p className="text-xs text-amber-600">Puoi visualizzare ma le modifiche sono limitate.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void run(async () => {
+                  await updateTicket({ operatore: currentUser?.nome ?? null, stato: "IN_CORSO" });
+                  setSelectedOperatore(currentUser?.nome ?? "");
+                });
+              }}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition"
+            >
+              Collabora
+            </button>
+          </div>
+        )}
+
+        {/* ========== 2-COLUMN GRID ========== */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 w-full items-start">
+          {/* ===== LEFT COLUMN (8 cols) ===== */}
+          <div className="xl:col-span-8 space-y-6">
+
+            {/* 1. Customer Message Card */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <div className="border-b border-slate-100 bg-slate-50/80 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                    <span className="text-base">&#9993;</span>
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900">Richiesta Originale</h2>
+                    <p className="text-xs text-slate-500">Descrizione del problema</p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 font-medium bg-white px-2.5 py-1 rounded-md border border-slate-200/80 shadow-sm">
+                  {ticket.data_creazione}
+                </span>
+              </div>
+              <div className="p-6 space-y-5">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center text-sm shadow-sm ring-4 ring-slate-100">
+                      {getInitials(ticket.contatto || ticket.cliente)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-slate-900">{ticket.contatto || "Non specificato"}</h3>
+                        <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{ticket.cliente}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-mono mt-0.5">{ticket.email || "Nessuna email"}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-slate-50/90 border border-slate-200/90 rounded-xl p-5 text-sm text-slate-700 leading-relaxed space-y-3">
+                  <div className="flex items-center gap-2 pb-2.5 border-b border-slate-200/70 text-xs text-slate-600 font-semibold">
+                    <span>Oggetto:</span>
+                    <span className="text-slate-900 font-bold">{ticket.sommario_problema}</span>
+                  </div>
+                  <p className="whitespace-pre-wrap">{ticket.descrizione_dettagliata}</p>
+                  {ticket.note && (
+                    <div className="pt-3 border-t border-slate-200/70">
+                      <p className="text-xs font-semibold text-slate-500 mb-1">Note interne:</p>
+                      <p className="text-xs text-slate-600 whitespace-pre-wrap">{ticket.note}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* 2. Quick Reply / Composer */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                    <span className="text-base">&#9998;</span>
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900">Risposta Rapida</h2>
+                    <p className="text-xs text-slate-500">Aggiungi una nota interna</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all bg-white overflow-hidden">
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  rows={4}
-                  placeholder="Descrivi le azioni intraprese per risolvere il problema..."
-                  className="w-full rounded-lg border-0 bg-white px-4 py-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  rows={3}
+                  placeholder="Scrivi una nota interna..."
+                  disabled={isClosed}
+                  className="w-full text-xs sm:text-sm p-4 border-0 focus:ring-0 text-slate-800 placeholder-slate-400 resize-y min-h-[80px] disabled:bg-slate-50 disabled:cursor-not-allowed"
                 />
+                <div className="bg-slate-50/90 px-4 py-2.5 border-t border-slate-100 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveAll}
+                    disabled={saving || isClosed}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-600/25 transition-colors disabled:opacity-50"
+                  >
+                    {saving ? "Salvataggio..." : saved ? "Salvato!" : "Salva Note"}
+                  </button>
+                </div>
               </div>
-            </div>
+            </section>
 
-            {/* Technical Notes Section */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
-                  <BookIcon className="h-4 w-4 text-violet-600" />
-                  Note Tecniche ({ticket.note_tecniche.length})
-                </h2>
+            {/* 3. Technical Notes */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
+                    <BookIcon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900">Note Tecniche</h2>
+                    <p className="text-xs text-slate-500">{ticket.note_tecniche.length} note archiviate</p>
+                  </div>
+                </div>
               </div>
 
               {/* Add/Edit Note Form */}
-              <div className="mb-4 rounded-lg bg-slate-50 p-4 border border-slate-200">
-                <h3 className="mb-3 text-xs font-semibold text-slate-600">
-                  {editingNote ? "Modifica Nota Tecnica" : "Nuova Nota Tecnica"}
-                </h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Titolo *</label>
+              {!isClosed && (
+                <div className="rounded-xl bg-slate-50 p-4 border border-slate-200 space-y-3">
+                  <h3 className="text-xs font-semibold text-slate-600">
+                    {editingNote ? "Modifica Nota" : "Nuova Nota Tecnica"}
+                  </h3>
+                  <input
+                    value={noteForm.titolo}
+                    onChange={(e) => setNoteForm((f) => ({ ...f, titolo: e.target.value }))}
+                    placeholder="Titolo nota *"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <textarea
+                    value={noteForm.problema}
+                    onChange={(e) => setNoteForm((f) => ({ ...f, problema: e.target.value }))}
+                    rows={2}
+                    placeholder="Problema riscontrato..."
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  />
+                  <textarea
+                    value={noteForm.soluzione}
+                    onChange={(e) => setNoteForm((f) => ({ ...f, soluzione: e.target.value }))}
+                    rows={3}
+                    placeholder="Soluzione applicata *"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  />
+
+                  {/* File Upload */}
+                  <div className="rounded-lg border-2 border-dashed border-violet-200 bg-white p-3 text-center hover:border-violet-400 transition">
                     <input
-                      value={noteForm.titolo}
-                      onChange={(e) => setNoteForm((f) => ({ ...f, titolo: e.target.value }))}
-                      placeholder="Es. Errore all'avvio: arresto improvviso"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      type="file"
+                      id="note-file-input-new"
+                      className="hidden"
+                      multiple
+                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z,.dwg,.dxf,.sql,.json,.xml,.csv"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        if (files.length > 0) setPendingFiles((prev) => [...prev, ...files]);
+                        e.target.value = "";
+                      }}
                     />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">
-                      Problema riscontrato
+                    <label htmlFor="note-file-input-new" className="cursor-pointer text-violet-600 hover:text-violet-700">
+                      <p className="text-xs font-medium text-slate-600">Allega file</p>
+                      <p className="text-[10px] text-slate-400">Immagini, PDF, documenti...</p>
                     </label>
-                    <textarea
-                      value={noteForm.problema}
-                      onChange={(e) => setNoteForm((f) => ({ ...f, problema: e.target.value }))}
-                      rows={2}
-                      placeholder="Descrizione del problema..."
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">
-                      Soluzione applicata *
-                    </label>
-                    <textarea
-                      value={noteForm.soluzione}
-                      onChange={(e) => setNoteForm((f) => ({ ...f, soluzione: e.target.value }))}
-                      rows={3}
-                      placeholder="Come è stato risolto il problema..."
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                    />
                   </div>
 
-                  {/* File Upload Section */}
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">
-                      Allegati (opzionale)
-                    </label>
-                    <div className="rounded-lg border-2 border-dashed border-violet-200 bg-white p-4 text-center hover:border-violet-400 transition">
-                      <input
-                        type="file"
-                        id="note-file-input"
-                        className="hidden"
-                        multiple
-                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z,.dwg,.dxf,.sql,.json,.xml,.csv"
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files || []);
-                          if (files.length > 0) {
-                            setPendingFiles((prev) => [...prev, ...files]);
-                          }
-                          e.target.value = "";
-                        }}
-                      />
-                      <label
-                        htmlFor="note-file-input"
-                        className="cursor-pointer text-violet-600 hover:text-violet-700"
-                      >
-                        <span className="text-2xl">📎</span>
-                        <p className="mt-1 text-xs font-medium text-slate-600">
-                          Clicca per aggiungere file
-                        </p>
-                        <p className="text-[10px] text-slate-400">
-                          Immagini, PDF, documenti, file CAD, SQL...
-                        </p>
-                      </label>
-                    </div>
-
-                    {/* Pending Files List */}
-                    {pendingFiles.length > 0 && (
-                      <div className="mt-2 space-y-2">
-                        {pendingFiles.map((file, idx) => (
-                          <div
-                            key={`${file.name}-${idx}`}
-                            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
-                          >
-                            <div className="h-8 w-8 shrink-0 rounded bg-violet-100 flex items-center justify-center text-[10px] font-bold text-violet-600">
-                              {file.name.split(".").pop()?.toUpperCase() || "?"}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-slate-700 truncate">{file.name}</p>
-                              <p className="text-[10px] text-slate-400">{formatFileSize(file.size)}</p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
-                              className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <TrashIcon className="h-3 w-3" />
-                            </button>
+                  {pendingFiles.length > 0 && (
+                    <div className="space-y-1.5">
+                      {pendingFiles.map((file, idx) => (
+                        <div key={`${file.name}-${idx}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+                          <div className="h-6 w-6 shrink-0 rounded bg-violet-100 flex items-center justify-center text-[9px] font-bold text-violet-600">
+                            {file.name.split(".").pop()?.toUpperCase() || "?"}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          <span className="text-xs text-slate-700 truncate flex-1">{file.name}</span>
+                          <button type="button" onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500 p-0.5">
+                            <TrashIcon className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <button
@@ -1003,16 +893,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       disabled={saving || !noteForm.titolo.trim() || !noteForm.soluzione.trim()}
                       className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
                     >
-                      {saving ? "Salvataggio..." : editingNote ? "Aggiorna Nota" : "Aggiungi Nota"}
+                      {saving ? "Salvataggio..." : editingNote ? "Aggiorna" : "Aggiungi Nota"}
                     </button>
                     {editingNote && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setEditingNote(null);
-                          setNoteForm({ titolo: "", problema: "", soluzione: "" });
-                          setPendingFiles([]);
-                        }}
+                        onClick={() => { setEditingNote(null); setNoteForm({ titolo: "", problema: "", soluzione: "" }); setPendingFiles([]); }}
                         className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                       >
                         Annulla
@@ -1020,121 +906,77 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                     )}
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Notes List */}
               {ticket.note_tecniche.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-400">
+                <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">
                   Nessuna nota tecnica presente.
                 </p>
               ) : (
                 <div className="space-y-3">
                   {ticket.note_tecniche.map((n) => (
-                    <div
-                      key={n.id}
-                      className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-                    >
+                    <div key={n.id} className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <h4 className="text-sm font-semibold text-slate-800">{n.titolo}</h4>
                           <p className="mt-0.5 text-[11px] text-slate-400">
-                            {n.data_creazione}
-                            {n.operatore ? ` · ${n.operatore}` : ""}
+                            {n.data_creazione}{n.operatore ? ` - ${n.operatore}` : ""}
                           </p>
-                          {/* Attachments count badge - always visible */}
                           {n.allegati && n.allegati.length > 0 && (
                             <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
-                              📎 {n.allegati.length} {n.allegati.length === 1 ? "allegato" : "allegati"}
+                              {n.allegati.length} {n.allegati.length === 1 ? "allegato" : "allegati"}
                             </span>
                           )}
                         </div>
-                        <div className="flex shrink-0 gap-1.5">
-                          <label className="cursor-pointer rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-100 transition flex items-center gap-1">
-                            📎 Allega
-                            <input
-                              type="file"
-                              className="hidden"
-                              id={`file-${n.id}`}
-                              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z,.dwg,.dxf,.sql,.json,.xml,.csv"
-                              onChange={(e) => handleFileSelect(e, n.id)}
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => setExpandedNote(expandedNote === n.id ? null : n.id)}
-                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
-                          >
-                            {expandedNote === n.id ? "▼" : "▶"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => startEditNote(n)}
-                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
-                          >
-                            <EditIcon className="h-3 w-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeNote(n.id)}
-                            className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                          >
-                            <TrashIcon className="h-3 w-3" />
-                          </button>
-                        </div>
+                        {!isClosed && (
+                          <div className="flex shrink-0 gap-1.5">
+                            <label className="cursor-pointer rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-100 transition">
+                              Allega
+                              <input type="file" className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z" onChange={(e) => handleFileSelect(e, n.id)} />
+                            </label>
+                            <button type="button" onClick={() => setExpandedNote(expandedNote === n.id ? null : n.id)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">
+                              {expandedNote === n.id ? "▼" : "▶"}
+                            </button>
+                            <button type="button" onClick={() => startEditNote(n)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">
+                              <EditIcon className="h-3 w-3" />
+                            </button>
+                            <button type="button" onClick={() => removeNote(n.id)} className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-500 hover:bg-red-50">
+                              <TrashIcon className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Upload Progress - always visible when uploading */}
+                      {/* Upload progress */}
                       {uploadingNoteId === n.id && uploadingFile && (
                         <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-medium text-violet-700 truncate max-w-[200px]">
-                              {uploadingFile.name}
-                            </span>
-                            <span className="text-[10px] text-violet-500">
-                              {formatFileSize(uploadingFile.size)}
-                            </span>
+                            <span className="text-xs font-medium text-violet-700 truncate max-w-[200px]">{uploadingFile.name}</span>
+                            <span className="text-[10px] text-violet-500">{formatFileSize(uploadingFile.size)}</span>
                           </div>
                           <div className="h-1.5 bg-violet-200 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-violet-600 transition-all duration-300"
-                              style={{ width: `${uploadProgress}%` }}
-                            />
+                            <div className="h-full bg-violet-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
                           </div>
                           <div className="flex items-center gap-2 mt-2">
-                            <button
-                              type="button"
-                              onClick={uploadFile}
-                              disabled={saving}
-                              className="rounded bg-violet-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                            >
+                            <button type="button" onClick={uploadFile} disabled={saving} className="rounded bg-violet-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50">
                               {saving ? "Caricamento..." : "Carica"}
                             </button>
-                            <button
-                              type="button"
-                              onClick={cancelUpload}
-                              className="rounded border border-slate-300 px-3 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
-                            >
+                            <button type="button" onClick={cancelUpload} className="rounded border border-slate-300 px-3 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100">
                               Annulla
                             </button>
                           </div>
                         </div>
                       )}
 
-                      {/* Attachments List - always visible when there are attachments */}
+                      {/* Attachments */}
                       {n.allegati && n.allegati.length > 0 && (
                         <div className="mt-3 space-y-2">
                           {n.allegati.map((allegato) => (
-                            <div
-                              key={allegato.id}
-                              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
-                            >
+                            <div key={allegato.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
                               {isImageFile(allegato.tipo_mime) ? (
                                 <div className="h-8 w-8 shrink-0 rounded bg-slate-100 flex items-center justify-center overflow-hidden">
-                                  <img
-                                    src={`/api/uploads/${allegato.id}`}
-                                    alt={allegato.nome_originale}
-                                    className="h-full w-full object-cover"
-                                  />
+                                  <img src={`/api/uploads/${allegato.id}`} alt={allegato.nome_originale} className="h-full w-full object-cover" />
                                 </div>
                               ) : (
                                 <div className="h-8 w-8 shrink-0 rounded bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-600">
@@ -1142,51 +984,33 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                                 </div>
                               )}
                               <div className="min-w-0 flex-1">
-                                <a
-                                  href={`/api/uploads/${allegato.id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-medium text-blue-600 hover:underline truncate block"
-                                >
+                                <a href={`/api/uploads/${allegato.id}`} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-600 hover:underline truncate block">
                                   {allegato.nome_originale}
                                 </a>
-                                <p className="text-[10px] text-slate-400">
-                                  {formatFileSize(allegato.dimensione)}
-                                </p>
+                                <p className="text-[10px] text-slate-400">{formatFileSize(allegato.dimensione)}</p>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => deleteAttachment(allegato.id)}
-                                className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                title="Elimina allegato"
-                              >
-                                <TrashIcon className="h-3 w-3" />
-                              </button>
+                              {!isClosed && (
+                                <button type="button" onClick={() => deleteAttachment(allegato.id)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Elimina">
+                                  <TrashIcon className="h-3 w-3" />
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
                       )}
 
-                      {/* Expanded Details */}
+                      {/* Expanded details */}
                       {expandedNote === n.id && (
                         <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
                           {n.problema && (
                             <div>
-                              <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                                Problema
-                              </h5>
-                              <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-600">
-                                {n.problema}
-                              </p>
+                              <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Problema</h5>
+                              <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-600">{n.problema}</p>
                             </div>
                           )}
                           <div>
-                            <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-emerald-600 uppercase">
-                              Soluzione
-                            </h5>
-                            <p className="rounded-lg bg-emerald-50 p-2.5 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">
-                              {n.soluzione}
-                            </p>
+                            <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-emerald-600 uppercase">Soluzione</h5>
+                            <p className="rounded-lg bg-emerald-50 p-2.5 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">{n.soluzione}</p>
                           </div>
                         </div>
                       )}
@@ -1194,345 +1018,258 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                   ))}
                 </div>
               )}
-            </div>
+            </section>
 
-            {/* Contact Details */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <h2 className="mb-4 text-sm font-bold text-slate-800">Dettagli Contatto</h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Cliente / Azienda
-                  </label>
-                  <div className="rounded-lg bg-slate-100 p-0.5">
-                    <input
-                      value={cliente}
-                      onChange={(e) => setCliente(e.target.value)}
-                      placeholder="Nome azienda"
-                      disabled={ticket.stato === "CHIUSO"}
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
-                    />
+            {/* 4. Dark Tech Workspace Banner */}
+            {/* <section className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 rounded-2xl text-white p-6 shadow-md relative overflow-hidden">
+              <div className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none">
+                <span className="text-9xl">&#128187;</span>
+              </div>
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-8 h-8 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center text-blue-300">
+                      <BookIcon className="h-4 w-4" />
+                    </span>
+                    <h3 className="text-base font-bold text-white tracking-tight">Documentazione Tecnica & Worklog</h3>
                   </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Nome Contatto
-                  </label>
-                  <div className="rounded-lg bg-slate-100 p-0.5">
-                    <input
-                      value={contatto}
-                      onChange={(e) => setContatto(e.target.value)}
-                      placeholder="Nome della persona"
-                      disabled={ticket.stato === "CHIUSO"}
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Recapito Telefonico
-                  </label>
-                  <div className="rounded-lg bg-slate-100 p-0.5">
-                    <input
-                      value={telefono}
-                      onChange={(e) => setTelefono(e.target.value)}
-                      placeholder="Es. 391 123 4567"
-                      disabled={ticket.stato === "CHIUSO"}
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    Email del Contatto
-                  </label>
-                  <div className="rounded-lg bg-slate-100 p-0.5">
-                    <input
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Es. nome@azienda.it"
-                      disabled={ticket.stato === "CHIUSO"}
-                      className="w-full rounded-lg border-0 bg-white px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
-                    />
+                  <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                    Diagnostica approfondita, sessioni di debugging e worklog certificati sono accessibili nella dashboard tecnica dedicata.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-slate-300">
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-emerald-400">&#10003;</span>
+                      Note tecniche: <strong className="text-white">{ticket.note_tecniche.length}</strong>
+                    </span>
+                    {ticket.data_inizio_lavoro && (
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-amber-300">&#9202;</span>
+                        In lavoro dal {ticket.data_inizio_lavoro}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
+            </section> */}
           </div>
 
-          {/* Right column - Context + AI */}
-          <div className="space-y-5">
-            {/* Client Contact Details */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <div className="mb-4 flex items-center gap-2">
-                <UserIcon className="h-5 w-5 text-blue-600" />
-                <h3 className="text-sm font-bold text-slate-800">Dettagli Cliente</h3>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Azienda
-                  </p>
-                  <p className="mt-0.5 text-sm font-semibold text-slate-800">{ticket.cliente}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Persona di Contatto
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium text-slate-700">{ticket.contatto || "Non specificato"}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Recapito Telefonico
-                  </p>
-                  <p className="mt-0.5 text-sm text-slate-600">{ticket.telefono || "Non fornito"}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Email del Contatto
-                  </p>
-                  <p className="mt-0.5 text-sm text-slate-600">{ticket.email || "Non fornita"}</p>
+          {/* ===== RIGHT COLUMN (4 cols) ===== */}
+          <div className="xl:col-span-4 space-y-6">
+
+            {/* 1. Customer Details Card */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">&#127970;</span>
+                  <h2 className="text-sm font-bold text-slate-900">Dettagli Cliente</h2>
                 </div>
               </div>
-            </div>
-
-            {/* Ticket Context */}
-            <div className="rounded-xl bg-slate-100 p-5 shadow-sm">
-              <div className="mb-4 flex items-center gap-2">
-                <InfoIcon className="h-5 w-5 text-slate-600" />
-                <h3 className="text-sm font-bold text-slate-800">Contesto Ticket</h3>
-              </div>
-
-              <div className="space-y-3">
+              <div className="space-y-3.5 text-xs">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    ID Ticket
-                  </p>
-                  <span className="mt-1 inline-block rounded-md bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm">
-                    {ticket.numero}
-                  </span>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Nome Cliente
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium text-slate-700">{ticket.cliente}</p>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Email Cliente
-                  </p>
-                  <p className="mt-0.5 text-sm text-slate-600">{ticket.email}</p>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Problema Originale
-                  </p>
-                  <p className="mt-0.5 text-sm text-slate-600 leading-relaxed">
-                    {ticket.sommario_problema}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Segnalato il
-                  </p>
-                  <p className="mt-0.5 text-sm text-slate-600">{ticket.data_creazione}</p>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Modulo Software
-                  </p>
-                  <span className="mt-1 inline-block rounded-md bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
-                    {ticket.modulo_software}
-                  </span>
-                </div>
-
-                {ticket.operatore && (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Operatore Assegnato
-                    </p>
-                    <span className="mt-1 inline-block rounded-md bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
-                      {ticket.operatore}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Time Tracking */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <div className="mb-4 flex items-center gap-2">
-                <svg className="h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-                <h3 className="text-sm font-bold text-slate-800">Gestione Tempo</h3>
-              </div>
-
-              <div className="space-y-3">
-                {/* Data inizio lavoro */}
-                {ticket.data_inizio_lavoro && (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Inizio Lavoro
-                    </p>
-                    <p className="mt-0.5 text-sm text-slate-600">{ticket.data_inizio_lavoro}</p>
-                  </div>
-                )}
-
-                {/* Data chiusura */}
-                {ticket.data_chiusura && (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Chiusura
-                    </p>
-                    <p className="mt-0.5 text-sm text-slate-600">{ticket.data_chiusura}</p>
-                  </div>
-                )}
-
-                {/* Tempo stimato (auto-calculated) */}
-                {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Tempo Stimato (calcolato)
-                    </p>
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="inline-flex items-center rounded-md bg-blue-100 px-2.5 py-1 text-sm font-bold text-blue-700">
-                        {Math.floor(ticket.tempo_stimato_minuti / 60)}h {ticket.tempo_stimato_minuti % 60}m
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        ({ticket.tempo_stimato_minuti} min)
-                      </span>
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Azienda</span>
+                  <div className="flex items-center gap-2.5 mt-1">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-xs">
+                      {getInitials(ticket.cliente)}
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-slate-900 block">{ticket.cliente}</span>
                     </div>
                   </div>
-                )}
-
-                {/* Tempo effettivo (editable) */}
-                {ticket.stato === "CHIUSO" && (
+                </div>
+                <div>
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Referente</span>
+                  <p className="text-xs font-semibold text-slate-900 mt-0.5">{ticket.contatto || "Non specificato"}</p>
+                </div>
+                <div className="space-y-2 pt-1">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Tempo Effettivo (modificabile)
-                    </p>
-                    <div className="mt-1.5 flex items-center gap-2">
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Email</span>
+                    <p className="text-xs text-blue-600 font-medium mt-0.5 break-all">{ticket.email || "Non fornita"}</p>
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Telefono</span>
+                    <p className="text-xs text-slate-700 font-medium mt-0.5">{ticket.telefono || "Non fornito"}</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* 2. Status & Assignment Card */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">&#9881;</span>
+                  <h2 className="text-sm font-bold text-slate-900">Stato & Assegnazione</h2>
+                </div>
+              </div>
+              <div className="space-y-3.5 text-xs">
+                {/* Status selector */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Stato</label>
+                  <div className="relative">
+                    <select
+                      value={selectedStato}
+                      onChange={(e) => setSelectedStato(e.target.value as StatoTicket)}
+                      disabled={isClosed}
+                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{STATI_MAP[s]}</option>
+                      ))}
+                    </select>
+                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+
+                {/* Operator assignment */}
+                <div>
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Operatore</span>
+                  {isClosed ? (
+                    <p className="text-xs text-slate-500">Ticket chiuso</p>
+                  ) : currentUser?.ruolo === "admin" ? (
+                    <div className="relative">
+                      <select
+                        value={selectedOperatore}
+                        onChange={(e) => { const val = e.target.value; setSelectedOperatore(val); if (val) setSelectedStato("IN_CORSO"); }}
+                        className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      >
+                        <option value="">Non assegnato</option>
+                        {operatori.map((op) => (
+                          <option key={op.id} value={op.nome}>{op.nome} ({op.ruolo})</option>
+                        ))}
+                      </select>
+                      <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    </div>
+                  ) : ticket.operatore === currentUser?.nome ? (
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 border border-emerald-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Assegnato a te
+                      </span>
+                      <button type="button" onClick={() => { void run(async () => { await updateTicket({ operatore: null, stato: "NUOVO" }); setSelectedOperatore(""); }); }} disabled={saving} className="text-[11px] font-semibold text-amber-600 hover:text-amber-800">
+                        Rilascia
+                      </button>
+                    </div>
+                  ) : ticket.operatore ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> {ticket.operatore}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">Non assegnato</span>
+                  )}
+                </div>
+
+                {/* Priority selector */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Priorita</label>
+                  <div className="relative">
+                    <select
+                      value={selectedPriorita}
+                      onChange={(e) => setSelectedPriorita(e.target.value as Priorita)}
+                      disabled={isClosed}
+                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    >
+                      {PRIORITY_OPTIONS.map((p) => (
+                        <option key={p} value={p}>{PRIORITA_MAP[p]}</option>
+                      ))}
+                    </select>
+                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+
+                {/* Save button */}
+                {!isClosed && (
+                  <button
+                    type="button"
+                    onClick={handleSaveAll}
+                    disabled={saving}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-600/25 transition-all disabled:opacity-50"
+                  >
+                    {saving ? (
+                      <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> Salvataggio...</>
+                    ) : saved ? (
+                      <><CheckCircleIcon className="h-4 w-4" /> Salvato!</>
+                    ) : (
+                      "Salva Modifiche"
+                    )}
+                  </button>
+                )}
+              </div>
+            </section>
+
+            {/* 3. Time Tracking Card */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-3.5">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">&#9202;</span>
+                  <h2 className="text-sm font-bold text-slate-900">Gestione Tempo</h2>
+                </div>
+              </div>
+              <div className="space-y-3 text-xs">
+                {ticket.data_inizio_lavoro && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Inizio lavoro:</span>
+                    <span className="font-semibold text-slate-800">{ticket.data_inizio_lavoro}</span>
+                  </div>
+                )}
+                {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Stimato:</span>
+                    <span className="font-semibold text-slate-800">{Math.floor(ticket.tempo_stimato_minuti / 60)}h {ticket.tempo_stimato_minuti % 60}m</span>
+                  </div>
+                )}
+                {ticket.data_chiusura && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Chiusura:</span>
+                    <span className="font-semibold text-slate-800">{ticket.data_chiusura}</span>
+                  </div>
+                )}
+                {isClosed && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Tempo Effettivo</span>
+                    <div className="flex items-center gap-2">
                       <input
                         type="text"
                         value={tempoEffettivo}
                         onChange={(e) => setTempoEffettivo(e.target.value)}
                         placeholder="es. 2:30"
-                        className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-24 rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
-                      <span className="text-xs text-slate-500">ore:minuti</span>
-                      <button
-                        type="button"
-                        onClick={saveTempoEffettivo}
-                        disabled={savingTempo || !tempoEffettivo.trim()}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition"
-                      >
-                        {savingTempo ? "Salvataggio..." : "Salva"}
+                      <span className="text-[10px] text-slate-400">ore:minuti</span>
+                      <button type="button" onClick={saveTempoEffettivo} disabled={savingTempo || !tempoEffettivo.trim()} className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                        Salva
                       </button>
                     </div>
-                    <p className="mt-1 text-[10px] text-slate-400">
-                      Formato: ore:minuti (es. 2:30) o decimale (es. 2.5)
-                    </p>
                   </div>
                 )}
-
-                {/* Show actual time if set and ticket is closed */}
-                {ticket.stato === "CHIUSO" && ticket.tempo_effettivo_minuti !== null && ticket.tempo_effettivo_minuti !== undefined && (
-                  <div className="pt-2 border-t border-slate-100">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600">
-                      Tempo Finale
-                    </p>
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="inline-flex items-center rounded-md bg-emerald-100 px-2.5 py-1 text-sm font-bold text-emerald-700">
-                        {Math.floor(ticket.tempo_effettivo_minuti / 60)}h {ticket.tempo_effettivo_minuti % 60}m
-                      </span>
-                      {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
-                        <span className={`text-[10px] font-medium ${
-                          ticket.tempo_effettivo_minuti > ticket.tempo_stimato_minuti
-                            ? "text-red-500"
-                            : "text-emerald-500"
-                        }`}>
-                          {ticket.tempo_effettivo_minuti > ticket.tempo_stimato_minuti ? "+" : ""}
-                          {ticket.tempo_effettivo_minuti - ticket.tempo_stimato_minuti}m vs stimato
-                        </span>
-                      )}
-                    </div>
+                {isClosed && ticket.tempo_effettivo_minuti !== null && ticket.tempo_effettivo_minuti !== undefined && (
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                    <span className="text-emerald-600 font-semibold">Tempo Finale:</span>
+                    <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                      {Math.floor(ticket.tempo_effettivo_minuti / 60)}h {ticket.tempo_effettivo_minuti % 60}m
+                    </span>
                   </div>
                 )}
-
-                {/* In progress: show live elapsed time */}
-                {ticket.stato === "IN_CORSO" && ticket.data_inizio_lavoro && (
-                  <div className="pt-2 border-t border-slate-100">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600">
-                      In Lavoro Da
-                    </p>
-                    <p className="mt-1 text-sm font-medium text-slate-700">
-                      {(() => {
-                        const start = new Date(ticket.data_inizio_lavoro.replace(/(\d{2})\/(\d{2})\/(\d{4}), (\d{2}):(\d{2})/, "$3-$2-$1T$4:$5:00"));
-                        const now = new Date();
-                        const diff = now.getTime() - start.getTime();
-                        const hours = Math.floor(diff / 3600000);
-                        const mins = Math.floor((diff % 3600000) / 60000);
-                        return `${hours}h ${mins}m`;
-                      })()}
-                    </p>
-                  </div>
-                )}
-
-                {/* No time data */}
-                {!ticket.data_inizio_lavoro && ticket.stato !== "CHIUSO" && (
-                  <p className="text-xs text-slate-400 italic">
-                    Il timer partirà quando il ticket verrà preso in carico.
-                  </p>
+                {!ticket.data_inizio_lavoro && !isClosed && (
+                  <p className="text-xs text-slate-400 italic">Il timer parte quando il ticket viene preso in carico.</p>
                 )}
               </div>
-            </div>
+            </section>
 
-            {/* Email Log */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-800">Email Inviate</h3>
-                {ticket.stato !== "CHIUSO" && ticket.email && (
-                  <button
-                    type="button"
-                    onClick={() => setShowEmailForm(!showEmailForm)}
-                    className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-                  >
-                    {showEmailForm ? "Annulla" : "Invia Email"}
-                  </button>
-                )}
+            {/* 4. Email Log Card */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">&#9993;</span>
+                  <h2 className="text-sm font-bold text-slate-900">Email</h2>
+                </div>
+                <span className="text-[10px] font-semibold text-slate-400">{emailLog.length} inviate</span>
               </div>
 
               {showEmailForm && (
-                <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
-                  <input
-                    type="text"
-                    value={emailOggetto}
-                    onChange={(e) => setEmailOggetto(e.target.value)}
-                    placeholder="Oggetto email"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none"
-                  />
-                  <textarea
-                    value={emailMessaggio}
-                    onChange={(e) => setEmailMessaggio(e.target.value)}
-                    placeholder="Messaggio da inviare al cliente..."
-                    rows={4}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none resize-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={sendManualEmail}
-                    disabled={sendingEmail || !emailOggetto.trim() || !emailMessaggio.trim()}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {sendingEmail ? "Invio in corso..." : "Invia"}
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 space-y-2">
+                  <input type="text" value={emailOggetto} onChange={(e) => setEmailOggetto(e.target.value)} placeholder="Oggetto email" className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none" />
+                  <textarea value={emailMessaggio} onChange={(e) => setEmailMessaggio(e.target.value)} placeholder="Messaggio..." rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none resize-none" />
+                  <button type="button" onClick={sendManualEmail} disabled={sendingEmail || !emailOggetto.trim() || !emailMessaggio.trim()} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                    {sendingEmail ? "Invio..." : "Invia"}
                   </button>
                 </div>
               )}
@@ -1542,11 +1279,9 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
               ) : (
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {emailLog.map((e) => (
-                    <div key={e.id} className="rounded-lg border border-slate-100 p-2">
+                    <div key={e.id} className="rounded-lg border border-slate-100 p-2.5">
                       <div className="flex items-center justify-between">
-                        <span className={`text-[10px] font-semibold uppercase ${
-                          e.stato === "inviata" ? "text-green-600" : "text-red-600"
-                        }`}>
+                        <span className={`text-[10px] font-semibold uppercase ${e.stato === "inviata" ? "text-emerald-600" : "text-red-500"}`}>
                           {e.tipo.replace("_", " ")}
                         </span>
                         <span className="text-[10px] text-slate-400">
@@ -1554,71 +1289,39 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                         </span>
                       </div>
                       <p className="mt-0.5 text-[10px] text-slate-500 truncate">{e.oggetto}</p>
-                      {e.errore && (
-                        <p className="mt-0.5 text-[10px] text-red-500">{e.errore}</p>
-                      )}
+                      {e.errore && <p className="mt-0.5 text-[10px] text-red-500">{e.errore}</p>}
                     </div>
                   ))}
                 </div>
               )}
-            </div>
+            </section>
 
-            {/* AI Insight Card */}
-            <div className="rounded-xl bg-gradient-to-br from-violet-50 to-purple-50 p-5 shadow-sm border border-violet-100">
-              <div className="mb-3 flex items-center gap-2">
-                <SparklesIcon className="h-5 w-5 text-violet-600" />
-                <h3 className="text-sm font-bold text-violet-800">AI Insight</h3>
-              </div>
-              <p className="text-sm leading-relaxed text-violet-700">
-                Basandosi su ticket simili per {ticket.cliente}, questo problema è spesso risolto
-                pulendo la cache di sistema e reinstallando i driver principali dello schermo.
-                Considera di consultare l&apos;ultima knowledge base del vendor per errori correlati.
-              </p>
-            </div>
-
-            {/* Status Summary */}
-            <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
-              <h3 className="mb-3 text-sm font-bold text-slate-800">Riepilogo</h3>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Stato:</span>
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
-                      STATUS_STYLES[ticket.stato]
-                    }`}
-                  >
-                    {STATI_MAP[ticket.stato]}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Priorità:</span>
-                  <span
-                    className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${
-                      PRIORITY_STYLES[ticket.priorita]
-                    }`}
-                  >
-                    {PRIORITA_MAP[ticket.priorita]}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Note interne:</span>
-                  <span className="text-xs text-slate-600">
-                    {ticket.note ? `${ticket.note.length} caratteri` : "Nessuna"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Note tecniche:</span>
-                  <span className="text-xs text-slate-600">{ticket.note_tecniche.length}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Messaggi:</span>
-                  <span className="text-xs text-slate-600">{ticket.messaggi.length}</span>
+            {/* 5. System Info Card */}
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">&#128187;</span>
+                  <h2 className="text-sm font-bold text-slate-900">Info Sistema</h2>
                 </div>
               </div>
-            </div>
+              <div className="space-y-2.5 text-xs">
+                <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                  <span className="text-slate-500">ID Ticket</span>
+                  <span className="font-mono font-bold text-slate-900">{ticket.numero}</span>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                  <span className="text-slate-500">Modulo</span>
+                  <span className="font-mono text-[11px] font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">{ticket.modulo_software}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-slate-500">Email inviate</span>
+                  <span className="font-semibold text-slate-800">{emailLog.length}</span>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

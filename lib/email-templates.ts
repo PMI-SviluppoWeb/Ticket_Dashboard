@@ -211,3 +211,33 @@ export function emailManuale(opts: {
     </table>
   `);
 }
+
+export function emailAutoReply(opts: {
+  numero: string;
+  cliente: string;
+  oggettoOriginale: string;
+}): string {
+  return wrap("Ricevuto la tua richiesta", `
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
+    <p style="margin:0 0 16px;font-size:14px">
+      Abbiamo ricevuto la tua email e le abbiamo assegnato il ticket <strong>${opts.numero}</strong>.
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Ticket</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${opts.numero}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Oggetto</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.oggettoOriginale}</td>
+      </tr>
+    </table>
+    <p style="margin:0 0 16px;font-size:14px">
+      Un operatore prendera' in carco la tua richiesta al piu' presto.
+      Riceverai ulteriori aggiornamenti man mano che il problema verra' esaminato.
+    </p>
+    <p style="margin:0;font-size:13px;color:#64748b">
+      Per urgenze, contattaci telefonicamente.
+    </p>
+  `);
+}

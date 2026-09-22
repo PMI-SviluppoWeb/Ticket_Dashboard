@@ -177,6 +177,24 @@ CREATE TABLE IF NOT EXISTS clienti (
 
 CREATE INDEX IF NOT EXISTS idx_clienti_ragione_sociale ON clienti (ragione_sociale);
 CREATE INDEX IF NOT EXISTS idx_clienti_citta           ON clienti (citta);
+
+CREATE TABLE IF NOT EXISTS email_inbox (
+  id             TEXT PRIMARY KEY,
+  message_id     TEXT NOT NULL UNIQUE,
+  from_email     TEXT NOT NULL,
+  from_nome      TEXT,
+  subject        TEXT NOT NULL,
+  body_preview   TEXT,
+  body_html      TEXT,
+  ticket_id      TEXT,
+  stato          TEXT NOT NULL DEFAULT 'processata'
+                 CHECK (stato IN ('processata','errore','ignorata')),
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_inbox_message_id ON email_inbox (message_id);
+CREATE INDEX IF NOT EXISTS idx_email_inbox_ticket     ON email_inbox (ticket_id);
+CREATE INDEX IF NOT EXISTS idx_email_inbox_stato      ON email_inbox (stato);
 `;
 
 const schemaReady = (async () => {
