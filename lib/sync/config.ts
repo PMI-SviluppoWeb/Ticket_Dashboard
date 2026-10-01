@@ -1,12 +1,18 @@
 /**
  * Configurazione sincronizzazione anagrafiche clienti
  *
- * Modifica le mappature qui sotto in base alla struttura della tua tabella SQL Server.
+ * Modifica le mappature qui sotto in base alla struttura dei dati della tua sorgente.
  *
- * - sourceTable: nome della tabella SQL Server
- * - sourceIdField: campo chiave primaria nella tabella SQL Server
- * - fieldMap: mappatura campi SQL Server → Turso
- *   (chiave = campo Turso, valore = campo SQL Server)
+ * - source: "sql-server" oppure "api"
+ * - sqlServer.table: nome tabella SQL Server
+ * - sqlServer.idField: campo chiave primaria SQL Server
+ * - sqlServer.fieldMap: mappatura campi SQL Server → Turso
+ * - api.enabled: true per usare l'API Arca
+ * - api.baseUrl: base URL dell'API
+ * - api.endpoint: endpoint specifico per le anagrafiche
+ * - api.idField: campo ID nella risposta API
+ * - api.fieldMap: mappatura campi API → Turso
+ *   (chiave = campo Turso, valore = campo API)
  */
 
 export type SyncSource = "sql-server" | "api";
@@ -22,44 +28,23 @@ export interface SyncConfig {
     enabled: boolean;
     baseUrl: string;
     endpoint: string;
+    contattiEndpoint: string; // Endpoint contatti (cellulare, email)
+    idField: string; // Campo ID nella risposta API (es. "id_cf")
+    fieldMap: Record<string, string | null>; // Chiave = Turso, Valore = API (null = non presente)
   };
 }
 
 // ──────────────────────────────────────────────────────────────
-// MODIFICA QUI I CAMPI SEGUENDO LE INDICAZIONI:
-//
-// 1. Imposta 'source' su "sql-server" o "api" a seconda della sorgente
-// 2. In 'sqlServer.table' inserisci il nome della tua tabella
-// 3. In 'sqlServer.idField' inserisci il nome del campo chiave primaria
-// 4. In 'sqlServer.fieldMap' mappa ogni campo Turso al corrispondente campo SQL Server
-//    - La chiave è il nome del campo nella tabella Turso 'clienti'
-//    - Il valore è il nome del campo nella tua tabella SQL Server
-//    - Se un campo non esiste su SQL Server, mettilo a null
-//
-// ESEMPIO:
-//   Se la tua tabella SQL Server si chiama 'ANAGRAFICHE' e ha i campi:
-//   Codice, RagioneSociale, Email, Telefono, Indirizzo, Citta, Provincia, CAP, P.IVA
-//
-//   Allora la mappatura sarà:
-//   ragione_sociale: "RagioneSociale"
-//   email: "Email"
-//   telefono: "Telefono"
-//   ecc.
+// MODIFICA QUI I CAMPI SEGUENTI:
 // ──────────────────────────────────────────────────────────────
 
 export const syncConfig: SyncConfig = {
   // Sorgente dati: "sql-server" oppure "api"
-  source: "sql-server",
+  source: "api",
 
   sqlServer: {
-    // Nome della tabella anagrafica clienti su SQL Server
     table: "ANAGRAFICHE",
-
-    // Campo chiave primaria (ID alfanumerico)
     idField: "Codice",
-
-    // Mappatura campi SQL Server → Turso
-    // Chiave = campo Turso, Valore = campo SQL Server
     fieldMap: {
       ragione_sociale: "RagioneSociale",
       nome_contatto: "NomeContatto",
@@ -75,8 +60,24 @@ export const syncConfig: SyncConfig = {
   },
 
   api: {
-    enabled: false,
-    baseUrl: process.env.ARCA_API_BASE_URL || "http://localhost:8080/api",
-    endpoint: "/clienti",
+    enabled: true,
+    baseUrl: process.env.ARCA_API_BASE_URL || "http://srv2022/PMISOFTWARE/api",
+    endpoint: "/dbo_CF",
+    contattiEndpoint: "/dbo_CFContatto",
+    idField: "id_cf", // Campo ID nella risposta API
+    fieldMap: {
+      // Chiave = campo Turso, Valore = campo API Arca
+      // (telefono/email/nome_contatto arrivano già arricchiti da dbo_CFContatto)
+      ragione_sociale: "descrizione",
+      nome_contatto: "nome_contatto",
+      email: "email",
+      telefono: "telefono",
+      indirizzo: "indirizzo",
+      citta: "localita",
+      provincia: "provincia",
+      cap: "cap",
+      partita_iva: "partitaiva",
+      note: "note_cf",
+    },
   },
 };

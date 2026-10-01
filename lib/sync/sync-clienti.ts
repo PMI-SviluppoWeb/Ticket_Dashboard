@@ -15,7 +15,9 @@ interface SyncResult {
  * Mappa i campi grezzi dalla sorgente (SQL Server o API) al formato Turso.
  */
 function mapCliente(raw: Record<string, unknown>, id: string): Record<string, unknown> {
-  const { fieldMap } = syncConfig.sqlServer;
+  const fieldMap = syncConfig.source === "sql-server"
+    ? syncConfig.sqlServer.fieldMap
+    : syncConfig.api.fieldMap;
 
   const mapped: Record<string, unknown> = {
     id,
@@ -49,17 +51,26 @@ async function insertCliente(cliente: Record<string, unknown>): Promise<void> {
   const fields = Object.keys(cliente);
   const placeholders = fields.map((f) => `:${f}`);
   const sql = `INSERT INTO clienti (${fields.join(", ")}) VALUES (${placeholders.join(", ")})`;
-  await syncDb.prepare(sql).run(cliente);
+  // Passa solo i campi presenti nella INSERT (combacino con i placeholder)
+  const args: Record<string, unknown> = {};
+  for (const f of fields) args[f] = cliente[f];
+  await syncDb.prepare(sql).run(args);
 }
 
 /**
  * Aggiorna un cliente esistente in Turso.
  */
 async function updateCliente(id: string, cliente: Record<string, unknown>): Promise<void> {
-  const fields = Object.keys(cliente).filter((f) => f !== "id");
+  // Non sovrascrivere data_creazione e non azzerare campi API assenti (null)
+  const fields = Object.keys(cliente).filter(
+    (f) => f !== "id" && f !== "data_creazione" && cliente[f] !== null
+  );
   const setClauses = fields.map((f) => `${f} = :${f}`);
   const sql = `UPDATE clienti SET ${setClauses.join(", ")} WHERE id = :id`;
-  await syncDb.prepare(sql).run({ ...cliente, id });
+  // libsql richiede che gli argomenti combacino esattamente con i placeholder
+  const args: Record<string, unknown> = { id };
+  for (const f of fields) args[f] = cliente[f];
+  await syncDb.prepare(sql).run(args);
 }
 
 /**
@@ -92,13 +103,14 @@ export async function syncClienti(): Promise<SyncResult> {
     await syncDb.ping();
 
     // 3. Sincronizza ogni cliente
-    const { idField } = syncConfig.source === "sql-server"
-      ? syncConfig.sqlServer
-      : syncConfig.sqlServer; // fallback
+    const idField = syncConfig.source === "sql-server"
+      ? syncConfig.sqlServer.idField
+      : syncConfig.api.idField;
 
     for (const raw of rawClienti) {
       const rawId = raw[idField];
       if (!rawId) {
+        result.skipped++;
         result.errors.push(`Cliente senza ID (${idField}): ${JSON.stringify(raw)}`);
         continue;
       }
