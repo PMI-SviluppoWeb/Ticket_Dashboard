@@ -6,7 +6,7 @@ echo "================================="
 
 # Avvia il worker IMAP in background
 echo "[Docker] Avvio IMAP worker..."
-npx tsx scripts/start-worker-docker.ts &
+tsx scripts/start-worker-docker.ts &
 WORKER_PID=$!
 
 # Avvia Next.js in foreground

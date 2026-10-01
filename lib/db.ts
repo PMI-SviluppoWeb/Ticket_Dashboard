@@ -1,18 +1,26 @@
-import { createClient, type InArgs } from "@libsql/client";
+import { createClient, type InArgs, type Client } from "@libsql/client";
 import "server-only";
 
-const url = process.env.TURSO_DATABASE_URL ?? "";
+// Lettura lazy delle env: durante `next build` (Docker) le variabili d'ambiente
+// non esistono, quindi il client va creato solo al primo accesso reale,
+// mai a livello di modulo (altrimenti il build fallisce).
+let cachedClient: Client | undefined;
 
-if (!url) {
-  throw new Error(
-    "Variabile TURSO_DATABASE_URL mancante. Configura il file .env.local con l'URL del database Turso."
-  );
+function getClient(): Client {
+  if (!cachedClient) {
+    const url = process.env.TURSO_DATABASE_URL ?? "";
+    if (!url) {
+      throw new Error(
+        "Variabile TURSO_DATABASE_URL mancante. Configura il file .env con l'URL del database Turso."
+      );
+    }
+    cachedClient = createClient({
+      url,
+      authToken: process.env.TURSO_AUTH_TOKEN || undefined,
+    });
+  }
+  return cachedClient;
 }
-
-export const client = createClient({
-  url,
-  authToken: process.env.TURSO_AUTH_TOKEN || undefined,
-});
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS operatori (
@@ -197,28 +205,43 @@ CREATE INDEX IF NOT EXISTS idx_email_inbox_ticket     ON email_inbox (ticket_id)
 CREATE INDEX IF NOT EXISTS idx_email_inbox_stato      ON email_inbox (stato);
 `;
 
-const schemaReady = (async () => {
+// Schema inizializzato in modo lazy: la prima query reale del processo
+// attiva la creazione tabelle/migrazioni; a build-time non viene eseguito nulla.
+let schemaPromise: Promise<void> | null = null;
+
+function ensureSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = initSchema().catch((err) => {
+      console.error("Errore nell'inizializzazione dello schema su Turso:", err);
+      schemaPromise = null; // permette il retry alla prossima query
+    });
+  }
+  return schemaPromise;
+}
+
+async function initSchema(): Promise<void> {
+  const client = getClient();
   const statements = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
   for (const stmt of statements) {
-    await client.execute(stmt);
+    await getClient().execute(stmt);
   }
   // Migration: add links column if missing
   try {
-    await client.execute("ALTER TABLE knowledge_docs ADD COLUMN links TEXT DEFAULT '[]'");
+    await getClient().execute("ALTER TABLE knowledge_docs ADD COLUMN links TEXT DEFAULT '[]'");
   } catch {
     // Column already exists
   }
   // Migration: make email NOT NULL on tickets (set default for existing nulls)
   try {
-    await client.execute("UPDATE tickets SET email = 'sconosciuto@placeholder.it' WHERE email IS NULL");
-    await client.execute("ALTER TABLE tickets ALTER COLUMN email TEXT NOT NULL");
+    await getClient().execute("UPDATE tickets SET email = 'sconosciuto@placeholder.it' WHERE email IS NULL");
+    await getClient().execute("ALTER TABLE tickets ALTER COLUMN email TEXT NOT NULL");
   } catch {
     // Column already NOT NULL or migration not needed
   }
   // Migration: fix contact data - extract phone and email from contatto field
   try {
     // Find tickets where contatto contains email or phone patterns
-    const ticketsWithMixedContact = await client.execute(
+    const ticketsWithMixedContact = await getClient().execute(
       `SELECT id, contatto, telefono, email FROM tickets
        WHERE contatto LIKE '%@%'
           OR contatto LIKE '%+39%'
@@ -255,7 +278,7 @@ const schemaReady = (async () => {
       nomeContatto = nomeContatto.replace(/[-–—,;|/\\]+/g, " ").replace(/\s{2,}/g, " ").trim();
       if (!nomeContatto) nomeContatto = "Non fornito";
 
-      await client.execute({
+      await getClient().execute({
         sql: `UPDATE tickets SET contatto = :contatto, telefono = :telefono, email = :email WHERE id = :id`,
         args: [nomeContatto, telefono, email || null, row.id as string],
       });
@@ -265,18 +288,18 @@ const schemaReady = (async () => {
   }
   // Migration: add time tracking columns
   try {
-    await client.execute("ALTER TABLE tickets ADD COLUMN data_inizio_lavoro TEXT");
+    await getClient().execute("ALTER TABLE tickets ADD COLUMN data_inizio_lavoro TEXT");
   } catch { /* Column already exists */ }
   try {
-    await client.execute("ALTER TABLE tickets ADD COLUMN tempo_stimato_minuti INTEGER");
+    await getClient().execute("ALTER TABLE tickets ADD COLUMN tempo_stimato_minuti INTEGER");
   } catch { /* Column already exists */ }
   try {
-    await client.execute("ALTER TABLE tickets ADD COLUMN tempo_effettivo_minuti INTEGER");
+    await getClient().execute("ALTER TABLE tickets ADD COLUMN tempo_effettivo_minuti INTEGER");
   } catch { /* Column already exists */ }
 
   // Seed: popola tabella clienti con dati di esempio se vuota
   try {
-    const { rows } = await client.execute("SELECT COUNT(*) AS cnt FROM clienti");
+    const { rows } = await getClient().execute("SELECT COUNT(*) AS cnt FROM clienti");
     const count = (rows[0] as Record<string, unknown>)?.cnt as number;
     if (count === 0) {
       const now = new Date().toISOString();
@@ -293,9 +316,7 @@ const schemaReady = (async () => {
   } catch {
     // Seeding non necessario o tabella già popolata
   }
-})().catch((err) => {
-  console.error("Errore nell'inizializzazione dello schema su Turso:", err);
-});
+}
 
 // Adapter asincrono che replica l'interfaccia di better-sqlite3
 // (db.prepare(...).get/all/run) usando il client @libsql/client.
@@ -324,19 +345,19 @@ function prepare(sql: string) {
   const sqlFixed = sql.replace(/@([A-Za-z0-9_]+)/g, ":$1");
   return {
     async get(params?: Params): Promise<Row | undefined> {
-      await schemaReady;
-      const result = await client.execute({ sql: sqlFixed, args: normalizeArgs(params) });
+      await ensureSchema();
+      const result = await getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) });
       const row = result.rows[0];
       return row ? toRow(row) : undefined;
     },
     async all(params?: Params): Promise<Row[]> {
-      await schemaReady;
-      const result = await client.execute({ sql: sqlFixed, args: normalizeArgs(params) });
+      await ensureSchema();
+      const result = await getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) });
       return result.rows.map(toRow);
     },
     async run(params?: Params): Promise<{ changes: number }> {
-      await schemaReady;
-      const result = await client.execute({ sql: sqlFixed, args: normalizeArgs(params) });
+      await ensureSchema();
+      const result = await getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) });
       return { changes: result.rowsAffected };
     },
   };
@@ -345,10 +366,10 @@ function prepare(sql: string) {
 export const db = {
   prepare,
   async exec(sql: string): Promise<void> {
-    await schemaReady;
-    await client.execute(sql);
+    await ensureSchema();
+    await getClient().execute(sql);
   },
   async ping(): Promise<void> {
-    await schemaReady;
+    await ensureSchema();
   },
 };
