@@ -5,10 +5,11 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   BookIcon,
+  CalendarIcon,
+  FolderIcon,
   GridIcon,
   HeadsetIcon,
   HelpCircleIcon,
-  UserIcon,
   LogOutIcon,
   UserCircleIcon,
   UserPlusIcon,
@@ -21,6 +22,8 @@ export default function Sidebar() {
 
   const NAV_ITEMS = [
     { href: "/", label: "Dashboard", icon: GridIcon, exact: true },
+    { href: "/calendario", label: "Calendario", icon: CalendarIcon, exact: false },
+    { href: "/progetti", label: "Progetti", icon: FolderIcon, exact: false },
     { href: "/operatore", label: "I Miei Ticket", icon: UserCircleIcon, exact: false, operatoreOnly: true },
     { href: "/admin", label: "Operatori", icon: UserPlusIcon, exact: false, adminOnly: true },
     { href: "/admin/dashboard", label: "Dashboard Admin", icon: BarChartIcon, exact: false, adminOnly: true },
@@ -58,74 +61,86 @@ export default function Sidebar() {
     }
   };
 
-  return (
-    <aside className="hidden w-56 shrink-0 flex-col bg-slate-900 text-slate-300 md:flex">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-4 py-5">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white shadow-lg shadow-blue-900/40">
-          <HeadsetIcon className="h-5 w-5" />
-        </span>
-        <div className="leading-tight">
-          <p className="text-sm font-bold text-white">Support Desk</p>
-          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-            Gestione ticket
-          </p>
-        </div>
-      </div>
+  // Iniziale per l'avatar. Serve un fallback esplicito: `nome` puo' arrivare
+  // vuoto e `[0]` su stringa vuota e' undefined, che stamperebbe "undefined"
+  // dentro il cerchio.
+  const iniziale = (operator?.nome?.trim()?.[0] ?? "?").toUpperCase();
 
-      {/* Navigazione principale */}
-      <nav className="mt-2 flex flex-1 flex-col gap-1 px-3">
+  // Etichetta flottante a destra del cerchio. Resta nel DOM anche quando e'
+  // invisibile, quindi gli screen reader leggono il nome della voce.
+  const tooltip =
+    "pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 translate-x-[-4px] whitespace-nowrap rounded-full bg-inchiostro px-3 py-1.5 text-xs font-semibold text-white opacity-0 shadow-soft transition duration-200 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100";
+  const cerchio =
+    "group relative grid h-11 w-11 place-items-center rounded-full transition-colors duration-200";
+
+  // Rail di icone (reference: public/projects.png). Al posto della colonna da
+  // 240px: lo spazio torna al contenuto e la navigazione diventa un oggetto
+  // unico, una pillola bianca sul canvas, invece di un pannello.
+  return (
+    <aside className="hidden w-[84px] shrink-0 flex-col items-center gap-6 py-4 md:flex">
+      <Link href="/" className={`${cerchio} bg-inchiostro text-lime`}>
+        <HeadsetIcon className="h-5 w-5" />
+        <span className={tooltip}>Support Desk</span>
+      </Link>
+
+      <nav
+        className="flex flex-col gap-1.5 rounded-full bg-white p-1.5 shadow-soft ring-1 ring-crema-contorno"
+        aria-label="Navigazione principale"
+      >
         {visibleNav.map((item) => {
-          const active = item.exact
-            ? pathname === item.href
-            : pathname.startsWith(item.href);
+          // La voce attiva e' quella con il percorso PIU' SPECIFICO:
+          // "/admin/dashboard" inizia anche con "/admin" e il confronto
+          // ingenuo accenderebbe due voci insieme.
+          const corrisponde = (i: (typeof NAV_ITEMS)[number]) =>
+            i.exact
+              ? pathname === i.href
+              : pathname === i.href || pathname.startsWith(`${i.href}/`);
+          const attiva = visibleNav
+            .filter(corrisponde)
+            .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+          const active = item.href === attiva;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              aria-current={active ? "page" : undefined}
+              className={`${cerchio} ${
                 active
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-950/50"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "bg-inchiostro text-lime"
+                  : "text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
               }`}
             >
-              <item.icon className="h-4 w-4" />
-              {item.label}
+              <item.icon className="h-[18px] w-[18px]" />
+              <span className={tooltip}>{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
-      {/* Utente corrente in basso */}
-      <div className="flex flex-col gap-1 px-3 pb-5 border-t border-slate-800 mt-auto">
-        {operator && (
-          <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white">
-              <UserIcon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-white truncate">{operator.nome}</p>
-              <p className="text-[11px] text-slate-400 truncate">{operator.email}</p>
-            </div>
-          </div>
-        )}
+      <div className="mt-auto flex flex-col items-center gap-1.5">
         <Link
           href="/knowledge"
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white"
+          className={`${cerchio} text-caldo-testo hover:bg-white hover:text-inchiostro`}
         >
-          <HelpCircleIcon className="h-4 w-4" />
-          Help Center
+          <HelpCircleIcon className="h-[18px] w-[18px]" />
+          <span className={tooltip}>Help Center</span>
         </Link>
         <button
+          type="button"
           onClick={handleLogout}
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-red-400 text-left w-full"
+          className={`${cerchio} cursor-pointer text-caldo-testo hover:bg-stato-urgenza-bg hover:text-stato-urgenza-testo`}
         >
-          <LogOutIcon className="h-4 w-4" />
-          Esci
+          <LogOutIcon className="h-[18px] w-[18px]" />
+          <span className={tooltip}>Esci</span>
         </button>
-        <p className="px-3 pt-2 text-[10px] uppercase tracking-wider text-slate-600">
-          v1.0 · Aggiornamento live
-        </p>
+        {operator && (
+          <span className={`${cerchio} mt-2 bg-lime font-display text-sm font-semibold text-lime-testo ring-4 ring-white`}>
+            {iniziale}
+            <span className={tooltip}>
+              {operator.nome} · {operator.email}
+            </span>
+          </span>
+        )}
       </div>
     </aside>
   );

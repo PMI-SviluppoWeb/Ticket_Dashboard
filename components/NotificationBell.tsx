@@ -63,7 +63,9 @@ export default function NotificationBell() {
     }
   }, [open, fetchNotifications]);
 
-  // Close on outside click
+  // Close on outside click and on Escape.
+  // Escape non e' un extra: un pannello che si apre col mouse ma si chiude
+  // solo col mouse e' inutilizzabile da tastiera.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -76,8 +78,15 @@ export default function NotificationBell() {
         setOpen(false);
       }
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   const markAsRead = async (id: string) => {
@@ -120,12 +129,18 @@ export default function NotificationBell() {
         ref={btnRef}
         type="button"
         onClick={() => setOpen(!open)}
-        className="relative rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="relative grid h-11 w-11 cursor-pointer place-items-center rounded-full bg-white text-inchiostro shadow-soft ring-1 ring-crema-contorno duration-200 hover:bg-lime"
         title="Notifiche"
+        aria-label={count > 0 ? `Notifiche, ${count} non lette` : "Notifiche"}
       >
         <BellIcon className="h-5 w-5" />
         {count > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+          // Il contatore e' in inchiostro, non in rosso: e' un numero di
+          // elementi in attesa, non un errore. Il rosso in questa palette
+          // segnala urgenza reale.
+          <span className="tabular absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-inchiostro px-1 text-[10px] font-bold text-white">
             {count > 99 ? "99+" : count}
           </span>
         )}
@@ -134,15 +149,16 @@ export default function NotificationBell() {
       {open && (
         <div
           ref={panelRef}
-          className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+          className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-panel border border-crema-contorno bg-white shadow-lg"
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <h3 className="text-sm font-semibold text-slate-900">Notifiche</h3>
+          <div className="flex items-center justify-between border-b border-crema-bordo px-4 py-3">
+            <h3 className="text-sm font-semibold text-inchiostro">Notifiche</h3>
             {count > 0 && (
               <button
+                type="button"
                 onClick={markAllRead}
-                className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                className="cursor-pointer text-xs font-medium text-caldo-testo transition-colors duration-200 hover:text-inchiostro hover:underline"
               >
                 Segna tutte come lette
               </button>
@@ -152,45 +168,64 @@ export default function NotificationBell() {
           {/* List */}
           <div className="max-h-80 overflow-y-auto">
             {loading ? (
-              <div className="py-8 text-center text-sm text-slate-400">Caricamento...</div>
+              <div className="py-8 text-center text-sm text-caldo-testo">Caricamento…</div>
             ) : notifications.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-400">
-                Nessuna notifica
+              <div className="px-4 py-8 text-center">
+                <p className="text-sm font-medium text-inchiostro">Nessuna notifica</p>
+                <p className="mt-1 text-xs text-caldo-testo">
+                  Qui arrivano gli aggiornamenti sui ticket.
+                </p>
               </div>
             ) : (
               notifications.map((n) => (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 border-b border-slate-100 px-4 py-3 transition hover:bg-slate-50 ${
-                    !n.letta ? "bg-blue-50/50" : ""
+                  className={`flex items-start gap-3 border-b border-crema-bordo px-4 py-3 transition-colors duration-200 hover:bg-crema-scuro ${
+                    !n.letta ? "bg-crema-scuro/60" : ""
                   }`}
                 >
-                  <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                    n.tipo === "nuovo_ticket" ? "bg-green-100" : "bg-slate-100"
-                  }`}>
+                  <div
+                    className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${
+                      n.tipo === "nuovo_ticket"
+                        ? "border-stato-info-bordo bg-stato-info-bg"
+                        : "border-stato-ok-bordo bg-stato-ok-bg"
+                    }`}
+                  >
                     {n.tipo === "nuovo_ticket" ? (
-                      <TicketIcon className="h-3.5 w-3.5 text-green-600" />
+                      <TicketIcon className="h-3.5 w-3.5 text-stato-info-testo" />
                     ) : (
-                      <CheckCircleIcon className="h-3.5 w-3.5 text-slate-500" />
+                      <CheckCircleIcon className="h-3.5 w-3.5 text-stato-ok-testo" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <p className={`text-sm ${!n.letta ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}>
+                      <p
+                        className={`text-sm text-inchiostro ${
+                          !n.letta ? "font-semibold" : "font-medium"
+                        }`}
+                      >
                         {n.titolo}
                       </p>
                       {!n.letta && (
-                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-inchiostro"
+                          aria-label="Non letta"
+                        />
                       )}
                     </div>
-                    <p className="mt-0.5 text-xs text-slate-500 line-clamp-2">{n.messaggio}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-caldo-testo">{n.messaggio}</p>
                     <div className="mt-1 flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400">{formatTime(n.data_creazione)}</span>
+                      <span className="tabular text-[10px] text-caldo-testo/80">
+                        {formatTime(n.data_creazione)}
+                      </span>
                       {n.ticket_id && (
                         <a
                           href={`/tickets/${n.ticket_id}`}
-                          onClick={(e) => { e.stopPropagation(); setOpen(false); }}
-                          className="text-[10px] font-medium text-blue-500 hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpen(false);
+                          }}
+                          className="text-[10px] font-medium text-inchiostro underline-offset-2 hover:underline"
                         >
                           Vedi ticket
                         </a>
@@ -199,9 +234,11 @@ export default function NotificationBell() {
                   </div>
                   {!n.letta && (
                     <button
+                      type="button"
                       onClick={() => markAsRead(n.id)}
-                      className="mt-1 shrink-0 rounded p-0.5 text-slate-300 hover:text-slate-500"
+                      className="mt-1 shrink-0 cursor-pointer rounded p-0.5 text-caldo-testo/60 transition-colors duration-200 hover:text-inchiostro"
                       title="Segna come letta"
+                      aria-label="Segna come letta"
                     >
                       <CheckCircleIcon className="h-3.5 w-3.5" />
                     </button>
