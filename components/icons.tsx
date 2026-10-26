@@ -362,3 +362,106 @@ export function ExternalLinkIcon({ className }: IconProps) {
     </Svg>
   );
 }
+
+export function CalendarIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4" />
+      <path d="M8 2v4" />
+      <path d="M3 10h18" />
+    </Svg>
+  );
+}
+
+export function FolderIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+    </Svg>
+  );
+}
+
+export function ChevronLeftIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <polyline points="15 18 9 12 15 6" />
+    </Svg>
+  );
+}
+
+export function ColumnsIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+      <path d="M15 3v18" />
+    </Svg>
+  );
+}
+
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <polyline points="20 6 9 17 4 12" />
+    </Svg>
+  );
+}
+
+export function XIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </Svg>
+  );
+}
+
+export function MessageIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </Svg>
+  );
+}
+
+export function ListChecksIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="m3 17 2 2 4-4" />
+      <path d="m3 7 2 2 4-4" />
+      <path d="M13 6h8" />
+      <path d="M13 12h8" />
+      <path d="M13 18h8" />
+    </Svg>
+  );
+}
+
+export function SendIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </Svg>
+  );
+}
+
+export function LayersIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="m12 2 9 5-9 5-9-5 9-5Z" />
+      <path d="m3 12 9 5 9-5" />
+      <path d="m3 17 9 5 9-5" />
+    </Svg>
+  );
+}
+
+export function TimerIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <line x1="10" x2="14" y1="2" y2="2" />
+      <line x1="12" x2="15" y1="14" y2="11" />
+      <circle cx="12" cy="14" r="8" />
+    </Svg>
+  );
+}

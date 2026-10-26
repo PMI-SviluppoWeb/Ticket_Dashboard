@@ -2,11 +2,144 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body {
-  height: 100%;
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply antialiased;
+    /* Luce diffusa dall'alto a sinistra, come nella reference: il canvas
+       piatto fa sembrare le card bianche ritagliate, la sfumatura le posa. */
+    background-image: radial-gradient(
+      120% 80% at 0% 0%,
+      rgb(255 255 255 / 0.7),
+      transparent 60%
+    );
+  }
+
+  /* Pressione fisica sui controlli: risposta immediata al tocco. */
+  button:not(:disabled),
+  a[role="button"] {
+    transition-property: color, background-color, border-color, box-shadow, transform;
+    transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
 }
 
-body {
-  @apply antialiased;
+/* La selezione del testo e' l'unico residuo del vecchio sistema che non si
+   puo' correggere con le utility: il blu di default del browser resta blu
+   anche su un fondo crema. */
+::selection {
+  background-color: #c8f25a; /* lime */
+  color: #151515; /* inchiostro */
+}
+
+/* Focus da tastiera.
+   Regola generale: anello in inchiostro, non blu. Vale per link, bottoni e
+   ogni elemento che non definisca un focus proprio.
+   I campi form sono ESCLUSI perche' hanno gia' il loro anello (focus:ring +
+   bordo): senza questa esclusione comparirebbero due indicatori sovrapposti,
+   che si legge come un difetto. */
+:focus-visible {
+  outline: 2px solid #151515;
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+/* Ingresso della pagina: i blocchi principali salgono di poco, in sequenza.
+   Solo opacity e transform, quindi nessun reflow. */
+@keyframes entra {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+main > * {
+  animation: entra 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+main > *:nth-child(2) { animation-delay: 60ms; }
+main > *:nth-child(3) { animation-delay: 120ms; }
+main > *:nth-child(n + 4) { animation-delay: 180ms; }
+
+/* Drawer laterale della task.
+   Velo e pannello entrano con la stessa curva dell'ingresso pagina, cosi' un
+   pannello sovrapposto non sembra provenire da un'altra applicazione. Il
+   pannello scorre in ORIZZONTALE (e' il gesto che comunica "arriva da destra");
+   il velo sale di poco, solo opacity + transform, quindi nessun reflow.
+
+   Uscita piu' rapida? Qui non serve: il drawer viene smontato, non animato in
+   chiusura. Se in futuro servira' un'uscita, annotarla con `anim-drawer-out`
+   piuttosto che riusare questa. */
+@keyframes entra-drawer {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes entra-velo {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.anim-drawer {
+  animation: entra-drawer 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.anim-velo {
+  animation: entra-velo 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Cifre a larghezza fissa nei dati.
+   In Inter i numeri sono proporzionali per default, quindi una colonna di
+   importi o di date non resta incolonnata. Vale per tabelle, contatori e
+   timestamp: i valori non devono ballare quando cambiano. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbar discreta, in tinta fredda.
+   Su una dashboard le colonne scrollabili sono molte e la scrollbar di
+   sistema (larga, grigio freddo) e' uno degli elementi che stona di piu'. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #dadce1 transparent; /* crema-contorno */
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #dadce1; /* crema-contorno */
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #c2c5cc;
+}
+
+/* Rispetto della preferenza di sistema per il motion ridotto.
+   Non e' un dettaglio di cortesia: chi ha disturbi vestibolari o emicrania
+   impostata questa preferenza sta chiedendo esplicitamente che le animazioni
+   non siano essenziali. La durata viene azzerata, non l'animazione, cosi' gli
+   stati finali restano corretti. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
