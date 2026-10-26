@@ -27,3 +27,8 @@ hermes-gmail-*.json
 
 # Output di graphify (rigenerabile con `graphify update .`)
 graphify-out/
+
+# Stato locale del hook impeccable (config del rilevatore, cache).
+# La configurazione vera e condivisa vive altrove; questa e' macchina-specifica
+# e non deve finire nei commit degli altri.
+.impeccable/
