@@ -43,30 +43,33 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-crema px-4 py-10">
       <div className="w-full max-w-md">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-blue-600 text-white mb-4">
+        <div className="rounded-card border border-crema-contorno bg-white p-8">
+          <div className="mb-8 text-center">
+            <div className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-panel bg-inchiostro text-white">
               <HeadsetIcon className="h-8 w-8" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">Support Desk</h1>
-            <p className="text-slate-500 mt-1">Accedi per gestire i tuoi ticket</p>
+            <h1 className="text-2xl font-bold tracking-tight text-inchiostro">Support Desk</h1>
+            <p className="mt-1.5 text-sm text-caldo-testo">Accedi per gestire i tuoi ticket</p>
           </div>
 
           {error && (
-            <div className="mb-6 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">
+            <div
+              className="mb-6 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm font-medium text-stato-urgenza-testo"
+              role="alert"
+            >
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-inchiostro">
                 Email
               </label>
               <div className="relative">
-                <MailIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <MailIcon className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-caldo-testo" />
                 <input
                   id="email"
                   type="email"
@@ -74,18 +77,18 @@ function LoginForm() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
+                  className="w-full rounded-control border border-crema-contorno bg-white py-2.5 pl-10 pr-3 text-inchiostro transition-colors duration-200 placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                   placeholder="mario.rossi@azienda.it"
                 />
               </div>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-inchiostro">
                 Password
               </label>
               <div className="relative">
-                <LockClosedIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <LockClosedIcon className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-caldo-testo" />
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
@@ -93,13 +96,13 @@ function LoginForm() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="w-full pl-10 pr-12 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
+                  className="w-full rounded-control border border-crema-contorno bg-white py-2.5 pl-10 pr-12 text-inchiostro transition-colors duration-200 placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
                   aria-label={showPassword ? "Nascondi password" : "Mostra password"}
                 >
                   {showPassword ? <EyeSlashIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
@@ -110,7 +113,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-blue-700 text-white font-semibold text-sm transition hover:bg-blue-800 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-inchiostro py-2.5 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
                 <>
@@ -123,7 +126,7 @@ function LoginForm() {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-slate-500">
+          <p className="mt-6 text-center text-xs text-caldo-testo">
             Non hai un account? Contatta l&apos;amministratore.
           </p>
         </div>
@@ -134,7 +137,13 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-100"><p>Caricamento...</p></div>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-crema">
+          <p className="text-sm text-caldo-testo">Caricamento…</p>
+        </div>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

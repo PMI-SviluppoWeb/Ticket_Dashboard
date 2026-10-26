@@ -10,50 +10,53 @@ import type {
   TechnicalNote,
   Ticket,
 } from "@/lib/types";
-import { PRIORITY_STYLES, STATUS_STYLES } from "@/components/badges";
+import {
+  PRIORITY_LABELS,
+  PRIORITY_STYLES,
+  STATUS_LABELS,
+  STATUS_STYLES,
+  chip,
+} from "@/components/badges";
 import {
   InfoIcon,
-  SparklesIcon,
   CheckCircleIcon,
   AlertCircleIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   TrashIcon,
   EditIcon,
   BookIcon,
   UserIcon,
+  UserPlusIcon,
+  MailIcon,
+  ClockIcon,
+  CalendarIcon,
+  TicketIcon,
+  FolderIcon,
 } from "@/components/icons";
 
-const STATI_MAP: Record<StatoTicket, string> = {
-  NUOVO: "Nuovo",
-  IN_CORSO: "In Lavorazione",
-  RISOLTO: "Risolto",
-  CHIUSO: "Chiuso",
-};
+// Base del chip.
+//
+// Arriva dal kit (`chip()`), non da una copia locale: i chip di stato e priorita'
+// non sono coperti dai componenti gia' pronti del kit, perche' quello di stato
+// porta anche il puntino e quello di priorita' il prefisso "Priorita: ". Senza
+// questa base i chip resterebbero senza padding e senza bordo (`border-<colore>`
+// da solo non disegna nulla: la larghezza del bordo e' 0 finche' non arriva
+// `border`).
+const CHIP_BASE = chip("", { taglia: "lg" });
 
-const STATI_COLORS: Record<StatoTicket, string> = {
-  NUOVO: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  IN_CORSO: "bg-blue-50 text-blue-700 border border-blue-200",
-  RISOLTO: "bg-violet-50 text-violet-700 border border-violet-200",
-  CHIUSO: "bg-slate-100 text-slate-600 border border-slate-200",
-};
-
+// Colore del puntino pieno di ciascuno stato.
+//
+// Il kit condiviso (components/badges.tsx) esporta i chip completi ma non i
+// puntini: qui serve la sola tinta, non fondo+bordo. Si usa la tinta di TESTO
+// della stessa famiglia semantica di STATUS_STYLES, cosi' il puntino e il chip
+// raccontano lo stesso stato con lo stesso colore. Un -bg sarebbe troppo chiaro
+// per un puntino da 6px (e' un fondo pensato per stendere un chip intero).
 const STATI_DOT: Record<StatoTicket, string> = {
-  NUOVO: "bg-emerald-500",
-  IN_CORSO: "bg-blue-500",
-  RISOLTO: "bg-violet-500",
-  CHIUSO: "bg-slate-400",
-};
-
-const PRIORITA_MAP: Record<Priorita, string> = {
-  BASSA: "Bassa",
-  MEDIA: "Media",
-  ALTA: "Alta",
-};
-
-const PRIORITA_COLORS: Record<Priorita, string> = {
-  BASSA: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  MEDIA: "bg-amber-50 text-amber-700 border border-amber-200",
-  ALTA: "bg-red-50 text-red-700 border border-red-200",
+  NUOVO: "bg-stato-info-testo",
+  IN_CORSO: "bg-stato-malva-testo",
+  RISOLTO: "bg-stato-ok-testo",
+  CHIUSO: "bg-stato-neutro-testo",
 };
 
 const STATUS_OPTIONS: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
@@ -466,9 +469,9 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
   if (loading && !ticket) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-50">
-        <div className="flex items-center gap-3 text-slate-400">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+      <div className="flex h-full items-center justify-center bg-crema">
+        <div className="flex items-center gap-3 text-caldo-testo">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-crema-contorno border-t-inchiostro" />
           <span className="text-sm font-medium">Caricamento ticket...</span>
         </div>
       </div>
@@ -477,12 +480,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
   if (!ticket) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 bg-slate-50 p-8">
-        <p className="text-sm text-slate-500">Ticket non trovato.</p>
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-crema p-8">
+        <p className="text-sm text-caldo-testo">Ticket non trovato.</p>
         <button
           type="button"
           onClick={onBack}
-          className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition shadow-sm"
+          className="cursor-pointer rounded-control border border-crema-contorno bg-white px-5 py-2.5 text-sm font-medium text-inchiostro transition-colors duration-200 hover:bg-crema-scuro"
         >
           Torna alla dashboard
         </button>
@@ -493,12 +496,17 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const isClosed = ticket.stato === "CHIUSO";
 
   return (
-    <div className="flex h-full flex-col bg-slate-50/70">
+    <div className="flex h-full flex-col bg-crema">
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-6">
-        {/* Error banner */}
+      <main className="flex-1 space-y-6 overflow-y-auto px-6 py-6 lg:px-8">
+        {/* Error banner — l'errore e' un ticket che richiede attenzione, quindi
+            famiglia urgenza (come la priorita' ALTA), non `pericolo`: quello e'
+            riservato alle azioni irreversibili. */}
         {error && (
-          <div className="flex items-center gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm font-medium text-red-700">
+          <div
+            role="alert"
+            className="flex items-center gap-2.5 rounded-panel border border-stato-urgenza-bordo bg-stato-urgenza-bg px-4 py-3 text-sm font-medium text-stato-urgenza-testo"
+          >
             <AlertCircleIcon className="h-4 w-4 shrink-0" />
             {error}
           </div>
@@ -506,51 +514,55 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
         {/* Closed ticket banner */}
         {isClosed && (
-          <div className="flex items-center gap-2.5 rounded-xl bg-slate-100 border border-slate-200 px-4 py-3 text-sm text-slate-600">
-            <CheckCircleIcon className="h-4 w-4 shrink-0 text-slate-500" />
+          <div className="flex items-center gap-2.5 rounded-panel border border-stato-neutro-bordo bg-stato-neutro-bg px-4 py-3 text-sm text-stato-neutro-testo">
+            <CheckCircleIcon className="h-4 w-4 shrink-0" />
             Ticket chiuso il {ticket.data_chiusura}. Modifiche non consentite.
           </div>
         )}
 
         {/* ========== TICKET HEADER ========== */}
-        <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm">
+        <section className="rounded-panel border border-crema-contorno bg-white p-6">
           {/* Row 1: Breadcrumb & sync status */}
-          <div className="flex items-center justify-between gap-4 pb-4 border-b border-slate-100 text-xs">
-            <nav className="flex items-center gap-2 text-slate-500 font-medium">
-              <button type="button" onClick={onBack} className="hover:text-blue-600 transition-colors">
+          <div className="flex items-center justify-between gap-4 border-b border-crema-bordo pb-4 text-xs">
+            <nav aria-label="Percorso" className="flex items-center gap-2 font-medium text-caldo-testo">
+              <button
+                type="button"
+                onClick={onBack}
+                className="cursor-pointer transition-colors duration-200 hover:text-inchiostro"
+              >
                 Dashboard
               </button>
-              <span className="text-slate-300">&rsaquo;</span>
-              <span className="text-slate-800 font-semibold">{ticket.numero}</span>
+              <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 text-caldo-testo/60" />
+              <span className="tabular font-semibold text-inchiostro">{ticket.numero}</span>
             </nav>
-            <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
-              <span className={`inline-block w-2 h-2 rounded-full ${STATI_DOT[ticket.stato]}`} />
-              {STATI_MAP[ticket.stato]}
+            <div className="flex items-center gap-2 text-xs font-medium text-caldo-testo">
+              <span className={`inline-block h-2 w-2 rounded-full ${STATI_DOT[ticket.stato]}`} />
+              {STATUS_LABELS[ticket.stato]}
             </div>
           </div>
 
           {/* Row 2: Title, badges, actions */}
-          <div className="py-5 flex items-start justify-between gap-6">
-            <div className="space-y-3 min-w-0 flex-1">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="font-mono font-bold text-xs bg-slate-900 text-white px-2.5 py-1 rounded-md tracking-wider">
+          <div className="flex items-start justify-between gap-6 py-5">
+            <div className="min-w-0 flex-1 space-y-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="tabular rounded-control bg-inchiostro px-2.5 py-1 font-mono text-xs font-bold tracking-wider text-white">
                   #{ticket.numero}
                 </span>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATI_COLORS[ticket.stato]}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${STATI_DOT[ticket.stato]}`} />
-                  {STATI_MAP[ticket.stato]}
+                <span className={`${CHIP_BASE} ${STATUS_STYLES[ticket.stato]}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${STATI_DOT[ticket.stato]}`} />
+                  {STATUS_LABELS[ticket.stato]}
                 </span>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${PRIORITA_COLORS[ticket.priorita]}`}>
-                  Priorita: {PRIORITA_MAP[ticket.priorita]}
+                <span className={`${CHIP_BASE} ${PRIORITY_STYLES[ticket.priorita]}`}>
+                  Priorita: {PRIORITY_LABELS[ticket.priorita]}
                 </span>
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight leading-snug break-words">
+              <h1 className="break-words text-xl font-bold leading-snug tracking-tight text-inchiostro sm:text-2xl">
                 {ticket.sommario_problema}
               </h1>
             </div>
 
             {/* Action buttons stack */}
-            <div className="flex flex-col gap-2 flex-shrink-0 w-64">
+            <div className="flex w-64 flex-shrink-0 flex-col gap-2">
               {!isClosed && ticket.stato !== "IN_CORSO" && (
                 <button
                   type="button"
@@ -563,12 +575,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                     });
                   }}
                   disabled={saving}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/25 transition-all disabled:opacity-50"
+                  className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-inchiostro px-3.5 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
                 >
                   {saving ? (
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   ) : (
-                    <span className="text-base">+</span>
+                    <UserPlusIcon className="h-4 w-4" />
                   )}
                   Prendi in carico
                 </button>
@@ -578,9 +590,10 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 <button
                   type="button"
                   onClick={() => setShowEmailForm(!showEmailForm)}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors shadow-sm"
+                  aria-expanded={showEmailForm}
+                  className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-control border border-crema-contorno bg-white px-3 py-2 text-xs font-semibold text-inchiostro transition-colors duration-200 hover:bg-crema-scuro sm:text-sm"
                 >
-                  <span className="text-blue-600">&#9993;</span>
+                  <MailIcon className="h-4 w-4" />
                   {showEmailForm ? "Chiudi Email" : "Invia Email / Rispondi"}
                 </button>
               )}
@@ -590,53 +603,57 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                   type="button"
                   onClick={() => setConfirmClose(true)}
                   disabled={isClosed}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-expanded={confirmClose}
+                  className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-control border border-crema-contorno bg-crema-scuro px-3 py-2 text-xs font-semibold text-caldo-testo transition-colors duration-200 hover:text-inchiostro disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
                 >
                   {isClosed ? "Gi Chiuso" : "Chiudi Ticket"}
                 </button>
               ) : (
-                <div className="flex items-center gap-2 w-full">
+                <div className="flex w-full items-center gap-2">
                   <button
                     type="button"
                     onClick={handleCloseTicket}
                     disabled={saving}
-                    className="flex-1 rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                    className="flex-1 cursor-pointer rounded-control bg-inchiostro px-3 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? "Chiusura..." : "Conferma"}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmClose(false)}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    className="cursor-pointer rounded-control border border-crema-contorno px-3 py-2 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro"
                   >
                     Annulla
                   </button>
                 </div>
               )}
 
-              {/* Delete button */}
+              {/* Delete button — azione distruttiva, quindi `pericolo` e non
+                  `stato-urgenza`: il rosso urgenza segnala un ticket urgente,
+                  questo rosso segnala qualcosa che non si puo' annullare. */}
               {!confirmDelete ? (
                 <button
                   type="button"
                   onClick={() => setConfirmDelete(true)}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors"
+                  aria-expanded={confirmDelete}
+                  className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-control border border-transparent bg-pericolo/10 px-3 py-2 text-xs font-semibold text-pericolo transition-colors duration-200 hover:bg-pericolo/20 sm:text-sm"
                 >
                   Elimina Ticket
                 </button>
               ) : (
-                <div className="flex items-center gap-2 w-full">
+                <div className="flex w-full items-center gap-2">
                   <button
                     type="button"
                     onClick={elimina}
                     disabled={saving}
-                    className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                    className="flex-1 cursor-pointer rounded-control bg-pericolo px-3 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-pericolo-scuro disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? "Eliminazione..." : "Conferma Elimina"}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(false)}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    className="cursor-pointer rounded-control border border-crema-contorno px-3 py-2 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro"
                   >
                     Annulla
                   </button>
@@ -646,23 +663,29 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
           </div>
 
           {/* Row 3: Metadata bar */}
-          <div className="flex flex-wrap items-center gap-y-2 gap-x-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
-            <div className="flex items-center gap-1.5 font-medium text-slate-700">
-              <span className="text-slate-400">&#128196;</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-crema-bordo pt-3 text-xs text-caldo-testo">
+            <div className="flex items-center gap-1.5 font-medium text-inchiostro">
+              <TicketIcon className="h-3.5 w-3.5 shrink-0 text-caldo-testo" />
               <span>Modulo:</span>
-              <span className="font-mono font-semibold bg-slate-100 px-2 py-0.5 rounded text-slate-800 border border-slate-200">{ticket.modulo_software}</span>
+              <span className="rounded bg-crema-scuro px-2 py-0.5 font-mono font-semibold text-inchiostro">
+                {ticket.modulo_software}
+              </span>
             </div>
-            <span className="text-slate-300">&bull;</span>
+            <span className="h-3 w-px bg-crema-contorno" />
             <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">&#128197;</span>
-              <span>Ricevuto: <strong className="text-slate-700 font-semibold">{ticket.data_creazione}</strong></span>
+              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-caldo-testo" />
+              <span>
+                Ricevuto: <strong className="tabular font-semibold text-inchiostro">{ticket.data_creazione}</strong>
+              </span>
             </div>
             {ticket.operatore && (
               <>
-                <span className="text-slate-300">&bull;</span>
+                <span className="h-3 w-px bg-crema-contorno" />
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">&#128100;</span>
-                  <span>Operatore: <strong className="text-slate-700 font-semibold">{ticket.operatore}</strong></span>
+                  <UserIcon className="h-3.5 w-3.5 shrink-0 text-caldo-testo" />
+                  <span>
+                    Operatore: <strong className="font-semibold text-inchiostro">{ticket.operatore}</strong>
+                  </span>
                 </div>
               </>
             )}
@@ -671,12 +694,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
         {/* Unassigned ticket CTA */}
         {!isClosed && currentUser?.ruolo !== "admin" && !ticket.operatore && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-center justify-between">
+          <div className="flex items-center justify-between rounded-panel border border-stato-info-bordo bg-stato-info-bg p-4">
             <div className="flex items-center gap-3">
-              <InfoIcon className="h-5 w-5 shrink-0 text-blue-500" />
+              <InfoIcon className="h-5 w-5 shrink-0" />
               <div>
-                <p className="text-sm font-semibold text-blue-800">Questo ticket e disponibile</p>
-                <p className="text-xs text-blue-600">Nessun operatore assegnato. Puoi prendere in carico.</p>
+                <p className="text-sm font-semibold">Questo ticket e disponibile</p>
+                <p className="text-xs">Nessun operatore assegnato. Puoi prendere in carico.</p>
               </div>
             </div>
             <button
@@ -689,7 +712,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 });
               }}
               disabled={saving}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? "Assegnamento..." : "Prendi in carico"}
             </button>
@@ -698,12 +721,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
         {/* Assigned to another operator */}
         {!isClosed && currentUser?.ruolo !== "admin" && ticket.operatore && ticket.operatore !== currentUser?.nome && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between">
+          <div className="flex items-center justify-between rounded-panel border border-stato-attesa-bordo bg-stato-attesa-bg p-4">
             <div className="flex items-center gap-3">
-              <AlertCircleIcon className="h-5 w-5 shrink-0 text-amber-500" />
+              <AlertCircleIcon className="h-5 w-5 shrink-0" />
               <div>
-                <p className="text-sm font-semibold text-amber-800">Assegnato a <strong>{ticket.operatore}</strong></p>
-                <p className="text-xs text-amber-600">Puoi visualizzare ma le modifiche sono limitate.</p>
+                <p className="text-sm font-semibold">Assegnato a <strong>{ticket.operatore}</strong></p>
+                <p className="text-xs">Puoi visualizzare ma le modifiche sono limitate.</p>
               </div>
             </div>
             <button
@@ -715,7 +738,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 });
               }}
               disabled={saving}
-              className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-stato-attesa-bordo bg-white px-4 py-2 text-sm font-semibold text-stato-attesa-testo transition-colors duration-200 hover:bg-crema-scuro disabled:cursor-not-allowed disabled:opacity-50"
             >
               Collabora
             </button>
@@ -723,51 +746,51 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         )}
 
         {/* ========== 2-COLUMN GRID ========== */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 w-full items-start">
+        <div className="grid w-full grid-cols-1 items-start gap-6 xl:grid-cols-12">
           {/* ===== LEFT COLUMN (8 cols) ===== */}
-          <div className="xl:col-span-8 space-y-6">
+          <div className="space-y-6 xl:col-span-8">
 
             {/* 1. Customer Message Card */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
-              <div className="border-b border-slate-100 bg-slate-50/80 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+            <section className="overflow-hidden rounded-panel border border-crema-contorno bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-crema-bordo bg-crema-scuro px-6 py-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
-                    <span className="text-base">&#9993;</span>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-control border border-stato-info-bordo bg-stato-info-bg text-stato-info-testo">
+                    <MailIcon className="h-4 w-4" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-bold text-slate-900">Richiesta Originale</h2>
-                    <p className="text-xs text-slate-500">Descrizione del problema</p>
+                    <h2 className="text-sm font-bold text-inchiostro">Richiesta Originale</h2>
+                    <p className="text-xs text-caldo-testo">Descrizione del problema</p>
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 font-medium bg-white px-2.5 py-1 rounded-md border border-slate-200/80 shadow-sm">
+                <span className="tabular inline-flex items-center gap-1.5 rounded-control border border-crema-contorno bg-white px-2.5 py-1 text-xs font-medium text-caldo-testo">
                   {ticket.data_creazione}
                 </span>
               </div>
-              <div className="p-6 space-y-5">
+              <div className="space-y-5 p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3.5">
-                    <div className="w-11 h-11 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center text-sm shadow-sm ring-4 ring-slate-100">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-inchiostro text-sm font-bold text-white ring-4 ring-crema-scuro">
                       {getInitials(ticket.contatto || ticket.cliente)}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-slate-900">{ticket.contatto || "Non specificato"}</h3>
-                        <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{ticket.cliente}</span>
+                        <h3 className="text-sm font-bold text-inchiostro">{ticket.contatto || "Non specificato"}</h3>
+                        <span className="rounded bg-stato-neutro-bg px-2 py-0.5 text-[11px] font-medium text-stato-neutro-testo">{ticket.cliente}</span>
                       </div>
-                      <p className="text-xs text-slate-500 font-mono mt-0.5">{ticket.email || "Nessuna email"}</p>
+                      <p className="mt-0.5 font-mono text-xs text-caldo-testo">{ticket.email || "Nessuna email"}</p>
                     </div>
                   </div>
                 </div>
-                <div className="bg-slate-50/90 border border-slate-200/90 rounded-xl p-5 text-sm text-slate-700 leading-relaxed space-y-3">
-                  <div className="flex items-center gap-2 pb-2.5 border-b border-slate-200/70 text-xs text-slate-600 font-semibold">
+                <div className="space-y-3 rounded-panel border border-crema-bordo bg-crema-scuro p-5 text-sm leading-relaxed text-caldo-testo">
+                  <div className="flex items-center gap-2 border-b border-crema-contorno pb-2.5 text-xs font-semibold text-caldo-testo">
                     <span>Oggetto:</span>
-                    <span className="text-slate-900 font-bold">{ticket.sommario_problema}</span>
+                    <span className="font-bold text-inchiostro">{ticket.sommario_problema}</span>
                   </div>
                   <p className="whitespace-pre-wrap">{ticket.descrizione_dettagliata}</p>
                   {ticket.note && (
-                    <div className="pt-3 border-t border-slate-200/70">
-                      <p className="text-xs font-semibold text-slate-500 mb-1">Note interne:</p>
-                      <p className="text-xs text-slate-600 whitespace-pre-wrap">{ticket.note}</p>
+                    <div className="border-t border-crema-contorno pt-3">
+                      <p className="mb-1 text-xs font-semibold text-inchiostro">Note interne:</p>
+                      <p className="whitespace-pre-wrap text-xs text-caldo-testo">{ticket.note}</p>
                     </div>
                   )}
                 </div>
@@ -775,33 +798,33 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
             </section>
 
             {/* 2. Quick Reply / Composer */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6 space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-6">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-                    <span className="text-base">&#9998;</span>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-control border border-stato-malva-bordo bg-stato-malva-bg text-stato-malva-testo">
+                    <EditIcon className="h-4 w-4" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-bold text-slate-900">Risposta Rapida</h2>
-                    <p className="text-xs text-slate-500">Aggiungi una nota interna</p>
+                    <h2 className="text-sm font-bold text-inchiostro">Risposta Rapida</h2>
+                    <p className="text-xs text-caldo-testo">Aggiungi una nota interna</p>
                   </div>
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all bg-white overflow-hidden">
+              <div className="overflow-hidden rounded-control border border-crema-contorno bg-white transition-colors duration-200 focus-within:border-inchiostro focus-within:ring-2 focus-within:ring-inchiostro/20">
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   rows={3}
                   placeholder="Scrivi una nota interna..."
                   disabled={isClosed}
-                  className="w-full text-xs sm:text-sm p-4 border-0 focus:ring-0 text-slate-800 placeholder-slate-400 resize-y min-h-[80px] disabled:bg-slate-50 disabled:cursor-not-allowed"
+                  className="min-h-[80px] w-full resize-y border-0 p-4 text-xs text-inchiostro placeholder-caldo-testo focus:ring-0 disabled:cursor-not-allowed disabled:bg-crema-scuro sm:text-sm"
                 />
-                <div className="bg-slate-50/90 px-4 py-2.5 border-t border-slate-100 flex items-center justify-end">
+                <div className="flex items-center justify-end border-t border-crema-bordo bg-crema-scuro px-4 py-2.5">
                   <button
                     type="button"
                     onClick={handleSaveAll}
                     disabled={saving || isClosed}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-600/25 transition-colors disabled:opacity-50"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-inchiostro px-4 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? "Salvataggio..." : saved ? "Salvato!" : "Salva Note"}
                   </button>
@@ -810,48 +833,48 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
             </section>
 
             {/* 3. Technical Notes */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6 space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-6">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-control border border-stato-ok-bordo bg-stato-ok-bg text-stato-ok-testo">
                     <BookIcon className="h-4 w-4" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-bold text-slate-900">Note Tecniche</h2>
-                    <p className="text-xs text-slate-500">{ticket.note_tecniche.length} note archiviate</p>
+                    <h2 className="text-sm font-bold text-inchiostro">Note Tecniche</h2>
+                    <p className="tabular text-xs text-caldo-testo">{ticket.note_tecniche.length} note archiviate</p>
                   </div>
                 </div>
               </div>
 
               {/* Add/Edit Note Form */}
               {!isClosed && (
-                <div className="rounded-xl bg-slate-50 p-4 border border-slate-200 space-y-3">
-                  <h3 className="text-xs font-semibold text-slate-600">
+                <div className="space-y-3 rounded-panel border border-crema-contorno bg-crema-scuro p-4">
+                  <h3 className="text-xs font-semibold text-inchiostro">
                     {editingNote ? "Modifica Nota" : "Nuova Nota Tecnica"}
                   </h3>
                   <input
                     value={noteForm.titolo}
                     onChange={(e) => setNoteForm((f) => ({ ...f, titolo: e.target.value }))}
                     placeholder="Titolo nota *"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-control border border-crema-contorno bg-white px-3 py-2 text-sm text-inchiostro placeholder-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                   />
                   <textarea
                     value={noteForm.problema}
                     onChange={(e) => setNoteForm((f) => ({ ...f, problema: e.target.value }))}
                     rows={2}
                     placeholder="Problema riscontrato..."
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                    className="w-full resize-none rounded-control border border-crema-contorno bg-white px-3 py-2 text-sm text-inchiostro placeholder-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                   />
                   <textarea
                     value={noteForm.soluzione}
                     onChange={(e) => setNoteForm((f) => ({ ...f, soluzione: e.target.value }))}
                     rows={3}
                     placeholder="Soluzione applicata *"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                    className="w-full resize-none rounded-control border border-crema-contorno bg-white px-3 py-2 text-sm text-inchiostro placeholder-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                   />
 
                   {/* File Upload */}
-                  <div className="rounded-lg border-2 border-dashed border-violet-200 bg-white p-3 text-center hover:border-violet-400 transition">
+                  <div className="rounded-control border-2 border-dashed border-stato-malva-bordo bg-white p-3 text-center transition-colors duration-200 hover:border-stato-malva-testo">
                     <input
                       type="file"
                       id="note-file-input-new"
@@ -864,21 +887,26 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                         e.target.value = "";
                       }}
                     />
-                    <label htmlFor="note-file-input-new" className="cursor-pointer text-violet-600 hover:text-violet-700">
-                      <p className="text-xs font-medium text-slate-600">Allega file</p>
-                      <p className="text-[10px] text-slate-400">Immagini, PDF, documenti...</p>
+                    <label htmlFor="note-file-input-new" className="cursor-pointer text-stato-malva-testo transition-colors duration-200 hover:text-inchiostro">
+                      <p className="text-xs font-medium text-caldo-testo">Allega file</p>
+                      <p className="text-[10px] text-caldo-testo">Immagini, PDF, documenti...</p>
                     </label>
                   </div>
 
                   {pendingFiles.length > 0 && (
                     <div className="space-y-1.5">
                       {pendingFiles.map((file, idx) => (
-                        <div key={`${file.name}-${idx}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
-                          <div className="h-6 w-6 shrink-0 rounded bg-violet-100 flex items-center justify-center text-[9px] font-bold text-violet-600">
+                        <div key={`${file.name}-${idx}`} className="flex items-center gap-2 rounded-control border border-crema-contorno bg-white p-2">
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-stato-malva-bg text-[9px] font-bold text-stato-malva-testo">
                             {file.name.split(".").pop()?.toUpperCase() || "?"}
                           </div>
-                          <span className="text-xs text-slate-700 truncate flex-1">{file.name}</span>
-                          <button type="button" onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500 p-0.5">
+                          <span className="flex-1 truncate text-xs text-inchiostro">{file.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
+                            aria-label={`Rimuovi ${file.name}`}
+                            className="cursor-pointer p-0.5 text-caldo-testo transition-colors duration-200 hover:text-pericolo"
+                          >
                             <TrashIcon className="h-3 w-3" />
                           </button>
                         </div>
@@ -891,7 +919,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       type="button"
                       onClick={saveNoteTecnica}
                       disabled={saving || !noteForm.titolo.trim() || !noteForm.soluzione.trim()}
-                      className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
+                      className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {saving ? "Salvataggio..." : editingNote ? "Aggiorna" : "Aggiungi Nota"}
                     </button>
@@ -899,7 +927,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       <button
                         type="button"
                         onClick={() => { setEditingNote(null); setNoteForm({ titolo: "", problema: "", soluzione: "" }); setPendingFiles([]); }}
-                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                        className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-white"
                       >
                         Annulla
                       </button>
@@ -910,38 +938,54 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
               {/* Notes List */}
               {ticket.note_tecniche.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">
+                <p className="rounded-panel border border-dashed border-crema-contorno p-4 text-center text-sm text-caldo-testo">
                   Nessuna nota tecnica presente.
                 </p>
               ) : (
                 <div className="space-y-3">
                   {ticket.note_tecniche.map((n) => (
-                    <div key={n.id} className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div key={n.id} className="rounded-panel border border-crema-contorno bg-crema-scuro p-4">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <h4 className="text-sm font-semibold text-slate-800">{n.titolo}</h4>
-                          <p className="mt-0.5 text-[11px] text-slate-400">
+                          <h4 className="text-sm font-semibold text-inchiostro">{n.titolo}</h4>
+                          <p className="tabular mt-0.5 text-[11px] text-caldo-testo">
                             {n.data_creazione}{n.operatore ? ` - ${n.operatore}` : ""}
                           </p>
                           {n.allegati && n.allegati.length > 0 && (
-                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-stato-malva-bordo bg-stato-malva-bg px-2 py-0.5 text-[10px] font-semibold text-stato-malva-testo">
                               {n.allegati.length} {n.allegati.length === 1 ? "allegato" : "allegati"}
                             </span>
                           )}
                         </div>
                         {!isClosed && (
                           <div className="flex shrink-0 gap-1.5">
-                            <label className="cursor-pointer rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-100 transition">
+                            <label className="cursor-pointer rounded-control border border-stato-malva-bordo bg-stato-malva-bg px-2 py-1 text-[11px] font-medium text-stato-malva-testo transition-colors duration-200 hover:border-stato-malva-testo">
                               Allega
                               <input type="file" className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z" onChange={(e) => handleFileSelect(e, n.id)} />
                             </label>
-                            <button type="button" onClick={() => setExpandedNote(expandedNote === n.id ? null : n.id)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">
-                              {expandedNote === n.id ? "▼" : "▶"}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedNote(expandedNote === n.id ? null : n.id)}
+                              aria-expanded={expandedNote === n.id}
+                              aria-label={expandedNote === n.id ? "Comprimi dettagli nota" : "Espandi dettagli nota"}
+                              className="cursor-pointer rounded-control border border-crema-contorno px-2 py-1 text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+                            >
+                              <ChevronDownIcon className={`h-3 w-3 transition-transform duration-200 ${expandedNote === n.id ? "rotate-180" : ""}`} />
                             </button>
-                            <button type="button" onClick={() => startEditNote(n)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => startEditNote(n)}
+                              aria-label="Modifica nota"
+                              className="cursor-pointer rounded-control border border-crema-contorno px-2 py-1 text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+                            >
                               <EditIcon className="h-3 w-3" />
                             </button>
-                            <button type="button" onClick={() => removeNote(n.id)} className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-500 hover:bg-red-50">
+                            <button
+                              type="button"
+                              onClick={() => removeNote(n.id)}
+                              aria-label="Elimina nota"
+                              className="cursor-pointer rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-2 py-1 text-stato-urgenza-testo transition-colors duration-200 hover:bg-stato-urgenza-bordo"
+                            >
                               <TrashIcon className="h-3 w-3" />
                             </button>
                           </div>
@@ -950,19 +994,28 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
                       {/* Upload progress */}
                       {uploadingNoteId === n.id && uploadingFile && (
-                        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-medium text-violet-700 truncate max-w-[200px]">{uploadingFile.name}</span>
-                            <span className="text-[10px] text-violet-500">{formatFileSize(uploadingFile.size)}</span>
+                        <div className="mt-3 rounded-panel border border-stato-malva-bordo bg-stato-malva-bg p-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="max-w-[200px] truncate text-xs font-medium text-stato-malva-testo">{uploadingFile.name}</span>
+                            <span className="tabular text-[10px] text-stato-malva-testo">{formatFileSize(uploadingFile.size)}</span>
                           </div>
-                          <div className="h-1.5 bg-violet-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-violet-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                          <div className="h-1.5 overflow-hidden rounded-full bg-white/70">
+                            <div className="h-full bg-stato-malva-testo transition-colors duration-300" style={{ width: `${uploadProgress}%` }} />
                           </div>
-                          <div className="flex items-center gap-2 mt-2">
-                            <button type="button" onClick={uploadFile} disabled={saving} className="rounded bg-violet-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50">
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={uploadFile}
+                              disabled={saving}
+                              className="cursor-pointer rounded-control bg-inchiostro px-3 py-1 text-[11px] font-medium text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                            >
                               {saving ? "Caricamento..." : "Carica"}
                             </button>
-                            <button type="button" onClick={cancelUpload} className="rounded border border-slate-300 px-3 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100">
+                            <button
+                              type="button"
+                              onClick={cancelUpload}
+                              className="cursor-pointer rounded-control border border-crema-contorno bg-white px-3 py-1 text-[11px] font-medium text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+                            >
                               Annulla
                             </button>
                           </div>
@@ -973,24 +1026,30 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                       {n.allegati && n.allegati.length > 0 && (
                         <div className="mt-3 space-y-2">
                           {n.allegati.map((allegato) => (
-                            <div key={allegato.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+                            <div key={allegato.id} className="flex items-center gap-2 rounded-control border border-crema-contorno bg-white p-2">
                               {isImageFile(allegato.tipo_mime) ? (
-                                <div className="h-8 w-8 shrink-0 rounded bg-slate-100 flex items-center justify-center overflow-hidden">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded bg-crema-scuro">
                                   <img src={`/api/uploads/${allegato.id}`} alt={allegato.nome_originale} className="h-full w-full object-cover" />
                                 </div>
                               ) : (
-                                <div className="h-8 w-8 shrink-0 rounded bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-600">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-stato-info-bg text-[10px] font-bold text-stato-info-testo">
                                   {allegato.nome_originale.split(".").pop()?.toUpperCase() || "?"}
                                 </div>
                               )}
                               <div className="min-w-0 flex-1">
-                                <a href={`/api/uploads/${allegato.id}`} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-600 hover:underline truncate block">
+                                <a href={`/api/uploads/${allegato.id}`} target="_blank" rel="noopener noreferrer" className="block truncate text-xs font-medium text-inchiostro underline-offset-2 transition-colors duration-200 hover:underline">
                                   {allegato.nome_originale}
                                 </a>
-                                <p className="text-[10px] text-slate-400">{formatFileSize(allegato.dimensione)}</p>
+                                <p className="tabular text-[10px] text-caldo-testo">{formatFileSize(allegato.dimensione)}</p>
                               </div>
                               {!isClosed && (
-                                <button type="button" onClick={() => deleteAttachment(allegato.id)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Elimina">
+                                <button
+                                  type="button"
+                                  onClick={() => deleteAttachment(allegato.id)}
+                                  title="Elimina"
+                                  aria-label={`Elimina allegato ${allegato.nome_originale}`}
+                                  className="shrink-0 cursor-pointer rounded p-1 text-caldo-testo transition-colors duration-200 hover:bg-stato-urgenza-bg hover:text-pericolo"
+                                >
                                   <TrashIcon className="h-3 w-3" />
                                 </button>
                               )}
@@ -1001,16 +1060,16 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
                       {/* Expanded details */}
                       {expandedNote === n.id && (
-                        <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                        <div className="mt-3 space-y-2 border-t border-crema-contorno pt-3">
                           {n.problema && (
                             <div>
-                              <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Problema</h5>
-                              <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-600">{n.problema}</p>
+                              <h5 className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-caldo-testo">Problema</h5>
+                              <p className="whitespace-pre-wrap text-xs leading-relaxed text-caldo-testo">{n.problema}</p>
                             </div>
                           )}
                           <div>
-                            <h5 className="mb-0.5 text-[11px] font-semibold tracking-wide text-emerald-600 uppercase">Soluzione</h5>
-                            <p className="rounded-lg bg-emerald-50 p-2.5 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">{n.soluzione}</p>
+                            <h5 className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-stato-ok-testo">Soluzione</h5>
+                            <p className="whitespace-pre-wrap rounded-panel border border-stato-ok-bordo bg-stato-ok-bg p-2.5 text-xs leading-relaxed text-stato-ok-testo">{n.soluzione}</p>
                           </div>
                         </div>
                       )}
@@ -1019,159 +1078,132 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 </div>
               )}
             </section>
-
-            {/* 4. Dark Tech Workspace Banner */}
-            {/* <section className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 rounded-2xl text-white p-6 shadow-md relative overflow-hidden">
-              <div className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none">
-                <span className="text-9xl">&#128187;</span>
-              </div>
-              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-8 h-8 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center text-blue-300">
-                      <BookIcon className="h-4 w-4" />
-                    </span>
-                    <h3 className="text-base font-bold text-white tracking-tight">Documentazione Tecnica & Worklog</h3>
-                  </div>
-                  <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
-                    Diagnostica approfondita, sessioni di debugging e worklog certificati sono accessibili nella dashboard tecnica dedicata.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-slate-300">
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-emerald-400">&#10003;</span>
-                      Note tecniche: <strong className="text-white">{ticket.note_tecniche.length}</strong>
-                    </span>
-                    {ticket.data_inizio_lavoro && (
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-amber-300">&#9202;</span>
-                        In lavoro dal {ticket.data_inizio_lavoro}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section> */}
           </div>
 
           {/* ===== RIGHT COLUMN (4 cols) ===== */}
-          <div className="xl:col-span-4 space-y-6">
+          <div className="space-y-6 xl:col-span-4">
 
             {/* 1. Customer Details Card */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-5">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">&#127970;</span>
-                  <h2 className="text-sm font-bold text-slate-900">Dettagli Cliente</h2>
+                  <FolderIcon className="h-4 w-4 text-caldo-testo" />
+                  <h2 className="text-sm font-bold text-inchiostro">Dettagli Cliente</h2>
                 </div>
               </div>
               <div className="space-y-3.5 text-xs">
                 <div>
-                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Azienda</span>
-                  <div className="flex items-center gap-2.5 mt-1">
-                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-xs">
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Azienda</span>
+                  <div className="mt-1 flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-control bg-stato-info-bg text-xs font-bold text-stato-info-testo">
                       {getInitials(ticket.cliente)}
                     </div>
                     <div>
-                      <span className="text-sm font-bold text-slate-900 block">{ticket.cliente}</span>
+                      <span className="block text-sm font-bold text-inchiostro">{ticket.cliente}</span>
                     </div>
                   </div>
                 </div>
                 <div>
-                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Referente</span>
-                  <p className="text-xs font-semibold text-slate-900 mt-0.5">{ticket.contatto || "Non specificato"}</p>
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Referente</span>
+                  <p className="mt-0.5 text-xs font-semibold text-inchiostro">{ticket.contatto || "Non specificato"}</p>
                 </div>
                 <div className="space-y-2 pt-1">
                   <div>
-                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Email</span>
-                    <p className="text-xs text-blue-600 font-medium mt-0.5 break-all">{ticket.email || "Non fornita"}</p>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Email</span>
+                    <p className="mt-0.5 break-all text-xs font-medium text-inchiostro">{ticket.email || "Non fornita"}</p>
                   </div>
                   <div>
-                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Telefono</span>
-                    <p className="text-xs text-slate-700 font-medium mt-0.5">{ticket.telefono || "Non fornito"}</p>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Telefono</span>
+                    <p className="tabular mt-0.5 text-xs font-medium text-caldo-testo">{ticket.telefono || "Non fornito"}</p>
                   </div>
                 </div>
               </div>
             </section>
 
             {/* 2. Status & Assignment Card */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-5">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">&#9881;</span>
-                  <h2 className="text-sm font-bold text-slate-900">Stato & Assegnazione</h2>
+                  <EditIcon className="h-4 w-4 text-caldo-testo" />
+                  <h2 className="text-sm font-bold text-inchiostro">Stato & Assegnazione</h2>
                 </div>
               </div>
               <div className="space-y-3.5 text-xs">
                 {/* Status selector */}
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Stato</label>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Stato</label>
                   <div className="relative">
                     <select
                       value={selectedStato}
                       onChange={(e) => setSelectedStato(e.target.value as StatoTicket)}
                       disabled={isClosed}
-                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                      className="w-full cursor-pointer appearance-none rounded-control border border-crema-contorno bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-inchiostro transition-colors duration-200 focus:border-inchiostro focus:ring-2 focus:ring-inchiostro/20 disabled:cursor-not-allowed disabled:bg-crema-scuro"
                     >
                       {STATUS_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{STATI_MAP[s]}</option>
+                        <option key={s} value={s}>{STATUS_LABELS[s]}</option>
                       ))}
                     </select>
-                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-[calc(50%-0.5rem)] h-4 w-4 text-caldo-testo" />
                   </div>
                 </div>
 
                 {/* Operator assignment */}
                 <div>
-                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Operatore</span>
+                  <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Operatore</span>
                   {isClosed ? (
-                    <p className="text-xs text-slate-500">Ticket chiuso</p>
+                    <p className="text-xs text-caldo-testo">Ticket chiuso</p>
                   ) : currentUser?.ruolo === "admin" ? (
                     <div className="relative">
                       <select
                         value={selectedOperatore}
                         onChange={(e) => { const val = e.target.value; setSelectedOperatore(val); if (val) setSelectedStato("IN_CORSO"); }}
-                        className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        className="w-full cursor-pointer appearance-none rounded-control border border-crema-contorno bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-inchiostro transition-colors duration-200 focus:border-inchiostro focus:ring-2 focus:ring-inchiostro/20"
                       >
                         <option value="">Non assegnato</option>
                         {operatori.map((op) => (
                           <option key={op.id} value={op.nome}>{op.nome} ({op.ruolo})</option>
                         ))}
                       </select>
-                      <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-[calc(50%-0.5rem)] h-4 w-4 text-caldo-testo" />
                     </div>
                   ) : ticket.operatore === currentUser?.nome ? (
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 border border-emerald-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Assegnato a te
+                      <span className="inline-flex items-center gap-1.5 rounded-control border border-stato-ok-bordo bg-stato-ok-bg px-3 py-2 text-xs font-medium text-stato-ok-testo">
+                        <span className="h-1.5 w-1.5 rounded-full bg-stato-ok-testo" /> Assegnato a te
                       </span>
-                      <button type="button" onClick={() => { void run(async () => { await updateTicket({ operatore: null, stato: "NUOVO" }); setSelectedOperatore(""); }); }} disabled={saving} className="text-[11px] font-semibold text-amber-600 hover:text-amber-800">
+                      <button
+                        type="button"
+                        onClick={() => { void run(async () => { await updateTicket({ operatore: null, stato: "NUOVO" }); setSelectedOperatore(""); }); }}
+                        disabled={saving}
+                        className="cursor-pointer text-[11px] font-semibold text-stato-attesa-testo transition-colors duration-200 hover:text-inchiostro disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         Rilascia
                       </button>
                     </div>
                   ) : ticket.operatore ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> {ticket.operatore}
+                    <span className="inline-flex items-center gap-1.5 text-xs text-stato-neutro-testo">
+                      <span className="h-1.5 w-1.5 rounded-full bg-stato-neutro-testo" /> {ticket.operatore}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-400">Non assegnato</span>
+                    <span className="text-xs text-caldo-testo">Non assegnato</span>
                   )}
                 </div>
 
                 {/* Priority selector */}
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Priorita</label>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Priorita</label>
                   <div className="relative">
                     <select
                       value={selectedPriorita}
                       onChange={(e) => setSelectedPriorita(e.target.value as Priorita)}
                       disabled={isClosed}
-                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                      className="w-full cursor-pointer appearance-none rounded-control border border-crema-contorno bg-white px-3 py-2.5 pr-8 text-xs font-semibold text-inchiostro transition-colors duration-200 focus:border-inchiostro focus:ring-2 focus:ring-inchiostro/20 disabled:cursor-not-allowed disabled:bg-crema-scuro"
                     >
                       {PRIORITY_OPTIONS.map((p) => (
-                        <option key={p} value={p}>{PRIORITA_MAP[p]}</option>
+                        <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
                       ))}
                     </select>
-                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-[calc(50%-0.5rem)] h-4 w-4 text-caldo-testo" />
                   </div>
                 </div>
 
@@ -1181,7 +1213,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                     type="button"
                     onClick={handleSaveAll}
                     disabled={saving}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-600/25 transition-all disabled:opacity-50"
+                    className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-inchiostro px-4 py-2.5 text-xs font-bold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? (
                       <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> Salvataggio...</>
@@ -1196,100 +1228,122 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
             </section>
 
             {/* 3. Time Tracking Card */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-3.5">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            <section className="space-y-3.5 rounded-panel border border-crema-contorno bg-white p-5">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">&#9202;</span>
-                  <h2 className="text-sm font-bold text-slate-900">Gestione Tempo</h2>
+                  <ClockIcon className="h-4 w-4 text-caldo-testo" />
+                  <h2 className="text-sm font-bold text-inchiostro">Gestione Tempo</h2>
                 </div>
               </div>
               <div className="space-y-3 text-xs">
                 {ticket.data_inizio_lavoro && (
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Inizio lavoro:</span>
-                    <span className="font-semibold text-slate-800">{ticket.data_inizio_lavoro}</span>
+                    <span className="text-caldo-testo">Inizio lavoro:</span>
+                    <span className="tabular font-semibold text-inchiostro">{ticket.data_inizio_lavoro}</span>
                   </div>
                 )}
                 {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Stimato:</span>
-                    <span className="font-semibold text-slate-800">{Math.floor(ticket.tempo_stimato_minuti / 60)}h {ticket.tempo_stimato_minuti % 60}m</span>
+                    <span className="text-caldo-testo">Stimato:</span>
+                    <span className="tabular font-semibold text-inchiostro">{Math.floor(ticket.tempo_stimato_minuti / 60)}h {ticket.tempo_stimato_minuti % 60}m</span>
                   </div>
                 )}
                 {ticket.data_chiusura && (
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Chiusura:</span>
-                    <span className="font-semibold text-slate-800">{ticket.data_chiusura}</span>
+                    <span className="text-caldo-testo">Chiusura:</span>
+                    <span className="tabular font-semibold text-inchiostro">{ticket.data_chiusura}</span>
                   </div>
                 )}
                 {isClosed && (
-                  <div className="pt-2 border-t border-slate-100">
-                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Tempo Effettivo</span>
+                  <div className="border-t border-crema-bordo pt-2">
+                    <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Tempo Effettivo</span>
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
                         value={tempoEffettivo}
                         onChange={(e) => setTempoEffettivo(e.target.value)}
                         placeholder="es. 2:30"
-                        className="w-24 rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="tabular w-24 rounded-control border border-crema-contorno px-3 py-1.5 text-xs text-inchiostro placeholder-caldo-testo transition-colors duration-200 focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                       />
-                      <span className="text-[10px] text-slate-400">ore:minuti</span>
-                      <button type="button" onClick={saveTempoEffettivo} disabled={savingTempo || !tempoEffettivo.trim()} className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                      <span className="text-[10px] text-caldo-testo">ore:minuti</span>
+                      <button
+                        type="button"
+                        onClick={saveTempoEffettivo}
+                        disabled={savingTempo || !tempoEffettivo.trim()}
+                        className="cursor-pointer rounded-control bg-inchiostro px-3 py-1.5 text-[11px] font-medium text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         Salva
                       </button>
                     </div>
                   </div>
                 )}
                 {isClosed && ticket.tempo_effettivo_minuti !== null && ticket.tempo_effettivo_minuti !== undefined && (
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                    <span className="text-emerald-600 font-semibold">Tempo Finale:</span>
-                    <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                  <div className="flex items-center justify-between border-t border-crema-bordo pt-2">
+                    <span className="font-semibold text-stato-ok-testo">Tempo Finale:</span>
+                    <span className="tabular rounded border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 font-bold text-stato-ok-testo">
                       {Math.floor(ticket.tempo_effettivo_minuti / 60)}h {ticket.tempo_effettivo_minuti % 60}m
                     </span>
                   </div>
                 )}
                 {!ticket.data_inizio_lavoro && !isClosed && (
-                  <p className="text-xs text-slate-400 italic">Il timer parte quando il ticket viene preso in carico.</p>
+                  <p className="text-xs italic text-caldo-testo">Il timer parte quando il ticket viene preso in carico.</p>
                 )}
               </div>
             </section>
 
             {/* 4. Email Log Card */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            <section className="space-y-3 rounded-panel border border-crema-contorno bg-white p-5">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">&#9993;</span>
-                  <h2 className="text-sm font-bold text-slate-900">Email</h2>
+                  <MailIcon className="h-4 w-4 text-caldo-testo" />
+                  <h2 className="text-sm font-bold text-inchiostro">Email</h2>
                 </div>
-                <span className="text-[10px] font-semibold text-slate-400">{emailLog.length} inviate</span>
+                <span className="tabular text-[10px] font-semibold text-caldo-testo">{emailLog.length} inviate</span>
               </div>
 
               {showEmailForm && (
-                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 space-y-2">
-                  <input type="text" value={emailOggetto} onChange={(e) => setEmailOggetto(e.target.value)} placeholder="Oggetto email" className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none" />
-                  <textarea value={emailMessaggio} onChange={(e) => setEmailMessaggio(e.target.value)} placeholder="Messaggio..." rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none resize-none" />
-                  <button type="button" onClick={sendManualEmail} disabled={sendingEmail || !emailOggetto.trim() || !emailMessaggio.trim()} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                <div className="space-y-2 rounded-panel border border-stato-info-bordo bg-stato-info-bg p-3">
+                  <input
+                    type="text"
+                    value={emailOggetto}
+                    onChange={(e) => setEmailOggetto(e.target.value)}
+                    placeholder="Oggetto email"
+                    className="w-full rounded-control border border-crema-contorno bg-white px-3 py-1.5 text-xs text-inchiostro placeholder-caldo-testo transition-colors duration-200 focus:border-inchiostro focus:outline-none"
+                  />
+                  <textarea
+                    value={emailMessaggio}
+                    onChange={(e) => setEmailMessaggio(e.target.value)}
+                    placeholder="Messaggio..."
+                    rows={3}
+                    className="w-full resize-none rounded-control border border-crema-contorno bg-white px-3 py-1.5 text-xs text-inchiostro placeholder-caldo-testo transition-colors duration-200 focus:border-inchiostro focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={sendManualEmail}
+                    disabled={sendingEmail || !emailOggetto.trim() || !emailMessaggio.trim()}
+                    className="cursor-pointer rounded-control bg-inchiostro px-3 py-1.5 text-xs font-medium text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                  >
                     {sendingEmail ? "Invio..." : "Invia"}
                   </button>
                 </div>
               )}
 
               {emailLog.length === 0 ? (
-                <p className="text-xs text-slate-400">Nessuna email inviata.</p>
+                <p className="text-xs text-caldo-testo">Nessuna email inviata.</p>
               ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
+                <div className="max-h-48 space-y-2 overflow-y-auto">
                   {emailLog.map((e) => (
-                    <div key={e.id} className="rounded-lg border border-slate-100 p-2.5">
+                    <div key={e.id} className="rounded-control border border-crema-bordo p-2.5">
                       <div className="flex items-center justify-between">
-                        <span className={`text-[10px] font-semibold uppercase ${e.stato === "inviata" ? "text-emerald-600" : "text-red-500"}`}>
+                        <span className={`text-[10px] font-semibold uppercase ${e.stato === "inviata" ? "text-stato-ok-testo" : "text-stato-urgenza-testo"}`}>
                           {e.tipo.replace("_", " ")}
                         </span>
-                        <span className="text-[10px] text-slate-400">
+                        <span className="tabular text-[10px] text-caldo-testo">
                           {new Date(e.data_creazione).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                         </span>
                       </div>
-                      <p className="mt-0.5 text-[10px] text-slate-500 truncate">{e.oggetto}</p>
-                      {e.errore && <p className="mt-0.5 text-[10px] text-red-500">{e.errore}</p>}
+                      <p className="mt-0.5 truncate text-[10px] text-caldo-testo">{e.oggetto}</p>
+                      {e.errore && <p className="mt-0.5 text-[10px] text-stato-urgenza-testo">{e.errore}</p>}
                     </div>
                   ))}
                 </div>
@@ -1297,25 +1351,25 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
             </section>
 
             {/* 5. System Info Card */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            <section className="space-y-3 rounded-panel border border-crema-contorno bg-white p-5">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">&#128187;</span>
-                  <h2 className="text-sm font-bold text-slate-900">Info Sistema</h2>
+                  <TicketIcon className="h-4 w-4 text-caldo-testo" />
+                  <h2 className="text-sm font-bold text-inchiostro">Info Sistema</h2>
                 </div>
               </div>
               <div className="space-y-2.5 text-xs">
-                <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                  <span className="text-slate-500">ID Ticket</span>
-                  <span className="font-mono font-bold text-slate-900">{ticket.numero}</span>
+                <div className="flex items-center justify-between border-b border-crema-bordo py-1">
+                  <span className="text-caldo-testo">ID Ticket</span>
+                  <span className="tabular font-mono font-bold text-inchiostro">{ticket.numero}</span>
                 </div>
-                <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                  <span className="text-slate-500">Modulo</span>
-                  <span className="font-mono text-[11px] font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">{ticket.modulo_software}</span>
+                <div className="flex items-center justify-between border-b border-crema-bordo py-1">
+                  <span className="text-caldo-testo">Modulo</span>
+                  <span className="rounded bg-crema-scuro px-2 py-0.5 font-mono text-[11px] font-semibold text-inchiostro">{ticket.modulo_software}</span>
                 </div>
                 <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-500">Email inviate</span>
-                  <span className="font-semibold text-slate-800">{emailLog.length}</span>
+                  <span className="text-caldo-testo">Email inviate</span>
+                  <span className="tabular font-semibold text-inchiostro">{emailLog.length}</span>
                 </div>
               </div>
             </section>

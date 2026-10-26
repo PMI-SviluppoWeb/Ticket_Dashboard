@@ -13,6 +13,8 @@ import {
   BarChartIcon,
 } from "@/components/icons";
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
+import SectionBar from "@/components/SectionBar";
 
 interface Operator {
   id: string;
@@ -235,7 +237,7 @@ export default function AdminPage() {
   if (checking) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <LoaderIcon className="h-8 w-8 animate-spin text-blue-600" />
+        <LoaderIcon className="h-8 w-8 animate-spin text-inchiostro" />
       </div>
     );
   }
@@ -244,17 +246,17 @@ export default function AdminPage() {
   if (!currentOperator) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
-            <HeadsetIcon className="h-6 w-6 text-slate-500" />
+        <div className="w-full max-w-md rounded-card border border-crema-contorno bg-white p-8 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-crema-scuro">
+            <HeadsetIcon className="h-6 w-6 text-caldo-testo" />
           </div>
-          <h2 className="text-lg font-semibold text-slate-900">Accesso richiesto</h2>
-          <p className="mt-2 text-sm text-slate-500">
+          <h2 className="text-lg font-semibold text-inchiostro">Accesso richiesto</h2>
+          <p className="mt-2 text-sm text-caldo-testo">
             Devi effettuare il login per accedere a questa pagina.
           </p>
           <a
             href="/login?redirect=/admin"
-            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 transition"
+            className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
           >
             Vai al Login
           </a>
@@ -267,22 +269,22 @@ export default function AdminPage() {
   if (!isAdmin) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
-            <LockClosedIcon className="h-6 w-6 text-amber-600" />
+        <div className="w-full max-w-md rounded-card border border-crema-contorno bg-white p-8 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-stato-attesa-bordo bg-stato-attesa-bg">
+            <LockClosedIcon className="h-6 w-6 text-stato-attesa-testo" />
           </div>
-          <h2 className="text-lg font-semibold text-slate-900">Area riservata agli amministratori</h2>
-          <p className="mt-2 text-sm text-slate-500">
+          <h2 className="text-lg font-semibold text-inchiostro">Area riservata agli amministratori</h2>
+          <p className="mt-2 text-sm text-caldo-testo">
             La gestione operatori è accessibile solo con un account amministratore.
             Effettua il login con le credenziali admin per accedere a questa pagina.
           </p>
           <a
             href="/login?redirect=/admin"
-            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 transition"
+            className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
           >
             Vai al Login
           </a>
-          <p className="mt-4 text-xs text-slate-400">
+          <p className="mt-4 text-xs text-caldo-testo">
             Sei loggato come <strong>{currentOperator.nome}</strong> ({currentOperator.email})
           </p>
         </div>
@@ -290,55 +292,59 @@ export default function AdminPage() {
     );
   }
 
-  // Admin view
+  // Admin view. Il padding passa da `p-6` a `px-6 py-5` come le altre pagine:
+  // il valore non cambia la sostanza ma la cornice si muove tutta insieme.
   return (
-    <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex-1 overflow-y-auto px-6 py-5">
       <div className="mx-auto max-w-5xl">
-        {/* Header */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Gestione Operatori</h1>
-            <p className="text-sm text-slate-500">
-              Crea, modifica e gestisci gli account degli operatori.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400">
-              Sessione admin: <strong>{currentOperator.nome}</strong>
-            </span>
-            <Link
-              href="/admin/dashboard"
-              className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
-            >
-              <BarChartIcon className="h-4 w-4" />
-              Dashboard
-            </Link>
-            <button
-              onClick={handleExitAdmin}
-              className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
-            >
-              Esci da Admin
-            </button>
-            <button
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 transition"
-            >
-              <UserPlusIcon className="h-4 w-4" />
-              Nuovo Operatore
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          titolo="Gestione Operatori"
+          sottotitolo="Crea, modifica e gestisci gli account degli operatori."
+          azioni={
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-caldo-testo">
+                Sessione admin: <strong>{currentOperator.nome}</strong>
+              </span>
+              <Link
+                href="/admin/dashboard"
+                className="flex cursor-pointer items-center gap-2 rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+              >
+                <BarChartIcon className="h-4 w-4" />
+                Dashboard
+              </Link>
+              <button
+                onClick={handleExitAdmin}
+                className="flex cursor-pointer items-center gap-2 rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+              >
+                Esci da Admin
+              </button>
+              <button
+                onClick={() => { resetForm(); setShowForm(true); }}
+                className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
+              >
+                <UserPlusIcon className="h-4 w-4" />
+                Nuovo Operatore
+              </button>
+            </div>
+          }
+        />
 
         {/* Alerts */}
         {error && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mb-4 flex items-center gap-2 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm text-stato-urgenza-testo">
             <AlertCircleIcon className="h-4 w-4 shrink-0" />
             {error}
-            <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700">&times;</button>
+            <button
+              onClick={() => setError(null)}
+              aria-label="Chiudi il messaggio di errore"
+              className="ml-auto cursor-pointer text-stato-urgenza-testo/70 transition-colors duration-200 hover:text-stato-urgenza-testo"
+            >
+              &times;
+            </button>
           </div>
         )}
         {success && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+          <div className="mb-4 flex items-center gap-2 rounded-control border border-stato-ok-bordo bg-stato-ok-bg p-3 text-sm text-stato-ok-testo">
             <CheckCircleIcon className="h-4 w-4 shrink-0" />
             {success}
           </div>
@@ -346,39 +352,42 @@ export default function AdminPage() {
 
         {/* Create/Edit Form */}
         {showForm && (
-          <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                {editingId ? "Modifica Operatore" : "Nuovo Operatore"}
-              </h2>
-              <button onClick={resetForm} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
-            </div>
+          <div className="mb-6 overflow-hidden rounded-card border border-crema-contorno bg-white">
+            <SectionBar titolo={editingId ? "Modifica Operatore" : "Nuovo Operatore"} icona={UserPlusIcon}>
+              <button
+                onClick={resetForm}
+                aria-label="Chiudi il modulo"
+                className="cursor-pointer text-xl leading-none text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+              >
+                &times;
+              </button>
+            </SectionBar>
             <form onSubmit={handleSubmit} className="p-5">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Nome *</label>
+                  <label className="mb-1 block text-sm font-medium text-caldo-testo">Nome *</label>
                   <input
                     type="text"
                     required
                     value={form.nome}
                     onChange={(e) => setForm({ ...form, nome: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                     placeholder="Nome completo"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Email *</label>
+                  <label className="mb-1 block text-sm font-medium text-caldo-testo">Email *</label>
                   <input
                     type="email"
                     required
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                     placeholder="email@esempio.it"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                  <label className="mb-1 block text-sm font-medium text-caldo-testo">
                     Password {editingId ? "(lascia vuoto per non cambiare)" : "*"}
                   </label>
                   <input
@@ -386,18 +395,18 @@ export default function AdminPage() {
                     required={!editingId}
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                     placeholder="Minimo 8 caratteri"
                     minLength={8}
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Ruolo *</label>
+                  <label className="mb-1 block text-sm font-medium text-caldo-testo">Ruolo *</label>
                   <select
                     required
                     value={form.ruolo}
                     onChange={(e) => setForm({ ...form, ruolo: e.target.value as "admin" | "operatore" })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full cursor-pointer rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                   >
                     <option value="operatore">Operatore</option>
                     <option value="admin">Amministratore</option>
@@ -408,7 +417,7 @@ export default function AdminPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50"
+                  className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {saving ? <LoaderIcon className="h-4 w-4 animate-spin" /> : <CheckCircleIcon className="h-4 w-4" />}
                   {editingId ? "Salva Modifiche" : "Crea Operatore"}
@@ -416,7 +425,7 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                  className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
                 >
                   Annulla
                 </button>
@@ -426,79 +435,78 @@ export default function AdminPage() {
         )}
 
         {/* Operators Table */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Operatori ({operatori.length})
-            </h2>
-          </div>
+        <div className="overflow-hidden rounded-card border border-crema-contorno bg-white">
+          <SectionBar titolo="Operatori" icona={UserPlusIcon} conteggio={operatori.length} />
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <LoaderIcon className="h-6 w-6 animate-spin text-blue-600" />
+              <LoaderIcon className="h-6 w-6 animate-spin text-inchiostro" />
             </div>
           ) : operatori.length === 0 ? (
-            <div className="py-12 text-center text-sm text-slate-500">Nessun operatore trovato.</div>
+            <div className="py-12 text-center text-sm text-caldo-testo">Nessun operatore trovato.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <th className="px-5 py-3 font-medium text-slate-600">Nome</th>
-                    <th className="px-5 py-3 font-medium text-slate-600">Email</th>
-                    <th className="px-5 py-3 font-medium text-slate-600">Ruolo</th>
-                    <th className="px-5 py-3 font-medium text-slate-600">Stato</th>
-                    <th className="px-5 py-3 font-medium text-slate-600">Creato il</th>
-                    <th className="px-5 py-3 font-medium text-slate-600">Ultimo accesso</th>
-                    <th className="px-5 py-3 font-medium text-slate-600 text-right">Azioni</th>
+                  <tr className="border-b border-crema-bordo bg-crema-scuro">
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Nome</th>
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Email</th>
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Ruolo</th>
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Stato</th>
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Creato il</th>
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Ultimo accesso</th>
+                    <th className="px-5 py-3 text-right font-medium text-caldo-testo">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
                   {operatori.map((op) => {
                     const isActive = !!op.attivo;
                     return (
-                      <tr key={op.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                      <tr key={op.id} className="border-b border-crema-bordo transition-colors duration-200 last:border-0 hover:bg-crema-scuro">
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-3">
-                            <div className={`flex h-8 w-8 items-center justify-center rounded-full text-white text-xs font-bold ${isActive ? "bg-blue-600" : "bg-slate-400"}`}>
+                            <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${isActive ? "bg-inchiostro text-white" : "bg-stato-neutro-bg text-stato-neutro-testo"}`}>
                               {op.nome.charAt(0).toUpperCase()}
                             </div>
-                            <span className="font-medium text-slate-900">{op.nome}</span>
+                            <span className="font-medium text-inchiostro">{op.nome}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-3 text-slate-600">{op.email}</td>
+                        <td className="px-5 py-3 text-caldo-testo">{op.email}</td>
                         <td className="px-5 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${op.ruolo === "admin" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${op.ruolo === "admin" ? "border-stato-malva-bordo bg-stato-malva-bg text-stato-malva-testo" : "border-stato-neutro-bordo bg-stato-neutro-bg text-stato-neutro-testo"}`}>
                             {op.ruolo === "admin" ? "Admin" : "Operatore"}
                           </span>
                         </td>
                         <td className="px-5 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${isActive ? "border-stato-ok-bordo bg-stato-ok-bg text-stato-ok-testo" : "border-stato-urgenza-bordo bg-stato-urgenza-bg text-stato-urgenza-testo"}`}>
                             {isActive ? "Attivo" : "Inattivo"}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-slate-500">{formatDate(op.data_creazione)}</td>
-                        <td className="px-5 py-3 text-slate-500">{formatDate(op.ultimo_accesso)}</td>
+                        <td className="px-5 py-3 text-caldo-testo">{formatDate(op.data_creazione)}</td>
+                        <td className="px-5 py-3 text-caldo-testo">{formatDate(op.ultimo_accesso)}</td>
                         <td className="px-5 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button
                               onClick={() => handleEdit(op)}
-                              className="rounded p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition"
+                              className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
                               title="Modifica"
+                              aria-label={`Modifica ${op.nome}`}
                             >
                               <EditIcon className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => handleToggleActive(op.id, op.attivo)}
-                              className={`rounded p-1.5 transition ${isActive ? "text-slate-400 hover:bg-red-50 hover:text-red-600" : "text-slate-400 hover:bg-green-50 hover:text-green-600"}`}
+                              className={`cursor-pointer rounded-control border p-1.5 transition-colors duration-200 ${isActive ? "border-crema-contorno text-caldo-testo hover:border-stato-attesa-bordo hover:bg-stato-attesa-bg hover:text-stato-attesa-testo" : "border-crema-contorno text-caldo-testo hover:border-stato-ok-bordo hover:bg-stato-ok-bg hover:text-stato-ok-testo"}`}
                               title={isActive ? "Disattiva" : "Riattiva"}
+                              aria-label={isActive ? `Disattiva ${op.nome}` : `Riattiva ${op.nome}`}
                             >
                               <TrashIcon className="h-4 w-4" />
                             </button>
                             {isActive && (
                               <button
                                 onClick={() => handlePermanentDelete(op.id)}
-                                className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-700 transition"
+                                className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-urgenza-bordo hover:bg-stato-urgenza-bg hover:text-stato-urgenza-testo"
                                 title="Elimina definitivamente"
+                                aria-label={`Elimina definitivamente ${op.nome}`}
                               >
                                 <TrashIcon className="h-4 w-4" />
                               </button>
@@ -517,21 +525,21 @@ export default function AdminPage() {
         {/* Deactivate Confirmation Modal */}
         {confirmDelete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-              <h3 className="text-lg font-semibold text-slate-900">Conferma disattivazione</h3>
-              <p className="mt-2 text-sm text-slate-600">
+            <div className="mx-4 w-full max-w-sm rounded-card border border-crema-contorno bg-white p-6 shadow-lg">
+              <h3 className="text-lg font-semibold text-inchiostro">Conferma disattivazione</h3>
+              <p className="mt-2 text-sm text-caldo-testo">
                 Sei sicuro di voler disattivare questo operatore? Non potrà più accedere al sistema.
               </p>
               <div className="mt-5 flex items-center justify-end gap-3">
                 <button
                   onClick={() => setConfirmDelete(null)}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                  className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
                 >
                   Annulla
                 </button>
                 <button
                   onClick={confirmDeactivate}
-                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition"
+                  className="cursor-pointer rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-4 py-2 text-sm font-semibold text-stato-urgenza-testo transition-colors duration-200 hover:bg-stato-urgenza-bordo"
                 >
                   Disattiva
                 </button>
@@ -543,24 +551,24 @@ export default function AdminPage() {
         {/* Permanent Delete Confirmation Modal */}
         {confirmPermanentDelete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-                <TrashIcon className="h-6 w-6 text-red-600" />
+            <div className="mx-4 w-full max-w-sm rounded-card border border-crema-contorno bg-white p-6 shadow-lg">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-stato-urgenza-bordo bg-stato-urgenza-bg">
+                <TrashIcon className="h-6 w-6 text-stato-urgenza-testo" />
               </div>
-              <h3 className="text-center text-lg font-semibold text-slate-900">Elimina definitivamente?</h3>
-              <p className="mt-2 text-center text-sm text-slate-600">
-                Questa azione è <strong>irreversibile</strong>. L'operatore verrà eliminato permanentemente dal sistema e non potrà più essere recuperato.
+              <h3 className="text-center text-lg font-semibold text-inchiostro">Elimina definitivamente?</h3>
+              <p className="mt-2 text-center text-sm text-caldo-testo">
+                Questa azione è <strong className="text-inchiostro">irreversibile</strong>. L'operatore verrà eliminato permanentemente dal sistema e non potrà più essere recuperato.
               </p>
               <div className="mt-5 flex items-center justify-end gap-3">
                 <button
                   onClick={() => setConfirmPermanentDelete(null)}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                  className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
                 >
                   Annulla
                 </button>
                 <button
                   onClick={confirmPermanentDeleteAction}
-                  className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 transition"
+                  className="cursor-pointer rounded-control bg-pericolo px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-pericolo-scuro"
                 >
                   Elimina Definitivamente
                 </button>

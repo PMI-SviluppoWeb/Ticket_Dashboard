@@ -4,16 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Stats, TicketRow } from "@/lib/types";
 import StatsCards from "@/components/StatsCards";
-import FiltersBar, { DEFAULT_FILTERS, type Filters } from "@/components/FiltersBar";
+import FiltersBar, { DEFAULT_FILTERS, OrdinaPill, type Filters } from "@/components/FiltersBar";
 import TicketTable from "@/components/TicketTable";
 import QuickActions from "@/components/QuickActions";
-import NotificationBell from "@/components/NotificationBell";
+import AppHeader from "@/components/AppHeader";
+import PageHeader from "@/components/PageHeader";
+import SectionBar from "@/components/SectionBar";
 import {
   ChevronDownIcon,
   RefreshIcon,
-  SearchIcon,
   SparklesIcon,
-  UserIcon,
 } from "@/components/icons";
 
 const PAGE_SIZE = 5;
@@ -160,89 +160,94 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Top bar */}
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-6 py-2.5">
-        <div className="relative w-full max-w-xs">
-          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={filters.q}
-            onChange={(e) => handleFiltersChange({ q: e.target.value })}
-            placeholder="Cerca ticket, ID o clienti…"
-            className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <NotificationBell />
-          <Link
-            href="/knowledge"
-            className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
-          >
-            Knowledge Base
-            <ChevronDownIcon className="h-3.5 w-3.5 text-slate-400" />
-          </Link>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60"
-          >
-            <RefreshIcon className="h-3.5 w-3.5" />
-            Aggiorna
-          </button>
-          <span className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-slate-500">
-            <UserIcon className="h-4 w-4" />
-          </span>
-        </div>
-      </header>
+      {/* Top bar. La ricerca NON sta piu' qui: era legata allo stesso
+          `filters.q` del campo dentro la card, quindi due input visibili
+          nella stessa schermata che si rispecchiavano a vicenda — si
+          scriveva in uno e cambiava l'altro. Resta il campo della barra
+          filtri, che sta accanto all'elenco che filtra. */}
+      <AppHeader
+        azioni={
+          <>
+            <Link
+              href="/knowledge"
+              className="flex items-center gap-1 rounded-control px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+            >
+              Knowledge Base
+              <ChevronDownIcon className="h-3.5 w-3.5" />
+            </Link>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={loading}
+              className="flex cursor-pointer items-center gap-1.5 rounded-full bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshIcon className="h-3.5 w-3.5" />
+              Aggiorna
+            </button>
+          </>
+        }
+      />
 
       {/* Contenuto */}
       <main className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="mb-5">
-          <h1 className="text-xl font-bold text-slate-900">Panoramica del Sistema</h1>
-          <p className="text-sm text-slate-400">
-            Metriche in tempo reale e attività recente del workspace.
-          </p>
-        </div>
+        {/* Il titolo non e' piu' "Panoramica del Sistema": il workspace si
+            chiama cosi' per tutti, e un nome proprio in cima a ogni schermata
+            non dice a nessuno dove si trova. Il conteggio e' quello della
+            collezione filtrata, lo stesso che la SectionBar mostra accanto
+            alla sezione — qui da' la misura della pagina intera. */}
+        <PageHeader
+          eyebrow="Area di lavoro"
+          titolo="Dashboard"
+          conteggio={loading && totale === 0 ? undefined : totale}
+          sottotitolo="Metriche in tempo reale e attività recente del workspace."
+        />
 
         {stats && <StatsCards stats={stats} />}
 
+        {/* L'errore usa la famiglia urgenza: e' l'unica informazione della
+            pagina che richiede un'azione immediata. */}
         {error && (
-          <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
+          <p
+            role="alert"
+            className="mt-4 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-3 py-2 text-xs font-medium text-stato-urgenza-testo"
+          >
             {error}
           </p>
         )}
 
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
           {/* Elenco ticket */}
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
-                <SparklesIcon className="h-4 w-4 text-blue-600" />
-                Ticket Recenti
-              </h2>
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-card border border-crema-contorno bg-white xl:col-span-2">
+            <SectionBar
+              titolo="Ticket Recenti"
+              icona={SparklesIcon}
+              conteggio={totale}
+            >
+              <OrdinaPill
+                value={filters.ordina}
+                onChange={(ordina) => handleFiltersChange({ ordina })}
+              />
               <button
                 type="button"
                 onClick={() => {
                   setFilters(DEFAULT_FILTERS);
                   setPagina(1);
                 }}
-                className="text-xs font-semibold text-blue-700 underline-offset-2 hover:underline"
+                className="cursor-pointer text-xs font-semibold text-inchiostro underline-offset-2 hover:underline"
               >
                 Vedi tutti
               </button>
-            </div>
+            </SectionBar>
 
             <FiltersBar
               filters={filters}
               moduli={moduli}
-              visibili={tickets.length}
-              totale={totale}
               onChange={handleFiltersChange}
             />
 
             {loading && tickets.length === 0 ? (
               <div className="flex flex-1 items-center justify-center p-8">
-                <p className="text-sm text-slate-400">Caricamento ticket…</p>
+                <p className="text-sm text-caldo-testo">Caricamento ticket…</p>
               </div>
             ) : (
               <TicketTable
@@ -269,53 +274,55 @@ export default function Dashboard() {
         </div>
 
         {/* Ticket Chiusi - Caricamento indipendente */}
-        {/* <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700">
-                ✓
+        {/* Sezione disattivata: le classi interne sono tenute allineate al
+            design system, cosi' riattivarla non reintroduce la vecchia palette. */}
+        {/* <div className="mt-6 rounded-card border border-crema-contorno bg-white">
+          <div className="flex items-center justify-between border-b border-crema-bordo px-4 py-3">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-inchiostro">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-stato-ok-bordo bg-stato-ok-bg text-stato-ok-testo">
+                <CheckCircleIcon className="h-3 w-3" />
               </span>
               Ticket Chiusi
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+              <span className="tabular rounded-full border border-stato-neutro-bordo bg-stato-neutro-bg px-2 py-0.5 text-[10px] font-semibold text-stato-neutro-testo">
                 {chiusiTotali}
               </span>
             </h2>
             <button
               type="button"
               onClick={() => handleFiltersChange({ stato: "CHIUSO" })}
-              className="text-xs font-semibold text-blue-700 underline-offset-2 hover:underline"
+              className="text-xs font-semibold text-inchiostro underline-offset-2 hover:underline"
             >
               Vedi tutti
             </button>
           </div>
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-crema-bordo">
             {chiusiTickets.length > 0 ? (
               chiusiTickets.map((t) => (
                 <Link
                   key={t.id}
                   href={`/tickets/${t.id}`}
-                  className="flex items-center justify-between px-4 py-3 text-left transition hover:bg-slate-50"
+                  className="flex items-center justify-between px-4 py-3 text-left transition-colors duration-200 hover:bg-crema-scuro"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-700">{t.numero}</span>
-                      <span className="text-xs text-slate-400">·</span>
-                      <span className="text-xs text-slate-600">{t.cliente}</span>
+                      <span className="tabular text-xs font-bold text-caldo-testo">{t.numero}</span>
+                      <span className="text-xs text-caldo-testo">·</span>
+                      <span className="text-xs font-semibold text-inchiostro">{t.cliente}</span>
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-slate-400">
+                    <p className="mt-0.5 truncate text-xs text-caldo-testo">
                       {t.sommario_problema}
                     </p>
                   </div>
                   <div className="ml-4 shrink-0 text-right">
-                    <span className="inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                    <span className="inline-block rounded-full border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 text-[10px] font-semibold text-stato-ok-testo">
                       Chiuso
                     </span>
-                    <p className="mt-0.5 text-[10px] text-slate-400">{t.data_chiusura}</p>
+                    <p className="tabular mt-0.5 text-[10px] text-caldo-testo">{t.data_chiusura}</p>
                   </div>
                 </Link>
               ))
             ) : (
-              <p className="p-6 text-center text-sm text-slate-400">
+              <p className="p-6 text-center text-sm text-caldo-testo">
                 Nessun ticket chiuso al momento.
               </p>
             )}
