@@ -39,37 +39,47 @@ export async function createTicket(input: TicketInput): Promise<TicketRow> {
     input.numero ?? `TICK-${String(Date.now()).slice(-6)}`;
   const ts = now();
 
-  await db
-    .prepare(
-      `INSERT INTO tickets (
-         id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
-         descrizione_dettagliata, priorita, stato, note, operatore,
-         data_creazione, data_aggiornamento, data_chiusura
-       ) VALUES (
-         @id, @numero, @cliente, @contatto, @telefono, @email, @modulo_software, @sommario_problema,
-         @descrizione_dettagliata, @priorita, 'NUOVO', @note, NULL,
-         @data_creazione, @data_aggiornamento, NULL
-       )`
-    )
-    .run({
-      id,
-      numero,
-      cliente: input.cliente,
-      contatto: input.contatto,
-      telefono: input.telefono ?? null,
-      email: input.email ?? null,
-      modulo_software: input.modulo_software,
-      sommario_problema: input.sommario_problema,
-      descrizione_dettagliata: input.descrizione_dettagliata,
-      priorita: input.priorita,
-      note: input.note ?? null,
-      data_creazione: ts,
-      data_aggiornamento: ts,
-    });
-
-  for (const m of input.messaggi ?? []) {
-    await insertMessage(id, m);
-  }
+  // Ticket e messaggi iniziali in un solo round-trip.
+  const statements = [
+    {
+      sql: `INSERT INTO tickets (
+              id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
+              descrizione_dettagliata, priorita, stato, note, operatore,
+              data_creazione, data_aggiornamento, data_chiusura
+            ) VALUES (
+              @id, @numero, @cliente, @contatto, @telefono, @email, @modulo_software, @sommario_problema,
+              @descrizione_dettagliata, @priorita, 'NUOVO', @note, NULL,
+              @data_creazione, @data_aggiornamento, NULL
+            )`,
+      params: {
+        id,
+        numero,
+        cliente: input.cliente,
+        contatto: input.contatto,
+        telefono: input.telefono ?? null,
+        email: input.email ?? null,
+        modulo_software: input.modulo_software,
+        sommario_problema: input.sommario_problema,
+        descrizione_dettagliata: input.descrizione_dettagliata,
+        priorita: input.priorita,
+        note: input.note ?? null,
+        data_creazione: ts,
+        data_aggiornamento: ts,
+      },
+    },
+    ...(input.messaggi ?? []).map((m) => ({
+      sql: `INSERT INTO messages (id, ticket_id, ruolo, contenuto, data_creazione)
+            VALUES (@id, @ticketId, @ruolo, @contenuto, @data_creazione)`,
+      params: {
+        id: m.id ?? crypto.randomUUID(),
+        ticketId: id,
+        ruolo: m.ruolo,
+        contenuto: m.contenuto,
+        data_creazione: m.data_creazione ?? ts,
+      },
+    })),
+  ];
+  await db.batch(statements);
 
   return (await getTicket(id))!;
 }
@@ -153,17 +163,18 @@ export async function listTickets(opts: {
         ? `CASE priorita WHEN 'ALTA' THEN 0 WHEN 'MEDIA' THEN 1 ELSE 2 END, data_creazione DESC`
         : "data_creazione DESC";
 
-  const countRow = await db
-    .prepare(`SELECT COUNT(*) AS n FROM tickets ${whereSql}`)
-    .get(params);
+  // Conteggio e pagina sono indipendenti: in parallelo sono UN round-trip
+  // invece di due in serie.
+  const [countRow, rows] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS n FROM tickets ${whereSql}`).get(params),
+    db
+      .prepare(
+        `SELECT ${ROW_FIELDS} FROM tickets ${whereSql}
+         ORDER BY ${order} LIMIT @limit OFFSET @offset`
+      )
+      .all({ ...params, limit: paginaSize, offset: (pagina - 1) * paginaSize }),
+  ]);
   const totale = (countRow?.n as number) ?? 0;
-
-  const rows = await db
-    .prepare(
-      `SELECT ${ROW_FIELDS} FROM tickets ${whereSql}
-       ORDER BY ${order} LIMIT @limit OFFSET @offset`
-    )
-    .all({ ...params, limit: paginaSize, offset: (pagina - 1) * paginaSize });
   const tickets = rows as unknown as TicketRow[];
 
   return { tickets, totale, pagina, paginaSize };
@@ -173,29 +184,42 @@ export async function getTicket(id: string): Promise<Ticket | null> {
   const row = await db.prepare(`SELECT ${ROW_FIELDS} FROM tickets WHERE id = ?`).get(id);
   if (!row) return null;
 
-  const messaggi = (await db
-    .prepare(
-      `SELECT id, ruolo, contenuto, data_creazione FROM messages
-       WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
-    )
-    .all(id)) as unknown as Message[];
+  // Le tre letture sotto sono indipendenti: partono insieme invece che in
+  // serie (erano tre round-trip consecutivi verso il DB remoto).
+  const [messaggi, noteTecniche] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, ruolo, contenuto, data_creazione FROM messages
+         WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
+      )
+      .all(id) as unknown as Promise<Message[]>,
+    db
+      .prepare(
+        `SELECT id, ticket_id, titolo, problema, soluzione, operatore, data_creazione
+         FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
+      )
+      .all(id) as unknown as Promise<TechnicalNote[]>,
+  ]);
 
-  const noteTecniche = (await db
-    .prepare(
-      `SELECT id, ticket_id, titolo, problema, soluzione, operatore, data_creazione
-       FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
-    )
-    .all(id)) as unknown as TechnicalNote[];
-
-  // Fetch attachments for each technical note
-  for (const note of noteTecniche) {
+  // Allegati di tutte le note in UNA query, invece di una per nota (N+1).
+  if (noteTecniche.length > 0) {
+    const segnaposto = noteTecniche.map(() => "?").join(", ");
     const allegati = (await db
       .prepare(
         `SELECT id, note_tecnica_id, ticket_id, nome_file, nome_originale, dimensione, tipo_mime, data_creazione
-         FROM allegati WHERE note_tecnica_id = ? ORDER BY data_creazione ASC`
+         FROM allegati WHERE note_tecnica_id IN (${segnaposto}) ORDER BY data_creazione ASC`
       )
-      .all(note.id)) as unknown as Allegato[];
-    note.allegati = allegati;
+      .all(noteTecniche.map((n) => n.id))) as unknown as Allegato[];
+
+    const perNota = new Map<string, Allegato[]>();
+    for (const a of allegati) {
+      const lista = perNota.get(a.note_tecnica_id);
+      if (lista) lista.push(a);
+      else perNota.set(a.note_tecnica_id, [a]);
+    }
+    for (const note of noteTecniche) {
+      note.allegati = perNota.get(note.id) ?? [];
+    }
   }
 
   return { ...row, messaggi, note_tecniche: noteTecniche } as unknown as Ticket;
@@ -208,9 +232,16 @@ export async function getTicketByNumero(numero: string): Promise<TicketRow | nul
   return (row as TicketRow | undefined) ?? null;
 }
 
-export async function updateTicket(id: string, patch: TicketUpdate): Promise<Ticket | null> {
-  const existing = await getTicket(id);
-  if (!existing) return null;
+// `existing` permette al chiamante che ha gia' letto il ticket (es. la route
+// PATCH per validare e decidere le email) di evitare una seconda lettura:
+// ogni lettura sono 3 round-trip verso il DB remoto.
+export async function updateTicket(
+  id: string,
+  patch: TicketUpdate,
+  existing?: Ticket | null
+): Promise<Ticket | null> {
+  const corrente = existing ?? (await getTicket(id));
+  if (!corrente) return null;
 
   const next: TicketUpdate = { ...patch };
   if (patch.note !== undefined) next.note = patch.note || null;
@@ -259,41 +290,66 @@ export async function updateTicket(id: string, patch: TicketUpdate): Promise<Tic
     params.tempo_effettivo_minuti = next.tempo_effettivo_minuti !== null ? String(next.tempo_effettivo_minuti) : null;
   }
 
-  const finalStato = next.stato ?? existing.stato;
+  const finalStato = next.stato ?? corrente.stato;
+
+  // Valori risultanti, ricostruiti in memoria per non rileggere il ticket:
+  // la lettura finale era un altro giro di 3 round-trip.
+  let dataChiusura = corrente.data_chiusura;
+  let tempoStimato = corrente.tempo_stimato_minuti;
+  let tempoEffettivo = next.tempo_effettivo_minuti !== undefined
+    ? (next.tempo_effettivo_minuti ?? null)
+    : corrente.tempo_effettivo_minuti;
+  let dataInizioLavoro = corrente.data_inizio_lavoro;
 
   // Time tracking: set data_inizio_lavoro when transitioning to IN_CORSO
-  if (finalStato === "IN_CORSO" && existing.stato !== "IN_CORSO") {
+  if (finalStato === "IN_CORSO" && corrente.stato !== "IN_CORSO") {
     fields.push("data_inizio_lavoro = COALESCE(data_inizio_lavoro, @data_inizio_lavoro)");
     params.data_inizio_lavoro = ts;
+    dataInizioLavoro = dataInizioLavoro ?? ts;
   }
 
   // Time tracking: calculate tempo_stimato_minuti when closing
   if (finalStato === "CHIUSO" || finalStato === "RISOLTO") {
     fields.push("data_chiusura = COALESCE(data_chiusura, @data_chiusura)");
     params.data_chiusura = ts;
+    dataChiusura = dataChiusura ?? ts;
 
     // Auto-calculate estimated time if not already set
-    if (existing.tempo_stimato_minuti === null && existing.data_inizio_lavoro) {
-      const startTime = parseItalianDate(existing.data_inizio_lavoro);
+    if (corrente.tempo_stimato_minuti === null && corrente.data_inizio_lavoro) {
+      const inizioLavoro = corrente.data_inizio_lavoro;
+      const startTime = parseItalianDate(inizioLavoro);
       const endTime = parseItalianDate(ts);
       if (startTime && endTime) {
         const diffMs = endTime - startTime;
         const diffMinuti = Math.max(1, Math.round(diffMs / 60000));
         fields.push("tempo_stimato_minuti = @tempo_stimato_minuti");
         params.tempo_stimato_minuti = String(diffMinuti);
+        tempoStimato = diffMinuti;
       }
     }
-  } else if (existing.stato === "CHIUSO" || existing.stato === "RISOLTO") {
+  } else if (corrente.stato === "CHIUSO" || corrente.stato === "RISOLTO") {
     fields.push("data_chiusura = NULL");
     // Clear time tracking fields when reopening
     fields.push("tempo_stimato_minuti = NULL");
     fields.push("tempo_effettivo_minuti = NULL");
+    dataChiusura = null;
+    tempoStimato = null;
+    tempoEffettivo = null;
   }
 
   await db
     .prepare(`UPDATE tickets SET ${fields.join(", ")} WHERE id = @id`)
     .run(params);
-  return getTicket(id);
+
+  return {
+    ...corrente,
+    ...next,
+    data_aggiornamento: ts,
+    data_chiusura: dataChiusura,
+    data_inizio_lavoro: dataInizioLavoro,
+    tempo_stimato_minuti: tempoStimato,
+    tempo_effettivo_minuti: tempoEffettivo,
+  } as Ticket;
 }
 
 function parseItalianDate(dateStr: string): number | null {

@@ -12,6 +12,13 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  // Senza timeout, un SMTP che non risponde lascia appesa la richiesta HTTP
+  // che sta aspettando l'invio (es. il cambio di stato di un ticket): il
+  // default di sistema di nodemailer e' di 2 minuti, troppo per una richiesta
+  // utente.
+  connectionTimeout: 8_000,
+  greetingTimeout: 8_000,
+  socketTimeout: 15_000,
   tls: {
     rejectUnauthorized: false,
   },

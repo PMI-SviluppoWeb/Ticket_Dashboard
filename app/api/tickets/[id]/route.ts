@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { emailAssegnazione, emailChiusura } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
-import type { Priorita, StatoTicket, TicketUpdate, TechnicalNote, Allegato } from "@/lib/types";
+import type { Priorita, StatoTicket, Ticket, TicketUpdate, TechnicalNote } from "@/lib/types";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
 
@@ -16,10 +16,6 @@ const STATI: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
 
 function getOperatorId(request: Request): string | null {
   return request.headers.get("x-operator-id");
-}
-
-function getOperatorRole(request: Request): string | null {
-  return request.headers.get("x-operator-ruolo");
 }
 
 export async function GET(
@@ -38,18 +34,21 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   const operatorId = getOperatorId(request);
-  const operatorRole = getOperatorRole(request);
 
   if (!operatorId) {
     return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
   }
 
-  const operator = await getOperatorById(operatorId);
+  // Operatore e ticket sono indipendenti: una lettura in parallelo invece di
+  // due in serie.
+  const [operator, existingTicket] = await Promise.all([
+    getOperatorById(operatorId),
+    getTicket(params.id),
+  ]);
   if (!operator) {
     return NextResponse.json({ error: "Operatore non trovato." }, { status: 401 });
   }
 
-  const existingTicket = await getTicket(params.id);
   if (!existingTicket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
@@ -84,101 +83,131 @@ export async function PATCH(
   if (body.email !== undefined) patch.email = body.email;
   if (body.tempo_effettivo_minuti !== undefined) patch.tempo_effettivo_minuti = body.tempo_effettivo_minuti;
 
-  const ticket = await updateTicket(params.id, patch);
+  const ticket = await updateTicket(params.id, patch, existingTicket);
   if (!ticket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
 
-  // Send email on status change
+  // L'email e' un effetto collaterale, non parte della risposta: l'SMTP puo'
+  // impiegare secondi e bloccava il cambio di stato. Parte in background e
+  // l'esito resta tracciato in email_log (la dashboard lo mostra comunque).
   if (body.stato && existingTicket.email) {
-    const ticketEmail = existingTicket.email;
-
-    if (body.stato === "IN_CORSO" && existingTicket.stato === "NUOVO") {
-      const operatorName = patch.operatore ?? operator.nome;
-      const html = emailAssegnazione({
-        numero: ticket.numero,
-        cliente: ticket.cliente,
-        operatore: operatorName,
-      });
-      const result = await sendEmail({
-        to: ticketEmail,
-        subject: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
-        html,
-      });
-      await logEmail({
-        ticket_id: ticket.id,
-        tipo: "assegnazione",
-        destinatario: ticketEmail,
-        oggetto: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
-        corpo: html,
-        stato: result.ok ? "inviata" : "errore",
-        errore: result.error ?? null,
-      });
-    }
-
-    if (body.stato === "CHIUSO") {
-      // Fetch technical notes for the closure summary
-      const noteTecniche = (await db
-        .prepare(
-          `SELECT id, titolo, soluzione, operatore FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC`
-        )
-        .all(params.id)) as unknown as TechnicalNote[];
-
-      // Fetch all attachments for the ticket
-      const allegati = (await db
-        .prepare(
-          `SELECT nome_originale FROM allegati WHERE ticket_id = ? ORDER BY data_creazione ASC`
-        )
-        .all(params.id)) as unknown as Allegato[];
-
-      // Build email attachments from disk
-      const emailAttachments: { filename: string; path: string }[] = [];
-      const allAllegati = (await db
-        .prepare(
-          `SELECT nome_file, nome_originale FROM allegati WHERE ticket_id = ? ORDER BY data_creazione ASC`
-        )
-        .all(params.id)) as unknown as { nome_file: string; nome_originale: string }[];
-      for (const a of allAllegati) {
-        const filePath = join(UPLOADS_DIR, a.nome_file);
-        try {
-          await readFile(filePath);
-          emailAttachments.push({ filename: a.nome_originale, path: filePath });
-        } catch {
-          // File not found on disk, skip
-        }
-      }
-
-      const html = emailChiusura({
-        numero: ticket.numero,
-        cliente: ticket.cliente,
-        sommario: ticket.sommario_problema,
-        dataChiusura: ticket.data_chiusura ?? new Date().toLocaleString("it-IT"),
-        noteTecniche: noteTecniche.map((n) => ({
-          titolo: n.titolo,
-          soluzione: n.soluzione,
-          operatore: n.operatore ?? "Operatore",
-        })),
-        allegati: allegati.map((a) => a.nome_originale),
-      });
-      const result = await sendEmail({
-        to: ticketEmail,
-        subject: `[Support Desk] Ticket ${ticket.numero} chiuso`,
-        html,
-        attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
-      });
-      await logEmail({
-        ticket_id: ticket.id,
-        tipo: "chiusura",
-        destinatario: ticketEmail,
-        oggetto: `[Support Desk] Ticket ${ticket.numero} chiuso`,
-        corpo: html,
-        stato: result.ok ? "inviata" : "errore",
-        errore: result.error ?? null,
-      });
-    }
+    notificaCambioStato({
+      ticket,
+      precedente: existingTicket,
+      nuovoStato: body.stato,
+      operatore: patch.operatore ?? operator.nome,
+    });
   }
 
   return NextResponse.json(ticket);
+}
+
+function notificaCambioStato(opts: {
+  ticket: Ticket;
+  precedente: Ticket;
+  nuovoStato: StatoTicket;
+  operatore: string;
+}): void {
+  const { ticket, precedente, nuovoStato, operatore } = opts;
+  const ticketEmail = precedente.email;
+  if (!ticketEmail) return;
+
+  void inviaNotifica(ticket, precedente, nuovoStato, operatore, ticketEmail).catch(
+    (err) => console.error("Notifica ticket fallita:", ticket.id, err)
+  );
+}
+
+async function inviaNotifica(
+  ticket: Ticket,
+  precedente: Ticket,
+  nuovoStato: StatoTicket,
+  operatore: string,
+  ticketEmail: string
+): Promise<void> {
+  if (nuovoStato === "IN_CORSO" && precedente.stato === "NUOVO") {
+    const html = emailAssegnazione({
+      numero: ticket.numero,
+      cliente: ticket.cliente,
+      operatore,
+    });
+    const result = await sendEmail({
+      to: ticketEmail,
+      subject: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
+      html,
+    });
+    await logEmail({
+      ticket_id: ticket.id,
+      tipo: "assegnazione",
+      destinatario: ticketEmail,
+      oggetto: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
+      corpo: html,
+      stato: result.ok ? "inviata" : "errore",
+      errore: result.error ?? null,
+    });
+    return;
+  }
+
+  if (nuovoStato !== "CHIUSO") return;
+
+  // Note tecniche e allegati in parallelo; una sola query per gli allegati
+  // (prima erano due identiche di fila) e lettura dei file in parallelo.
+  const [noteTecniche, allAllegati] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, titolo, soluzione, operatore FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC`
+      )
+      .all(ticket.id) as unknown as Promise<TechnicalNote[]>,
+    db
+      .prepare(
+        `SELECT nome_file, nome_originale FROM allegati WHERE ticket_id = ? ORDER BY data_creazione ASC`
+      )
+      .all(ticket.id) as unknown as Promise<{ nome_file: string; nome_originale: string }[]>,
+  ]);
+
+  const esistenti = await Promise.all(
+    allAllegati.map(async (a) => {
+      const filePath = join(UPLOADS_DIR, a.nome_file);
+      try {
+        await readFile(filePath);
+        return { filename: a.nome_originale, path: filePath };
+      } catch {
+        // File not found on disk, skip
+        return null;
+      }
+    })
+  );
+  const emailAttachments = esistenti.filter(
+    (a): a is { filename: string; path: string } => a !== null
+  );
+
+  const html = emailChiusura({
+    numero: ticket.numero,
+    cliente: ticket.cliente,
+    sommario: ticket.sommario_problema,
+    dataChiusura: ticket.data_chiusura ?? new Date().toLocaleString("it-IT"),
+    noteTecniche: noteTecniche.map((n) => ({
+      titolo: n.titolo,
+      soluzione: n.soluzione,
+      operatore: n.operatore ?? "Operatore",
+    })),
+    allegati: allAllegati.map((a) => a.nome_originale),
+  });
+  const result = await sendEmail({
+    to: ticketEmail,
+    subject: `[Support Desk] Ticket ${ticket.numero} chiuso`,
+    html,
+    attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
+  });
+  await logEmail({
+    ticket_id: ticket.id,
+    tipo: "chiusura",
+    destinatario: ticketEmail,
+    oggetto: `[Support Desk] Ticket ${ticket.numero} chiuso`,
+    corpo: html,
+    stato: result.ok ? "inviata" : "errore",
+    errore: result.error ?? null,
+  });
 }
 
 export async function DELETE(
