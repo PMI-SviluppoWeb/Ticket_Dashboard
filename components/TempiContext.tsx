@@ -79,6 +79,10 @@ export function TempiProvider({ children }: { children: ReactNode }) {
   const carica = useCallback(async () => {
     try {
       const res = await fetch("/api/tempi", { cache: "no-store" });
+      // Il provider sta nel layout, quindi vive anche sulla pagina di login:
+      // li' l'API risponde 401 per costruzione. Non e' un errore da mostrare,
+      // e tenere il messaggio in stato lo farebbe comparire appena si entra.
+      if (res.status === 401) return;
       if (!res.ok) throw new Error(`Errore ${res.status}`);
       const data = (await res.json()) as { aperta: VoceTempoEstesa | null; voci: VoceTempoEstesa[] };
       setAperta(data.aperta ?? null);
