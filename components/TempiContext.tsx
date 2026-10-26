@@ -1,0 +1,205 @@
+"use client";
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type { VoceTempoEstesa } from "@/lib/types";
+
+// ===========================================================================
+// Il cronometro dell'applicazione.
+//
+// Vive in un solo posto (il layout) e viene letto da tutti: header, board
+// delle task e pannello del ticket mostrano lo STESSO stato. Se ogni
+// componente tenesse il proprio, avviare un timer dall'header non aggiornerebbe
+// la riga della task, e si potrebbe avviarne un secondo credendo che non ci sia.
+//
+// Solo UNA voce puo' correre per operatore: e' una regola del server (vedi
+// lib/tempi.ts), e qui il client la rispecchia. Avviare un nuovo bersaglio
+// chiude il precedente lato server: la risposta dice qual e' quello vero, e lo
+// stato locale si allinea a quella, non all'ottimismo locale.
+//
+// Il conteggio e' DERIVATO da `inizio` e dall'orologio del client: nessun setInterval
+// accumula secondi (un intervallo deriva col tempo, e a scheda in background
+// il browser lo rallenta). Un tick al secondo serve solo a far ri-renderizzare
+// il numero.
+// ===========================================================================
+
+interface TempiContextValue {
+  // Voce attualmente in corso, se c'e'.
+  aperta: VoceTempoEstesa | null;
+  // Ultime voci dell'operatore, per il pannello a tendina.
+  voci: VoceTempoEstesa[];
+  caricamento: boolean;
+  errore: string;
+  // Secondi trascorsi della voce aperta. Si aggiorna ogni secondo.
+  secondi: number;
+  // Avvia (o sposta) il cronometro. Chiude l'eventuale voce in corso.
+  avvia: (bersaglio: { attivita_id?: string; ticket_id?: string; descrizione?: string }) => Promise<void>;
+  ferma: () => Promise<void>;
+  elimina: (id: string) => Promise<void>;
+  ricarica: () => Promise<void>;
+  // true se la voce aperta corre sul bersaglio indicato: la riga della task
+  // mostra "Ferma" invece di "Avvia" senza dover confrontare gli id a mano.
+  inCorsoSu: (bersaglio: { attivita_id?: string; ticket_id?: string }) => boolean;
+}
+
+const TempiContext = createContext<TempiContextValue | null>(null);
+
+export function useTempi(): TempiContextValue {
+  const ctx = useContext(TempiContext);
+  if (!ctx) {
+    // Errore esplicito invece di un default silenzioso: un componente fuori
+    // dal provider mostrerebbe uno stato vuoto per sempre, che sembra un bug
+    // del backend.
+    throw new Error("useTempi va usato dentro <TempiProvider>.");
+  }
+  return ctx;
+}
+
+export function TempiProvider({ children }: { children: ReactNode }) {
+  const [aperta, setAperta] = useState<VoceTempoEstesa | null>(null);
+  const [voci, setVoci] = useState<VoceTempoEstesa[]>([]);
+  const [caricamento, setCaricamento] = useState(true);
+  const [errore, setErrore] = useState("");
+  const [adesso, setAdesso] = useState(() => Date.now());
+  const [richiestaInCorso, setRichiestaInCorso] = useState(false);
+
+  // Guardia contro il doppio clic: due POST ravvicinati creerebbero due voci
+  // (il secondo chiuderebbe il primo con zero secondi). Il ref evita la
+  // corsa che lo state non intercetta, perche' il setState e' asincrono.
+  const inVolo = useRef(false);
+
+  const carica = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tempi", { cache: "no-store" });
+      if (!res.ok) throw new Error(`Errore ${res.status}`);
+      const data = (await res.json()) as { aperta: VoceTempoEstesa | null; voci: VoceTempoEstesa[] };
+      setAperta(data.aperta ?? null);
+      setVoci(data.voci ?? []);
+      setErrore("");
+    } catch (err) {
+      setErrore(err instanceof Error ? err.message : "Errore di caricamento.");
+    } finally {
+      setCaricamento(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carica();
+  }, [carica]);
+
+  // Tick al secondo, solo mentre un cronometro corre: a voci ferme un timer
+  // che gira e' lavoro sprecato e ri-render inutili in tutta l'app.
+  useEffect(() => {
+    if (!aperta) return;
+    const id = setInterval(() => setAdesso(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [aperta]);
+
+  const secondi = useMemo(() => {
+    if (!aperta) return 0;
+    const inizio = new Date(aperta.inizio).getTime();
+    if (!Number.isFinite(inizio)) return 0;
+    return Math.max(0, Math.floor((adesso - inizio) / 1000));
+  }, [aperta, adesso]);
+
+  const avvia = useCallback(
+    async (bersaglio: { attivita_id?: string; ticket_id?: string; descrizione?: string }) => {
+      if (inVolo.current) return;
+      inVolo.current = true;
+      setRichiestaInCorso(true);
+      setErrore("");
+      try {
+        const res = await fetch("/api/tempi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bersaglio),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+        // Lo stato si allinea alla RISPOSTA, non all'ottimismo: e' il server a
+        // sapere quale voce e' rimasta aperta dopo aver chiuso la precedente.
+        setAperta(data as VoceTempoEstesa);
+        setAdesso(Date.now());
+        await carica();
+      } catch (err) {
+        setErrore(err instanceof Error ? err.message : "Errore di avvio.");
+      } finally {
+        inVolo.current = false;
+        setRichiestaInCorso(false);
+      }
+    },
+    [carica]
+  );
+
+  const ferma = useCallback(async () => {
+    if (inVolo.current || !aperta) return;
+    inVolo.current = true;
+    setRichiestaInCorso(true);
+    setErrore("");
+    try {
+      const res = await fetch(`/api/tempi/${aperta.id}`, { method: "PATCH" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      setAperta(null);
+      await carica();
+    } catch (err) {
+      setErrore(err instanceof Error ? err.message : "Errore di arresto.");
+    } finally {
+      inVolo.current = false;
+      setRichiestaInCorso(false);
+    }
+  }, [aperta, carica]);
+
+  const elimina = useCallback(
+    async (id: string) => {
+      setErrore("");
+      try {
+        const res = await fetch(`/api/tempi/${id}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+        await carica();
+      } catch (err) {
+        setErrore(err instanceof Error ? err.message : "Errore di eliminazione.");
+      }
+    },
+    [carica]
+  );
+
+  const inCorsoSu = useCallback(
+    (bersaglio: { attivita_id?: string; ticket_id?: string }) => {
+      if (!aperta) return false;
+      if (bersaglio.attivita_id) return aperta.attivita_id === bersaglio.attivita_id;
+      if (bersaglio.ticket_id) return aperta.ticket_id === bersaglio.ticket_id;
+      // Nessun id: e' il tempo generico, che corrisponde solo a una voce
+      // generica (nessuno dei due id valorizzato).
+      return !aperta.attivita_id && !aperta.ticket_id;
+    },
+    [aperta]
+  );
+
+  const value = useMemo<TempiContextValue>(
+    () => ({
+      aperta,
+      voci,
+      caricamento: caricamento || richiestaInCorso,
+      errore,
+      secondi,
+      avvia,
+      ferma,
+      elimina,
+      ricarica: carica,
+      inCorsoSu,
+    }),
+    [aperta, voci, caricamento, richiestaInCorso, errore, secondi, avvia, ferma, elimina, carica, inCorsoSu]
+  );
+
+  return <TempiContext.Provider value={value}>{children}</TempiContext.Provider>;
+}

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import NotificationBell from "@/components/NotificationBell";
+import CronometroHeader from "@/components/CronometroHeader";
 import { CalendarIcon } from "@/components/icons";
 
 interface AppHeaderProps {
@@ -9,6 +10,10 @@ interface AppHeaderProps {
   // Azioni specifiche della pagina. Stanno FUORI dalla barra, sul canvas, come
   // la campanella: i bottoni delle pagine sono disegnati per fondo chiaro.
   azioni?: ReactNode;
+  // Bersaglio proposto dal cronometro quando la pagina ne ha uno ovvio (una
+  // task aperta, un progetto). Puo' stare anche fuori dalla barra: e' un
+  // suggerimento, non un vincolo.
+  bersaglioTimer?: { attivita_id?: string; ticket_id?: string; etichetta: string } | null;
 }
 
 function saluto(ora: number) {
@@ -24,7 +29,7 @@ function saluto(ora: number) {
 // dall'orologio del client mentre il server gira in UTC: da qui il
 // `suppressHydrationWarning`, che evita l'avviso senza rendere la barra
 // client-only.
-export default function AppHeader({ children, azioni }: AppHeaderProps) {
+export default function AppHeader({ children, azioni, bersaglioTimer = null }: AppHeaderProps) {
   const ora = new Date();
   const data = ora.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "long" });
 
@@ -42,6 +47,10 @@ export default function AppHeader({ children, azioni }: AppHeaderProps) {
           {data}
         </span>
         {children && <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>}
+        {/* Il cronometro sta DENTRO la barra: e' informazione di stato, come
+            l'orologio, e deve seguire la pagina senza spostarsi. Sullo sfondo
+            nero usa il tema scuro (pillola lime quando corre). */}
+        <CronometroHeader tema="scuro" bersaglio={bersaglioTimer} />
         <span className="ml-auto mr-3 flex shrink-0 items-center gap-2 text-xs text-white/60">
           <span className="relative flex h-2 w-2" aria-hidden="true">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
