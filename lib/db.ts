@@ -288,6 +288,37 @@ CREATE TABLE IF NOT EXISTS attivita_google (
 
 CREATE INDEX IF NOT EXISTS idx_attivita_google_stato    ON attivita_google (stato);
 CREATE INDEX IF NOT EXISTS idx_attivita_google_calendar ON attivita_google (calendar_id);
+
+-- Tempi di lavorazione. Una voce appartiene a UNA cosa: un'attivita' (task di
+-- progetto o evento sciolto), un ticket, oppure nessuna delle due (tempo
+-- "generico", registrato dall'header quando non si e' scelto un bersaglio).
+--
+-- Non c'e' una FK verso attivita/tickets: le due tabelle hanno gia' cancellato
+-- righe in passato (cascate) e il DB non applica le foreign key. Il bersaglio
+-- vivo si risolve in lettura con un LEFT JOIN; una voce orfana resta un tempo
+-- registrato e non sparisce dai totali storici.
+--
+-- "fine" NULL significa voce in corso: e' il cronometro attivo. E' uno stato
+-- DERIVATO dalle date, mai una colonna: non puo' andare fuori sincrono.
+CREATE TABLE IF NOT EXISTS voci_tempo (
+  id                 TEXT PRIMARY KEY,
+  attivita_id        TEXT,
+  ticket_id          TEXT,
+  operatore_id       TEXT NOT NULL,
+  operatore          TEXT NOT NULL,
+  descrizione        TEXT,
+  inizio             TEXT NOT NULL,
+  fine               TEXT,
+  data_creazione     TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL,
+  CHECK (attivita_id IS NULL OR ticket_id IS NULL)
+);
+
+-- Il cronometro attivo di un operatore si cerca sempre per operatore aperto.
+CREATE INDEX IF NOT EXISTS idx_voci_tempo_operatore ON voci_tempo (operatore_id, fine);
+CREATE INDEX IF NOT EXISTS idx_voci_tempo_attivita ON voci_tempo (attivita_id);
+CREATE INDEX IF NOT EXISTS idx_voci_tempo_ticket   ON voci_tempo (ticket_id);
+CREATE INDEX IF NOT EXISTS idx_voci_tempo_inizio   ON voci_tempo (inizio);
 `;
 
 // NOTA sui due vincoli dello SCHEMA (che viene splittato su ";"):

@@ -428,6 +428,49 @@ export interface ProgettoListResult {
   paginaSize: number;
 }
 
+// ---------------------------------------------------------------------------
+// Tempi di lavorazione (cronometro)
+//
+// Una voce appartiene a UNA cosa sola: attivita' XOR ticket. Nessuno dei due
+// vuol dire tempo generico. `fine` nullo = voce in corso, cioe' il cronometro
+// che sta correndo in questo momento.
+// ---------------------------------------------------------------------------
+
+// Etichetta risolta in lettura: il bersaglio di una voce puo' essere stato
+// cancellato dopo la registrazione, e in quel caso il tempo resta valido.
+export type TipoVoceTempo = "attivita" | "ticket" | "generico";
+
+export interface VoceTempoRow {
+  id: string;
+  attivita_id: string | null;
+  ticket_id: string | null;
+  operatore_id: string;
+  operatore: string;
+  descrizione: string | null;
+  // ISO 8601. Le voci di tempo sono eventi puntuali con fuso: a differenza
+  // delle date di pianificazione dei progetti, qui serve l'istante esatto.
+  inizio: string;
+  // null = in corso.
+  fine: string | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+// Riga denormalizzata per la UI: titolo del bersaglio risolto via JOIN.
+// La durata NON e' memorizzata: si ricava da inizio/fine, cosi' non puo'
+// divergere dalle date (la voce in corso non ha una durata finche' non finisce).
+export interface VoceTempoEstesa extends VoceTempoRow {
+  tipo: TipoVoceTempo;
+  bersaglio: string | null;
+}
+
+export interface VoceTempoInput {
+  attivita_id?: string | null;
+  ticket_id?: string | null;
+  descrizione?: string | null;
+}
+
+
 export interface EmailInbox {
   id: string;
   message_id: string;

@@ -1,12 +1,12 @@
-import type { TicketRow } from "./types";
+import type { TicketRow, VoceTempoRow } from "./types";
 
 // ===========================================================================
-// Tempi del progetto.
+// Tempi del progetto e del cronometro.
 //
-// I progetti non hanno ancora un tempo proprio: l'unica sorgente reale oggi
-// sono i ticket di assistenza collegati (tempo_effettivo_minuti). Questo
-// modulo li aggrega e li formatta, senza inventare numeri. Quando il backend
-// avra' i tempi delle attivita', bastera' sommarli qui.
+// I progetti non hanno un tempo proprio memorizzato: il tempo reale arriva
+// dalle voci di `voci_tempo` (task, ticket, tempo generico) e, per lo storico,
+// dai ticket di assistenza collegati (tempo_effettivo_minuti). Questo modulo
+// aggrega e formatta, senza inventare numeri.
 //
 // Modulo PURO: viene importato da Client Component.
 // ===========================================================================
@@ -23,6 +23,65 @@ export function formatDurata(minuti: number | null | undefined): string {
   if (min === 0) return `${ore}h`;
   return `${ore}h ${min}m`;
 }
+
+// Cronometro: "1:04:09". Sempre con le ore, perche' e' un orologio che scorre
+// e larghezza/posizione delle cifre non devono ballare a ogni minuto.
+// `secondi` negativi (orologio del client indietro rispetto al server) sono
+// clampati a zero: lo schermo non deve mostrare un tempo che risale.
+export function formatCronometro(secondi: number | null | undefined): string {
+  const s = Math.max(0, Math.floor(secondi ?? 0));
+  const ore = Math.floor(s / 3600);
+  const min = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${ore}:${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+// Secondi trascorsi fra due istanti ISO. Con `fine` nullo il conteggio arriva
+// a `adesso` (default: ora del client).
+export function secondiTrascorsi(
+  inizio: string,
+  fine: string | null,
+  adesso: number = Date.now()
+): number {
+  const a = new Date(inizio).getTime();
+  if (!Number.isFinite(a)) return 0;
+  const b = fine ? new Date(fine).getTime() : adesso;
+  if (!Number.isFinite(b)) return 0;
+  return Math.max(0, Math.round((b - a) / 1000));
+}
+
+// Minuti di una voce chiusa. Restituisce null per la voce in corso: un tempo
+// ancora in movimento non e' un dato da sommare senza dire che e' parziale.
+export function minutiVoce(v: VoceTempoRow, adesso: number = Date.now()): number | null {
+  if (!v.fine) return null;
+  return Math.round(secondiTrascorsi(v.inizio, v.fine, adesso) / 60);
+}
+
+// Totale in minuti di un insieme di voci. Le voci in corso CONTANO fino ad
+// `adesso`: chi guarda il totale mentre lavora si aspetta di vederlo salire.
+// Per un totale "solo registrato" passare `soloChiuse`.
+export function totaleMinutiVoci(
+  voci: VoceTempoRow[],
+  opts?: { adesso?: number; soloChiuse?: boolean }
+): number {
+  const adesso = opts?.adesso ?? Date.now();
+  let totale = 0;
+  for (const v of voci) {
+    if (!v.fine && opts?.soloChiuse) continue;
+    totale += secondiTrascorsi(v.inizio, v.fine, adesso) / 60;
+  }
+  return Math.round(totale);
+}
+
+// Una voce in corso da piu' di `oreLimite` e' quasi certamente dimenticata:
+// la UI lo segnala invece di sommare in silenzio mezza giornata di troppo.
+export const ORE_AVVISO_TIMER = 8;
+
+export function timerDimenticato(v: VoceTempoRow, adesso: number = Date.now()): boolean {
+  if (v.fine) return false;
+  return secondiTrascorsi(v.inizio, null, adesso) > ORE_AVVISO_TIMER * 3600;
+}
+
 
 export interface TempoOperatore {
   nome: string;
