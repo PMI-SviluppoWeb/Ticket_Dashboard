@@ -260,7 +260,118 @@ docker image prune -a -f
 
 ---
 
-## 7. Risoluzione problemi
+## 7. Integrazione Google Calendar
+
+Il calendario condiviso dell'app può essere pubblicato su un calendario Google,
+così il team lo vede da telefono e desktop senza aprire la dashboard.
+
+**La sincronizzazione è a UNA DIREZIONE: dall'app verso Google.** L'app resta
+l'unica fonte di verità; Google è in sola lettura per il team. Non esiste
+sincronizzazione inversa né gestione dei conflitti: una modifica fatta a mano
+su un evento Google viene sovrascritta al successivo salvataggio nell'app.
+
+Gli eventi finiscono su Google **solo se l'attività ha una scadenza**. L'evento
+**termina alla scadenza**: se l'attività ha anche un inizio, l'evento va da
+inizio a scadenza; altrimenti parte un'ora prima (scadenza 17:30 → 16:30–17:30).
+
+### 7.1 Creare l'account di servizio
+
+Serve un account di servizio Google, non un OAuth utente: non richiede login
+interattivi e non scade.
+
+1. Su [console.cloud.google.com](https://console.cloud.google.com) crea un
+   progetto (o riusane uno esistente).
+2. **API e servizi → Libreria → Google Calendar API → Abilita**.
+3. **IAM e amministrazione → Account di servizio → Crea account di servizio**
+   (nome suggerito: `ticket-dashboard-sync`). Nessun ruolo IAM è necessario.
+4. Sull'account appena creato: **Chiavi → Aggiungi chiave → Crea nuova chiave →
+   JSON**. Si scarica un file contenente `client_email` e `private_key`.
+5. Annota il `client_email`: ha la forma
+   `ticket-dashboard-sync@tuo-progetto.iam.gserviceaccount.com`.
+
+### 7.2 Condividere il calendario
+
+6. In Google Calendar apri il calendario di destinazione e vai su
+   **Impostazioni e condivisione → Condividi con utenti specifici → Aggiungi
+   persone**, incolla il `client_email` e assegna il permesso
+   **"Apporta modifiche"**. La notifica via email non è necessaria.
+7. L'**ID calendario** è l'indirizzo del calendario (es. `info@azienda.it`)
+   oppure, per un calendario secondario, l'id
+   `...@group.calendar.google.com` che trovi in fondo a
+   **Impostazioni e condivisione → Integra calendario → ID calendario**.
+
+> ⚠️ **Su un account Gmail gratuito** non esiste la domain-wide delegation, e la
+> condivisione manuale **non** fa comparire il calendario nell'elenco dei
+> calendari dell'account di servizio. Per questo nel pannello di configurazione
+> l'ID si può sempre scrivere a mano, e c'è il pulsante **Verifica accesso**.
+
+### 7.3 Configurare l'applicazione
+
+Aggiungi al file `.env`:
+
+```env
+GOOGLE_SERVICE_ACCOUNT_EMAIL=ticket-dashboard-sync@tuo-progetto.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEv...\n-----END PRIVATE KEY-----\n"
+```
+
+- La **chiave privata va su una riga sola**, con gli a-capo scritti come `\n`:
+  `env_file` di docker-compose non supporta valori multi-riga. Il codice
+  ripristina gli a-capo all'avvio.
+- Queste variabili **non vanno mai committate**: la chiave firma token per conto
+  dell'account di servizio, che ha accesso in scrittura al calendario. `.env` e
+  `.env*.local` sono già in `.gitignore` e `.dockerignore`.
+- Variabili opzionali, con default nel codice:
+  `GOOGLE_OAUTH_TOKEN_URL`, `GOOGLE_CALENDAR_API_BASE` (per i test con uno stub
+  locale) e `GOOGLE_DRY_RUN=true` (simula le chiamate senza toccare la rete).
+
+Riavvia il container, poi apri **Calendario → pulsante «Google»**:
+
+1. attiva **Sincronizzazione attiva**;
+2. scegli se usare **un calendario per origine** (attività di progetto, eventi
+   con cliente, eventi generici) oppure **tutti gli eventi su un solo
+   calendario**;
+3. per ogni riga incolla l'ID calendario e premi **Verifica accesso**;
+4. salva, poi premi **Sincronizza ora**.
+
+La prima sincronizzazione popola il calendario con le attività esistenti,
+limitate alla finestra configurata (default: 30 giorni nel futuro). Il pulsante
+può essere premuto più volte: elabora a blocchi di 200 e indica quanti elementi
+restano.
+
+### 7.4 Come funziona la sincronizzazione
+
+- **Immediata**: creare, modificare o cancellare un'attività aggiorna subito
+  Google. Se Google non risponde entro pochi secondi l'operazione nell'app
+  riesce comunque, e la sincronizzazione viene riprovata: al salvataggio
+  successivo, con **Riprova gli errori**, o con **Sincronizza ora**.
+- **Rimozione della scadenza**: l'evento viene cancellato da Google.
+- **Cambio di mappatura**: gli eventi già sincronizzati vengono rimossi dal
+  calendario vecchio e ricreati nel nuovo alla prima **Sincronizza ora**.
+- **Cancellazione di un progetto**: le sue attività vengono rimosse da Google.
+  Oltre 25 attività la rimozione viene accodata e smaltita dalla
+  sincronizzazione successiva.
+- **Modifiche fatte a mano su Google**: se un evento viene cancellato su
+  Google, viene ricreato alla modifica successiva nell'app; se viene
+  modificato, la modifica viene sovrascritta. L'app è la fonte di verità.
+- Lo stato di ogni attività è visibile come badge (verde = sincronizzata,
+  rosso = errore, ambra = in attesa) nella pagina del progetto e come puntino
+  colorato nei chip del calendario.
+
+### 7.5 Diagnostica
+
+| Sintomo | Causa / Fix |
+|---|---|
+| Il pannello dice "non configurata" | `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_PRIVATE_KEY` assenti o container non riavviato |
+| `GOOGLE_PRIVATE_KEY non è una chiave PEM valida` | la chiave è su più righe: va messa su una riga sola con `\n` |
+| "Il calendario non è condiviso con l'account di servizio" | manca la condivisione con il `client_email`, oppure l'ID è sbagliato |
+| Elenco calendari vuoto | normale su Gmail gratuito: scrivi l'ID a mano |
+| Tutte le attività in errore con "Nessun calendario configurato" | la mappatura è vuota: assegna un calendario a ogni origine |
+| Errore "L'inizio è successivo alla scadenza" | l'attività ha `data_inizio` dopo `data_scadenza`: correggi le date nell'app |
+| Gli eventi compaiono a un'ora sbagliata | controlla il campo **Fuso orario** nel pannello (default `Europe/Rome`) |
+
+---
+
+## 8. Risoluzione problemi
 
 | Sintomo | Causa / Fix |
 |---|---|
