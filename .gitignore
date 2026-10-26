@@ -17,4 +17,13 @@ uploads/
 
 # Screenshot e log
 screen/
+.design-shots/
 dev.log
+
+# Chiavi degli account di servizio Google: contengono una private_key e non
+# vanno MAI versionate. Le credenziali reali stanno in GOOGLE_PRIVATE_KEY.
+hermes-gmail-*.json
+*-service-account*.json
+
+# Output di graphify (rigenerabile con `graphify update .`)
+graphify-out/
