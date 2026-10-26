@@ -34,6 +34,7 @@ import {
   TicketIcon,
   FolderIcon,
 } from "@/components/icons";
+import TimerBersaglio from "@/components/TimerBersaglio";
 
 // Base del chip.
 //
@@ -1236,6 +1237,14 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 </div>
               </div>
               <div className="space-y-3 text-xs">
+                {/* Cronometro sul ticket. Prima il tempo si poteva solo
+                    digitare a mano a ticket chiuso; adesso si misura mentre
+                    si lavora. Il campo manuale resta sotto: e' la correzione,
+                    non la fonte primaria. */}
+                <TimerBersaglio
+                  ticket_id={ticket.id}
+                  etichetta={`ticket ${ticket.numero}`}
+                />
                 {ticket.data_inizio_lavoro && (
                   <div className="flex items-center justify-between">
                     <span className="text-caldo-testo">Inizio lavoro:</span>

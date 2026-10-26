@@ -26,6 +26,8 @@ import {
 import SectionBar from "@/components/SectionBar";
 import ProgettoTaskBoard from "@/components/ProgettoTaskBoard";
 import ProgettoTaskDrawer from "@/components/ProgettoTaskDrawer";
+import CronometroHeader from "@/components/CronometroHeader";
+import { useTempi } from "@/components/TempiContext";
 import { formatData, perInputDateTime } from "@/lib/calendario";
 import { formatDurata, riepilogoTempi } from "@/lib/durata";
 import { iniziali, SEZIONE_INIZIALE, type ExtraTask, type Sezione } from "@/lib/task-local";
@@ -388,6 +390,77 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
   // -------------------------------------------------------------------------
   const tempi = useMemo(() => riepilogoTempi(progetto?.tickets ?? []), [progetto]);
 
+  // Tempo dalle VOCI REGISTRATE (task, ticket, tempo generico), letto dal
+  // server. Fino a oggi il pannello mostrava solo il tempo digitato a mano sui
+  // ticket, e dichiarava che le task non erano tracciate: adesso lo sono, ma
+  // sono una seconda fonte, non un sostituto. Le due si mostrano separate
+  // perche' sommarle nasconderebbe che una e' stimata a mano.
+  const [vociTempi, setVociTempi] = useState<{
+    totale: number;
+    perOperatore: { nome: string; minuti: number }[];
+  } | null>(null);
+  // Totali per riga della board: una sola query aggregata, non una per task.
+  const [minutiPerTask, setMinutiPerTask] = useState<Record<string, number>>({});
+  const [vociErrore, setVociErrore] = useState("");
+
+  const caricaVociTempi = useCallback(async () => {
+    if (!id) return;
+    try {
+      // Due letture in parallelo: il riepilogo del pannello (per operatore) e i
+      // totali per riga della board (per task). Stessa tabella, GROUP BY
+      // diversi: unirle in una risposta obbligherebbe il server a calcolare
+      // entrambe le aggregazioni anche quando interessa una sola.
+      const [resRiepilogo, resMinuti] = await Promise.all([
+        fetch(`/api/tempi?progetto=${encodeURIComponent(id)}`, { cache: "no-store" }),
+        fetch(`/api/tempi?attivita_minuti=${encodeURIComponent(id)}`, { cache: "no-store" }),
+      ]);
+      if (!resRiepilogo.ok) throw new Error(`Errore ${resRiepilogo.status}`);
+      if (!resMinuti.ok) throw new Error(`Errore ${resMinuti.status}`);
+
+      const riepilogo = (await resRiepilogo.json()) as {
+        totale: number;
+        perOperatore: { nome: string; minuti: number }[];
+      };
+      const { minuti } = (await resMinuti.json()) as { minuti: Record<string, number> };
+
+      setVociTempi(riepilogo);
+      setMinutiPerTask(minuti);
+      setVociErrore("");
+    } catch (err) {
+      setVociErrore(err instanceof Error ? err.message : "Errore di caricamento.");
+    }
+  }, [id]);
+
+  useEffect(() => {
+    caricaVociTempi();
+  }, [caricaVociTempi]);
+
+  // Il cronometro puo' cambiare stato da qualsiasi pagina: quando una voce
+  // parte o si ferma, i totali del progetto possono essere cambiati. Si
+  // rileggono allora, non a intervalli.
+  const { aperta: voceTimerAperta } = useTempi();
+  const voceTimerId = voceTimerAperta?.id ?? null;
+  useEffect(() => {
+    if (!voceTimerId) return;
+    caricaVociTempi();
+  }, [voceTimerId, caricaVociTempi]);
+
+  // Le due fonti hanno la stessa forma (nome -> minuti): si uniscono per
+  // persona invece di mostrare due elenchi quasi identici. I minuti a zero si
+  // scartano: una riga "0m" e' rumore, non un dato.
+  const perOperatoreTotale = useMemo(() => {
+    const mappa = new Map<string, number>();
+    for (const o of tempi.perOperatore) {
+      if (o.minuti > 0) mappa.set(o.nome, (mappa.get(o.nome) ?? 0) + o.minuti);
+    }
+    for (const o of vociTempi?.perOperatore ?? []) {
+      if (o.minuti > 0) mappa.set(o.nome, (mappa.get(o.nome) ?? 0) + o.minuti);
+    }
+    return Array.from(mappa, ([nome, minuti]) => ({ nome, minuti })).sort(
+      (a, b) => b.minuti - a.minuti
+    );
+  }, [tempi.perOperatore, vociTempi]);
+
   const attivitaSelezionata = useMemo(
     () => progetto?.attivita.find((a) => a.id === selezionataId) ?? null,
     [progetto, selezionataId]
@@ -444,7 +517,21 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
           {progetto.nome}
         </span>
         <span className="text-xs font-bold text-caldo-testo">{progetto.codice}</span>
-        <div className="ml-auto flex items-center gap-2">
+        {/* Il cronometro sulla pagina del progetto: variante chiara, perche'
+            qui l'header non e' la barra nera. Il bersaglio suggerito e' la task
+            aperta nel drawer, quando c'e': e' il lavoro che si sta guardando, e
+            avviare il timer deve costare un clic — non una ricerca. */}
+        <div className="ml-auto">
+          <CronometroHeader
+            tema="chiaro"
+            bersaglio={
+              attivitaSelezionata
+                ? { attivita_id: attivitaSelezionata.id, etichetta: attivitaSelezionata.titolo }
+                : null
+            }
+          />
+        </div>
+        <div className="flex items-center gap-2">
           <button type="button" onClick={apriModificaProgetto} className={BTN_SECONDARIO}>
             <EditIcon className="h-3.5 w-3.5" />
             Modifica
@@ -736,17 +823,20 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
                   Tempi
                 </h2>
                 <span className="ml-auto text-[11px] font-medium text-caldo-testo">
-                  da ticket collegati
+                  cronometro + ticket
                 </span>
               </div>
 
               <div className="p-5">
-                {/* Totale: il numero che si cerca, in scala grande. */}
+                {/* Totale: il numero che si cerca, in scala grande. Somma le
+                    due fonti — voci del cronometro e tempo digitato a mano sui
+                    ticket — ma le mostra separate sotto, perche' una e' tempo
+                    misurato e l'altra e' una stima inserita a posteriori. */}
                 <div className="flex items-end justify-between gap-3">
                   <div>
                     <p className={LABEL_CLASS}>Registrato</p>
                     <p className="font-display text-3xl font-semibold tracking-tight text-inchiostro">
-                      {formatDurata(tempi.totale)}
+                      {formatDurata(tempi.totale + (vociTempi?.totale ?? 0))}
                     </p>
                   </div>
                   <div className="text-right">
@@ -757,6 +847,29 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
                   </div>
                 </div>
 
+                {/* Le due fonti, esplicite. Senza questa riga il totale
+                    sembrerebbe un dato unico e non si saprebbe quanto viene
+                    dal cronometro e quanto da un campo scritto a mano. */}
+                <div className="mt-2 flex items-center gap-3 text-[11px] text-caldo-testo">
+                  <span className="inline-flex items-center gap-1">
+                    <TimerIcon className="h-3 w-3" />
+                    <span className="tabular font-semibold text-inchiostro">
+                      {formatDurata(vociTempi?.totale ?? 0)}
+                    </span>
+                    da cronometro
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <TicketIcon className="h-3 w-3" />
+                    <span className="tabular font-semibold text-inchiostro">
+                      {formatDurata(tempi.totale)}
+                    </span>
+                    da ticket
+                  </span>
+                </div>
+                {vociErrore && (
+                  <p className="mt-1 text-[11px] text-stato-urgenza-testo">{vociErrore}</p>
+                )}
+
                 {/* Barra stimato vs registrato: solo se c'e' una stima. Una
                     barra senza metro direbbe "sei in ritardo" senza sapere
                     rispetto a cosa. Il riempimento oltre il 100% si clampa. */}
@@ -765,23 +878,40 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
                     <div
                       className="h-1.5 w-full overflow-hidden rounded-full bg-inchiostro/10"
                       role="progressbar"
-                      aria-valuenow={Math.min(100, Math.round((tempi.totale / tempi.stimato) * 100))}
+                      aria-valuenow={Math.min(
+                        100,
+                        Math.round(
+                          ((tempi.totale + (vociTempi?.totale ?? 0)) / tempi.stimato) * 100
+                        )
+                      )}
                       aria-valuemin={0}
                       aria-valuemax={100}
-                      aria-label={`Tempo registrato rispetto allo stimato: ${formatDurata(tempi.totale)} su ${formatDurata(tempi.stimato)}`}
+                      aria-label={`Tempo registrato rispetto allo stimato: ${formatDurata(
+                        tempi.totale + (vociTempi?.totale ?? 0)
+                      )} su ${formatDurata(tempi.stimato)}`}
                     >
                       <div
                         className={`h-full rounded-full ${
-                          tempi.totale > tempi.stimato ? "bg-stato-urgenza-testo" : "bg-avanzamento"
+                          tempi.totale + (vociTempi?.totale ?? 0) > tempi.stimato
+                            ? "bg-stato-urgenza-testo"
+                            : "bg-avanzamento"
                         }`}
                         style={{
-                          width: `${Math.min(100, Math.round((tempi.totale / tempi.stimato) * 100))}%`,
+                          width: `${Math.min(
+                            100,
+                            Math.round(
+                              ((tempi.totale + (vociTempi?.totale ?? 0)) / tempi.stimato) * 100
+                            )
+                          )}%`,
                         }}
                       />
                     </div>
                     <p className="mt-1.5 text-[11px] text-caldo-testo">
-                      {Math.round((tempi.totale / tempi.stimato) * 100)}% dello stimato
-                      {tempi.totale > tempi.stimato && " · oltre la stima"}
+                      {Math.round(
+                        ((tempi.totale + (vociTempi?.totale ?? 0)) / tempi.stimato) * 100
+                      )}
+                      % dello stimato
+                      {tempi.totale + (vociTempi?.totale ?? 0) > tempi.stimato && " · oltre la stima"}
                     </p>
                   </div>
                 ) : (
@@ -794,22 +924,22 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
                 <div className="mt-5 border-t border-crema-bordo pt-4">
                   <p className={LABEL_CLASS}>Per operatore</p>
 
-                  {tempi.perOperatore.length === 0 ? (
+                  {perOperatoreTotale.length === 0 ? (
                     <div className="mt-1 rounded-control bg-crema-scuro px-4 py-3">
                       <p className="text-sm text-caldo-testo">
-                        Nessun tempo registrato sui ticket collegati.
+                        Nessun tempo registrato su questo progetto.
                       </p>
                       <p className="mt-1 text-[11px] text-caldo-testo/80">
-                        I tempi si inseriscono dal dettaglio del ticket.
+                        Avvia il timer da una task, dal ticket o dall&apos;header.
                       </p>
                     </div>
                   ) : (
                     <ul className="mt-1 space-y-3">
-                      {tempi.perOperatore.map((o) => {
+                      {perOperatoreTotale.map((o) => {
                         // Larghezza relativa al maggiore: la barra confronta le
                         // persone fra loro, non con il totale (che include anche
                         // chi non compare qui).
-                        const max = tempi.perOperatore[0]?.minuti || 1;
+                        const max = perOperatoreTotale[0]?.minuti || 1;
                         return (
                           <li key={o.nome} className="flex items-center gap-2.5">
                             <span
@@ -843,13 +973,15 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
               </div>
 
               {/* Piede: da dove vengono i numeri. Senza questa riga il totale
-                  sembrerebbe "il tempo del progetto", che oggi non esiste. */}
+                  sembrerebbe "il tempo del progetto", che non esiste come
+                  campo: e' sempre una somma di voci. */}
               <div className="mt-auto border-t border-crema-bordo px-5 py-3">
                 <p className="flex items-start gap-1.5 text-[11px] leading-snug text-caldo-testo">
                   <AlertCircleIcon className="mt-0.5 h-3 w-3 shrink-0" />
                   <span>
-                    Tempi derivati da {tempi.ticketConTempo} di {tempi.ticketTotale} ticket
-                    collegati. Il tempo delle singole task non è ancora tracciato.
+                    Cronometro: voci delle task e dei ticket di questo progetto.
+                    Ticket: {tempi.ticketConTempo} di {tempi.ticketTotale} con tempo
+                    inserito a mano. La correzione manuale resta sul ticket.
                   </span>
                 </p>
               </div>
@@ -878,6 +1010,7 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
                 operatori={operatori}
                 sezioni={sezioni}
                 extra={extra}
+                minutiPerTask={minutiPerTask}
                 selezionataId={selezionataId}
                 confermaEliminaId={confirmDeleteAttivita}
                 onSeleziona={(aid) => {

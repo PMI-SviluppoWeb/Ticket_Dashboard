@@ -15,6 +15,7 @@ import {
 } from "@/components/icons";
 import { formatData } from "@/lib/calendario";
 import { iniziali, nuovoId, type ExtraTask, type Sezione } from "@/lib/task-local";
+import TimerBersaglio from "@/components/TimerBersaglio";
 
 // ---------------------------------------------------------------------------
 // Board delle task del progetto, divisa in SEZIONI.
@@ -42,6 +43,11 @@ interface ProgettoTaskBoardProps {
   operatori: { id: string; nome: string }[];
   sezioni: Sezione[];
   extra: Record<string, ExtraTask>;
+  // Minuti registrati per task, gia' aggregati dal server in una sola query
+  // (`GET /api/tempi?attivita_minuti=`). Passarli qui, invece di lasciare che
+  // ogni riga ne chieda il totale, evita una richiesta per task: sulla board
+  // di un progetto grande sarebbero decine.
+  minutiPerTask?: Record<string, number>;
   selezionataId: string | null;
   confermaEliminaId: string | null;
   onSeleziona: (id: string) => void;
@@ -58,6 +64,7 @@ export default function ProgettoTaskBoard({
   operatori,
   sezioni,
   extra,
+  minutiPerTask,
   selezionataId,
   confermaEliminaId,
   onSeleziona,
@@ -427,6 +434,7 @@ export default function ProgettoTaskBoard({
                             extra={extra[a.id] ?? {}}
                             sezioni={sezioni}
                             sezioneId={sezione.id}
+                            minutiRegistrati={minutiPerTask?.[a.id] ?? 0}
                             selezionata={selezionataId === a.id}
                             onSeleziona={() => onSeleziona(a.id)}
                             onCompleta={(v) => onCompleta(a, v)}
@@ -461,6 +469,9 @@ interface RigaTaskProps {
   extra: ExtraTask;
   sezioni: Sezione[];
   sezioneId: string;
+  // Minuti delle voci chiuse su questa task. Arriva dall'aggregato della
+  // board: la riga non fa richieste proprie.
+  minutiRegistrati: number;
   selezionata: boolean;
   onSeleziona: () => void;
   onCompleta: (completata: boolean) => void;
@@ -475,6 +486,7 @@ function RigaTask({
   extra,
   sezioni,
   sezioneId,
+  minutiRegistrati,
   selezionata,
   onSeleziona,
   onCompleta,
@@ -603,8 +615,20 @@ function RigaTask({
         </div>
       )}
 
-      {/* Controlli: sposta di sezione + elimina, visibili su hover/focus */}
+      {/* Controlli: timer, sposta di sezione + elimina, visibili su hover/focus */}
       <div className="mt-0.5 flex shrink-0 items-center gap-1">
+        {/* Il timer entra e resta: e' un'azione che si usa, non un comando da
+            nascondere finche' non si passa col mouse. Il totale delle voci
+            chiuse arriva gia' aggregato (`minutiRegistrati`), quindi la riga
+            dice anche quanto e' costata la task senza aprire il drawer e senza
+            una richiesta per riga. */}
+        <TimerBersaglio
+          attivita_id={a.id}
+          etichetta={a.titolo}
+          minutiRegistrati={minutiRegistrati}
+          compatto
+        />
+
         {/* Sposta di sezione: una select nativa vestita da pillola. Mostra la
             sezione corrente, quindi il controllo dice anche DOVE sta la task
             senza aggiungere un'etichetta in ogni riga. Compare su hover e su

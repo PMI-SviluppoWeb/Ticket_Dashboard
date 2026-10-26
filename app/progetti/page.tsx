@@ -11,6 +11,7 @@ import { PriorityBadge, ProgettoStatusBadge, chip } from "@/components/badges";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
 import ProgettiKanban from "@/components/ProgettiKanban";
+import CronometroHeader from "@/components/CronometroHeader";
 import {
   ArrowRightIcon,
   ChevronLeftIcon,
@@ -295,6 +296,10 @@ export default function ProgettiPage() {
           <PlusIcon className="h-3.5 w-3.5" />
           Nuovo progetto
         </button>
+        {/* La pagina Progetti ha il proprio header (non AppHeader): il
+            cronometro va comunque raggiungibile da qui, altrimenti il tempo
+            generico si potrebbe avviare solo da alcune schermate. */}
+        <CronometroHeader tema="chiaro" />
       </header>
 
       <main className="flex-1 overflow-y-auto px-6 py-5">

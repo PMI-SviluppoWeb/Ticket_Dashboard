@@ -25,6 +25,7 @@ import {
 } from "@/components/icons";
 import { perInputDateTime } from "@/lib/calendario";
 import { iniziali, nuovoId, type CommentoTask, type ExtraTask } from "@/lib/task-local";
+import TimerBersaglio from "@/components/TimerBersaglio";
 
 // ---------------------------------------------------------------------------
 // Drawer della task.
@@ -379,6 +380,13 @@ export default function ProgettoTaskDrawer({
         {/* Corpo scrollabile                                                */}
         {/* ---------------------------------------------------------------- */}
         <div className="flex-1 overflow-y-auto">
+          {/* Tempo: nel drawer il totale e' completo (il componente legge le
+              proprie voci) e il pulsante e' grande, perche' qui c'e' spazio e
+              il drawer e' il posto dove si sta lavorando sulla task. */}
+          <div className="border-b border-crema-bordo px-6 py-4">
+            <TimerBersaglio attivita_id={attivita.id} etichetta={attivita.titolo} />
+          </div>
+
           {/* Meta: struttura a due colonne di etichetta+valore. */}
           <div className="border-b border-crema-bordo px-6 py-5">
             <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
