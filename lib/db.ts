@@ -17,6 +17,15 @@ function getClient(): Client {
     cachedClient = createClient({
       url,
       authToken: process.env.TURSO_AUTH_TOKEN || undefined,
+      // Next.js patcha il fetch globale e, per impostazione predefinita,
+      // ne mette in cache le risposte SU DISCO (.next/cache/fetch-cache).
+      // @libsql/client usa proprio il fetch globale, quindi senza questo
+      // override le risposte SQL di Turso vengono congelate: la prima
+      // risposta a una data query viene riusata per sempre, anche dopo un
+      // riavvio, e le letture non vedono piu' le scritture successive.
+      // Un database va letto sempre fresco: cache disattivata esplicitamente.
+      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+        fetch(input, { ...init, cache: "no-store" }),
     });
   }
   return cachedClient;
@@ -203,7 +212,90 @@ CREATE TABLE IF NOT EXISTS email_inbox (
 CREATE INDEX IF NOT EXISTS idx_email_inbox_message_id ON email_inbox (message_id);
 CREATE INDEX IF NOT EXISTS idx_email_inbox_ticket     ON email_inbox (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_inbox_stato      ON email_inbox (stato);
+
+CREATE TABLE IF NOT EXISTS progetti (
+  id                 TEXT PRIMARY KEY,
+  codice             TEXT NOT NULL UNIQUE,
+  nome               TEXT NOT NULL,
+  descrizione        TEXT,
+  cliente_id         TEXT NOT NULL,
+  stato              TEXT NOT NULL DEFAULT 'PIANIFICATO'
+                     CHECK (stato IN ('PIANIFICATO','IN_CORSO','IN_PAUSA','COMPLETATO','ANNULLATO')),
+  priorita           TEXT NOT NULL DEFAULT 'MEDIA' CHECK (priorita IN ('BASSA','MEDIA','ALTA')),
+  responsabile       TEXT,
+  data_inizio        TEXT,
+  data_fine          TEXT,
+  note               TEXT,
+  attivo             INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
+  data_creazione     TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_progetti_cliente ON progetti (cliente_id);
+CREATE INDEX IF NOT EXISTS idx_progetti_stato   ON progetti (stato);
+
+CREATE TABLE IF NOT EXISTS attivita (
+  id                 TEXT PRIMARY KEY,
+  progetto_id        TEXT,
+  cliente_id         TEXT,
+  titolo             TEXT NOT NULL,
+  descrizione        TEXT,
+  stato              TEXT NOT NULL DEFAULT 'DA_FARE'
+                     CHECK (stato IN ('DA_FARE','IN_CORSO','COMPLETATA')),
+  priorita           TEXT NOT NULL DEFAULT 'MEDIA' CHECK (priorita IN ('BASSA','MEDIA','ALTA')),
+  data_inizio        TEXT,
+  data_scadenza      TEXT,
+  data_completamento TEXT,
+  assegnatario       TEXT,
+  data_creazione     TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attivita_progetto ON attivita (progetto_id);
+CREATE INDEX IF NOT EXISTS idx_attivita_cliente  ON attivita (cliente_id);
+CREATE INDEX IF NOT EXISTS idx_attivita_scadenza ON attivita (data_scadenza);
+CREATE INDEX IF NOT EXISTS idx_attivita_stato    ON attivita (stato);
+
+CREATE TABLE IF NOT EXISTS progetti_tickets (
+  id             TEXT PRIMARY KEY,
+  progetto_id    TEXT NOT NULL,
+  ticket_id      TEXT NOT NULL,
+  data_creazione TEXT NOT NULL,
+  UNIQUE (progetto_id, ticket_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_progetti_tickets_progetto ON progetti_tickets (progetto_id);
+CREATE INDEX IF NOT EXISTS idx_progetti_tickets_ticket   ON progetti_tickets (ticket_id);
+
+CREATE TABLE IF NOT EXISTS impostazioni (
+  chiave             TEXT PRIMARY KEY,
+  valore             TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attivita_google (
+  attivita_id        TEXT PRIMARY KEY,
+  calendar_id        TEXT NOT NULL,
+  event_id           TEXT NOT NULL,
+  stato              TEXT NOT NULL DEFAULT 'PENDENTE'
+                     CHECK (stato IN ('PENDENTE','SINCRONIZZATO','ERRORE','DA_CANCELLARE')),
+  tentativi          INTEGER NOT NULL DEFAULT 0,
+  ultimo_errore      TEXT,
+  data_sync          TEXT,
+  data_creazione     TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attivita_google_stato    ON attivita_google (stato);
+CREATE INDEX IF NOT EXISTS idx_attivita_google_calendar ON attivita_google (calendar_id);
 `;
+
+// NOTA sui due vincoli dello SCHEMA (che viene splittato su ";"):
+//  - nessun DDL puo' contenere un ";" dentro un letterale;
+//  - nessun DDL puo' contenere un "@" nudo dentro un letterale, perche'
+//    prepare() riscrive /@([A-Za-z0-9_]+)/ in ":nome" ANCHE dentro le stringhe.
+// In particolare calendar_id contiene "@" (es. "info@azienda.it"): va sempre
+// passato come parametro, mai interpolato in una query.
 
 // Schema inizializzato in modo lazy: la prima query reale del processo
 // attiva la creazione tabelle/migrazioni; a build-time non viene eseguito nulla.
@@ -221,10 +313,16 @@ function ensureSchema(): Promise<void> {
 
 async function initSchema(): Promise<void> {
   const client = getClient();
-  const statements = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
-  for (const stmt of statements) {
-    await getClient().execute(stmt);
-  }
+
+  // Tutto lo schema in UNA sola richiesta HTTP: prima erano 50 `execute` in
+  // serie, cioe' 50 round-trip (~10s su un DB remoto) pagati al primo accesso
+  // di ogni processo. Gli statement sono idempotenti (`IF NOT EXISTS`).
+  await client.executeMultiple(SCHEMA);
+
+  // Le migrazioni sotto restano idempotenti, ma la pulizia dei contatti legge
+  // tutta la tabella `tickets`: gira una volta per database, non a ogni avvio.
+  if ((await leggiVersioneSchema(client)) >= SCHEMA_VERSION) return;
+
   // Migration: add links column if missing
   try {
     await getClient().execute("ALTER TABLE knowledge_docs ADD COLUMN links TEXT DEFAULT '[]'");
@@ -239,6 +337,7 @@ async function initSchema(): Promise<void> {
     // Column already NOT NULL or migration not needed
   }
   // Migration: fix contact data - extract phone and email from contatto field
+  const updatesContatti = [];
   try {
     // Find tickets where contatto contains email or phone patterns
     const ticketsWithMixedContact = await getClient().execute(
@@ -278,13 +377,23 @@ async function initSchema(): Promise<void> {
       nomeContatto = nomeContatto.replace(/[-–—,;|/\\]+/g, " ").replace(/\s{2,}/g, " ").trim();
       if (!nomeContatto) nomeContatto = "Non fornito";
 
-      await getClient().execute({
+      updatesContatti.push({
         sql: `UPDATE tickets SET contatto = :contatto, telefono = :telefono, email = :email WHERE id = :id`,
         args: [nomeContatto, telefono, email || null, row.id as string],
       });
     }
   } catch {
     // Migration not needed or already applied
+  }
+  // Un solo round-trip per tutte le righe (prima era un UPDATE per riga).
+  // Best effort come gli altri blocchi: un errore qui non deve impedire
+  // l'uso dell'app.
+  if (updatesContatti.length > 0) {
+    try {
+      await client.batch(updatesContatti, "write");
+    } catch (err) {
+      console.error("Migrazione contatti non applicata:", err);
+    }
   }
   // Migration: add time tracking columns
   try {
@@ -315,6 +424,34 @@ async function initSchema(): Promise<void> {
     }
   } catch {
     // Seeding non necessario o tabella già popolata
+  }
+
+  // Solo se tutte le migrazioni sono andate a termine si registra la versione:
+  // in caso di errore il prossimo avvio le ritenta.
+  try {
+    await client.execute({
+      sql: `INSERT INTO impostazioni (chiave, valore, data_aggiornamento)
+            VALUES ('schema_version', :v, :ts)
+            ON CONFLICT (chiave) DO UPDATE SET valore = :v, data_aggiornamento = :ts`,
+      args: [String(SCHEMA_VERSION), new Date().toISOString()],
+    });
+  } catch (err) {
+    console.error("Versione schema non registrata:", err);
+  }
+}
+
+// Incrementare quando si aggiunge una migrazione dati da eseguire una volta.
+const SCHEMA_VERSION = 1;
+
+async function leggiVersioneSchema(client: Client): Promise<number> {
+  try {
+    const { rows } = await client.execute(
+      "SELECT valore FROM impostazioni WHERE chiave = 'schema_version'"
+    );
+    const n = Number(rows[0]?.valore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -363,8 +500,27 @@ function prepare(sql: string) {
   };
 }
 
+export interface BatchStatement {
+  sql: string;
+  params?: Record<string, ParamValue> | ParamValue[];
+}
+
 export const db = {
   prepare,
+  // Piu' statement in UNA richiesta al server (e in transazione, se Turso la
+  // supporta). Evita di sommare un round-trip per riga.
+  async batch(statements: BatchStatement[]): Promise<{ changes: number }[]> {
+    if (statements.length === 0) return [];
+    await ensureSchema();
+    const risultati = await getClient().batch(
+      statements.map((s) => ({
+        sql: s.sql.replace(/@([A-Za-z0-9_]+)/g, ":$1"),
+        args: s.params,
+      })),
+      "write"
+    );
+    return risultati.map((r) => ({ changes: r.rowsAffected }));
+  },
   async exec(sql: string): Promise<void> {
     await ensureSchema();
     await getClient().execute(sql);

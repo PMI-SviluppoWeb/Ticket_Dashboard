@@ -239,6 +239,195 @@ export interface ClienteInput {
   note?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Progetti e calendario
+//
+// Convenzione date del modulo:
+//  - campi di pianificazione (inseriti dall'utente): "YYYY-MM-DDTHH:mm" naive,
+//    senza fuso. Round-trip a conversione zero con <input type="datetime-local">,
+//    lessicalmente ordinabili, e slice(0,10) e' gia' il giorno locale.
+//  - campi di audit (generati dal sistema): ISO 8601 UTC.
+// NON mescolare mai queste date con quelle dei ticket (stringhe it-IT non
+// ordinabili) in un ORDER BY o in un JOIN.
+// ---------------------------------------------------------------------------
+
+export type StatoProgetto =
+  | "PIANIFICATO"
+  | "IN_CORSO"
+  | "IN_PAUSA"
+  | "COMPLETATO"
+  | "ANNULLATO";
+
+export type StatoAttivita = "DA_FARE" | "IN_CORSO" | "COMPLETATA";
+
+// Origine di un elemento di calendario, derivata dagli id (non e' una colonna).
+export type OrigineEvento = "progetto" | "cliente" | "generico";
+
+export interface ProgettoRow {
+  id: string;
+  codice: string;
+  nome: string;
+  descrizione: string | null;
+  cliente_id: string;
+  stato: StatoProgetto;
+  priorita: Priorita;
+  responsabile: string | null;
+  data_inizio: string | null;
+  data_fine: string | null;
+  note: string | null;
+  attivo: boolean;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+// Vista di lista: ragione sociale risolta via JOIN + conteggi
+export interface ProgettoListRow extends ProgettoRow {
+  cliente_ragione_sociale: string;
+  num_attivita: number;
+  // Sottoinsieme di num_attivita con stato COMPLETATA. Serve alla barra di
+  // avanzamento della lista: la percentuale e' derivata, non memorizzata,
+  // cosi' non puo' andare fuori sincrono con le attivita' reali.
+  // Opzionale perche' questo tipo e' consumato anche da app/calendario, che
+  // non ha bisogno della percentuale: il campo resta additivo.
+  num_attivita_completate?: number;
+  num_ticket: number;
+}
+
+export interface Progetto extends ProgettoRow {
+  cliente_ragione_sociale: string;
+  attivita: AttivitaRow[];
+  tickets: TicketRow[];
+}
+
+export interface ProgettoInput {
+  nome: string;
+  descrizione?: string | null;
+  cliente_id: string;
+  stato?: StatoProgetto;
+  priorita?: Priorita;
+  responsabile?: string | null;
+  data_inizio?: string | null;
+  data_fine?: string | null;
+  note?: string | null;
+}
+
+export interface ProgettoUpdate extends Partial<Omit<ProgettoInput, "cliente_id">> {
+  cliente_id?: string;
+  attivo?: boolean;
+}
+
+export interface AttivitaRow {
+  id: string;
+  // nullo = evento fuori progetto. progetto_id e cliente_id non possono
+  // essere valorizzati entrambi (vincolo applicativo, vedi le rotte API).
+  progetto_id: string | null;
+  cliente_id: string | null;
+  titolo: string;
+  descrizione: string | null;
+  stato: StatoAttivita;
+  priorita: Priorita;
+  data_inizio: string | null;
+  // La chiave del calendario: senza scadenza l'elemento non compare.
+  data_scadenza: string | null;
+  data_completamento: string | null;
+  assegnatario: string | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+  // Stato della sincronizzazione verso Google Calendar, risolto via LEFT JOIN
+  // su attivita_google. Opzionale e additivo: null/assente = mai sincronizzata
+  // o sincronizzazione non configurata. Non rompe i componenti esistenti.
+  google_stato?: GoogleStato | null;
+  google_ultimo_errore?: string | null;
+  google_data_sync?: string | null;
+}
+
+export interface AttivitaInput {
+  progetto_id?: string | null;
+  cliente_id?: string | null;
+  titolo: string;
+  descrizione?: string | null;
+  stato?: StatoAttivita;
+  priorita?: Priorita;
+  data_inizio?: string | null;
+  data_scadenza?: string | null;
+  assegnatario?: string | null;
+}
+
+export type AttivitaUpdate = Partial<Omit<AttivitaInput, "progetto_id">> & {
+  progetto_id?: string | null;
+};
+
+// Riga denormalizzata restituita dalla query di intervallo del calendario.
+export interface AttivitaCalendario extends AttivitaRow {
+  progetto_nome: string | null;
+  progetto_codice: string | null;
+  cliente_ragione_sociale: string | null;
+}
+
+// Elemento mostrato in calendario. `tipo` e' il punto di estensione per i
+// ticket: oggi vale sempre "attivita".
+export interface EventoCalendario extends AttivitaCalendario {
+  tipo: "attivita" | "ticket";
+}
+
+// ---------------------------------------------------------------------------
+// Sincronizzazione Google Calendar (una direzione: App -> Google)
+//
+// L'app e' l'unica fonte di verita'; Google e' in sola lettura per il team.
+// La mappatura origine -> calendario e' configurabile a runtime e vive nella
+// tabella `impostazioni`; le credenziali stanno in variabili d'ambiente.
+// ---------------------------------------------------------------------------
+
+export type GoogleStato = "PENDENTE" | "SINCRONIZZATO" | "ERRORE" | "DA_CANCELLARE";
+
+export type GoogleModalita = "per_origine" | "unico";
+
+// Riga della tabella attivita_google. La riga sopravvive alla cancellazione
+// dell'attivita' quando lo stato e' DA_CANCELLARE: e' il tombstone che
+// permette di propagare la cancellazione a Google senza perderla.
+export interface AttivitaGoogleRow {
+  attivita_id: string;
+  calendar_id: string;
+  event_id: string;
+  stato: GoogleStato;
+  tentativi: number;
+  ultimo_errore: string | null;
+  data_sync: string | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+export interface ConfigGoogle {
+  abilitato: boolean;
+  modalita: GoogleModalita;
+  calendario_default: string;
+  mappatura: Partial<Record<OrigineEvento, string>>;
+  timezone: string;
+  finestra_giorni: number;
+}
+
+// Conteggi mostrati dalla UI: quante attivita' sono in ciascuno stato.
+export interface ConteggiGoogle {
+  sincronizzati: number;
+  in_errore: number;
+  da_cancellare: number;
+  mai_sincronizzati: number;
+}
+
+export interface ProgettoTicket {
+  id: string;
+  progetto_id: string;
+  ticket_id: string;
+  data_creazione: string;
+}
+
+export interface ProgettoListResult {
+  progetti: ProgettoListRow[];
+  totale: number;
+  pagina: number;
+  paginaSize: number;
+}
+
 export interface EmailInbox {
   id: string;
   message_id: string;
