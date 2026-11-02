@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCliente } from "@/lib/clienti";
 import { deleteProgetto, getProgetto, STATI_PROGETTO, updateProgetto } from "@/lib/progetti";
+import { parsePersone } from "@/lib/persone";
 import { RE_DATETIME_LOCAL } from "@/lib/calendario";
 import type { Priorita, ProgettoUpdate } from "@/lib/types";
 
@@ -78,6 +79,12 @@ export async function PATCH(
     }
     if (body.descrizione !== undefined) patch.descrizione = body.descrizione;
     if (body.responsabile !== undefined) patch.responsabile = body.responsabile;
+    if (body.persone !== undefined) {
+      if (!Array.isArray(body.persone)) {
+        return NextResponse.json({ error: "Formato persone non valido." }, { status: 400 });
+      }
+      patch.persone = parsePersone(body.persone);
+    }
     if (body.note !== undefined) patch.note = body.note;
     if (body.attivo !== undefined) patch.attivo = !!body.attivo;
 

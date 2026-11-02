@@ -78,12 +78,14 @@ export function emailAssegnazione(opts: {
   `);
 }
 
-export function emailNuovaNota(opts: {
+// Template pensato per il CLIENTE: a differenza del vecchio emailNuovaNota
+// (rimosso, mostrava campo "soluzione" e nome operatore) non espone i dettagli
+// dell'intervento. Il testo arriva editato dall'operatore nella dialog di conferma.
+export function emailAggiornamentoCliente(opts: {
   numero: string;
   cliente: string;
-  titoloNota: string;
-  soluzione?: string;
-  operatore: string;
+  titolo: string;
+  messaggio: string;
   allegati?: string[];
 }): string {
   let attachmentsHtml = "";
@@ -98,26 +100,13 @@ export function emailNuovaNota(opts: {
       </div>`;
   }
 
-  return wrap("Aggiornamento Ticket", `
+  return wrap(`Aggiornamento ticket ${opts.numero}`, `
     <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
-      E' stato registrato un nuovo aggiornamento sul ticket <strong>${opts.numero}</strong>.
+      Abbiamo un aggiornamento sul ticket <strong>${opts.numero}</strong>.
     </p>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
-      <tr>
-        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Aggiornamento</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.titoloNota}</td>
-      </tr>
-      <tr>
-        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Operatore</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.operatore}</td>
-      </tr>
-    </table>
-    ${opts.soluzione ? `
-    <div style="margin-bottom:16px">
-      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#1e293b">Dettaglio intervento:</p>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap">${opts.soluzione}</div>
-    </div>` : ""}
+    <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1e293b">${opts.titolo}</p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;margin-bottom:16px;font-size:14px;color:#475569;line-height:1.6;white-space:pre-wrap">${opts.messaggio}</div>
     ${attachmentsHtml}
     <p style="margin:16px 0 0;font-size:13px;color:#64748b">
       Per maggiori dettagli accedi alla piattaforma di supporto.

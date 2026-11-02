@@ -1,4 +1,4 @@
-import type { TicketRow, VoceTempoRow } from "./types";
+import type { TicketListRow, VoceTempoRow } from "./types";
 
 // ===========================================================================
 // Tempi del progetto e del cronometro.
@@ -22,6 +22,17 @@ export function formatDurata(minuti: number | null | undefined): string {
   if (ore === 0) return `${min}m`;
   if (min === 0) return `${ore}h`;
   return `${ore}h ${min}m`;
+}
+
+// Come `formatDurata`, ma per le misure che ripartono da zero ogni giorno o
+// ogni settimana (dashboard, riepiloghi per periodo).
+//
+// Li' lo zero e' un dato, non un'assenza: un contatore azzerato alle 00:00
+// deve leggere "0m", mentre il trattino di `formatDurata` direbbe "non
+// caricato" e farebbe pensare a una query fallita.
+export function formatDurataZero(minuti: number | null | undefined): string {
+  if (minuti == null || !Number.isFinite(minuti) || minuti <= 0) return "0m";
+  return formatDurata(minuti);
 }
 
 // Cronometro: "1:04:09". Sempre con le ore, perche' e' un orologio che scorre
@@ -101,7 +112,9 @@ export interface RiepilogoTempi {
   perOperatore: TempoOperatore[];
 }
 
-export function riepilogoTempi(tickets: TicketRow[]): RiepilogoTempi {
+// TicketListRow basta: il riepilogo legge solo tempi e operatore, e cosi'
+// accetta sia le righe di lista sia quelle complete.
+export function riepilogoTempi(tickets: TicketListRow[]): RiepilogoTempi {
   let totale = 0;
   let stimato = 0;
   let ticketConTempo = 0;

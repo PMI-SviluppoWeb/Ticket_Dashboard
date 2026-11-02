@@ -61,7 +61,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as Partial<TicketInput>;
+    const body = (await request.json()) as Partial<TicketInput> & { invia_conferma?: boolean };
 
     if (!body.cliente || !body.sommario_problema || !body.descrizione_dettagliata) {
       return NextResponse.json(
@@ -70,9 +70,12 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!body.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+    // Email OPZIONALE: un ticket preso al telefono non ha sempre un indirizzo.
+    // Se presente deve pero' essere valida, perche' e' la destinazione delle
+    // risposte e dell'autorisposta.
+    if (body.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
       return NextResponse.json(
-        { error: "Email del cliente obbligatoria e valida." },
+        { error: "L'email del cliente, se presente, deve essere valida." },
         { status: 400 }
       );
     }
@@ -94,7 +97,9 @@ export async function POST(request: Request) {
       cliente: body.cliente,
       contatto: body.contatto ?? "Non fornito",
       telefono: body.telefono,
-      email: body.email,
+      // La colonna email e' NOT NULL in DB: senza email (ticket da telefono)
+      // si riprende lo stesso placeholder usato dalla migrazione storica.
+      email: body.email ?? "sconosciuto@placeholder.it",
       modulo_software: body.modulo_software || "Generico",
       sommario_problema: body.sommario_problema,
       descrizione_dettagliata: body.descrizione_dettagliata,
@@ -110,28 +115,32 @@ export async function POST(request: Request) {
       tipo: "nuovo_ticket",
     });
 
-    // Send email to client
-    const html = emailNuovoTicket({
-      numero: ticket.numero,
-      cliente: ticket.cliente,
-      sommario: ticket.sommario_problema,
-      descrizione: ticket.descrizione_dettagliata,
-      priorita: ticket.priorita,
-    });
-    const result = await sendEmail({
-      to: body.email,
-      subject: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
-      html,
-    });
-    await logEmail({
-      ticket_id: ticket.id,
-      tipo: "nuovo_ticket",
-      destinatario: body.email,
-      oggetto: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
-      corpo: html,
-      stato: result.ok ? "inviata" : "errore",
-      errore: result.error ?? null,
-    });
+    // Autorisposta al cliente: di default si, ma chi crea il ticket da UI
+    // (telefono, senza email, o senza voler scrivere) puo' sceglierlo.
+    const email = body.email;
+    if (body.invia_conferma !== false && email) {
+      const html = emailNuovoTicket({
+        numero: ticket.numero,
+        cliente: ticket.cliente,
+        sommario: ticket.sommario_problema,
+        descrizione: ticket.descrizione_dettagliata,
+        priorita: ticket.priorita,
+      });
+      const result = await sendEmail({
+        to: email,
+        subject: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
+        html,
+      });
+      await logEmail({
+        ticket_id: ticket.id,
+        tipo: "nuovo_ticket",
+        destinatario: email,
+        oggetto: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
+        corpo: html,
+        stato: result.ok ? "inviata" : "errore",
+        errore: result.error ?? null,
+      });
+    }
 
     return NextResponse.json(ticket, { status: 201 });
   } catch (err) {

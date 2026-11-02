@@ -17,7 +17,18 @@ export async function GET(request: Request) {
 
     const rows = await db.prepare(query).all();
 
-    return NextResponse.json({ operatori: rows });
+    // Dati di riferimento per le select: cambiano quando un admin crea o
+    // disattiva un operatore, non a ogni schermata. Due minuti di cache del
+    // browser evitano il viaggio quando piu' componenti chiedono la stessa
+    // lista, e la lista resta privata (nessuna cache condivisa, nessun CDN).
+    //
+    // L'elenco `?all=true` e' invece il pannello admin, che ricarica subito
+    // dopo ogni scrittura: li' un dato vecchio di due minuti mostrerebbe un
+    // operatore appena creato come assente.
+    return NextResponse.json(
+      { operatori: rows },
+      all ? {} : { headers: { "Cache-Control": "private, max-age=120, stale-while-revalidate=300" } }
+    );
   } catch (err) {
     console.error("GET /api/operatori", err);
     return NextResponse.json({ error: "Errore interno del server." }, { status: 500 });

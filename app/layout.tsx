@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Outfit } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
+import MobileTabBar from "@/components/MobileTabBar";
 import { TempiProvider } from "@/components/TempiContext";
 import "./globals.css";
 
@@ -26,8 +27,11 @@ export default function RootLayout({
               sta sopra le rotte cosi' il conteggio continua a scorrere mentre
               si naviga e l'header di ogni pagina lo legge dallo stesso posto. */}
           <TempiProvider>
-            <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+            {/* pb solo sotto i 768px: la bottom tab bar e' fixed e coprirebbe
+                l'ultima riga del contenuto. */}
+            <div className="flex min-w-0 flex-1 flex-col pb-14 md:pb-0">{children}</div>
           </TempiProvider>
+          <MobileTabBar />
         </div>
       </body>
     </html>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   Allegato,
+  Cliente,
   EmailLog,
   Priorita,
   RuoloMessaggio,
@@ -29,12 +30,17 @@ import {
   UserIcon,
   UserPlusIcon,
   MailIcon,
+  MessageIcon,
   ClockIcon,
   CalendarIcon,
   TicketIcon,
   FolderIcon,
+  XIcon,
+  SendIcon,
 } from "@/components/icons";
 import TimerBersaglio from "@/components/TimerBersaglio";
+import { useOperatore } from "@/lib/operatore-client";
+import { caricaApi } from "@/lib/api-cache";
 
 // Base del chip.
 //
@@ -104,7 +110,6 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [selectedPriorita, setSelectedPriorita] = useState<Priorita>("BASSA");
 
   const [operatori, setOperatori] = useState<Operator[]>([]);
-  const [currentUser, setCurrentUser] = useState<{ nome: string; ruolo: string } | null>(null);
   const [noteForm, setNoteForm] = useState({ titolo: "", problema: "", soluzione: "" });
   const [editingNote, setEditingNote] = useState<TechnicalNote | null>(null);
   const [expandedNote, setExpandedNote] = useState<string | null>(null);
@@ -118,6 +123,21 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [emailOggetto, setEmailOggetto] = useState("");
   const [emailMessaggio, setEmailMessaggio] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
+
+  const [nuovoMessaggio, setNuovoMessaggio] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  // Scheda cliente dall'anagrafica ERP: sola lettura. Il ticket porta il
+  // nome come testo libero, quindi prima si cerca l'id a mano e poi la
+  // scheda completa.
+  const [schedaCliente, setSchedaCliente] = useState<Cliente | null>(null);
+  const [schedaStato, setSchedaStato] = useState<"carica" | "ok" | "assente">("carica");
+
+  // Conferma invio nota al cliente: dopo il salvataggio di una NOTA NUOVA non
+  // si parte piu' con l'email automatica — si chiede con testo editabile.
+  const [invioNota, setInvioNota] = useState<{ noteId: string; titolo: string } | null>(null);
+  const [notaClienteTesto, setNotaClienteTesto] = useState("");
+  const [sendingNota, setSendingNota] = useState(false);
 
   const [tempoEffettivo, setTempoEffettivo] = useState("");
   const [savingTempo, setSavingTempo] = useState(false);
@@ -149,31 +169,20 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
 
   const loadOperatori = useCallback(async () => {
     try {
-      const res = await fetch("/api/operatori");
-      if (res.ok) {
-        const data = await res.json();
-        setOperatori(data.operatori ?? []);
-      }
+      const data = await caricaApi<{ operatori: Operator[] }>("/api/operatori");
+      setOperatori(data.operatori ?? []);
     } catch { /* */ }
   }, []);
 
-  const loadCurrentUser = useCallback(async () => {
-    try {
-      const res = await fetch("/api/auth/me");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.operator) {
-          setCurrentUser({ nome: data.operator.nome, ruolo: data.operator.ruolo });
-        }
-      }
-    } catch { /* */ }
-  }, []);
+  // L'operatore della sessione arriva dalla cache condivisa: niente seconda
+  // richiesta a /api/auth/me per la stessa pagina.
+  const { operatore: sessione } = useOperatore();
+  const currentUser = sessione ? { nome: sessione.nome, ruolo: sessione.ruolo } : null;
 
   useEffect(() => {
     load();
     loadOperatori();
-    loadCurrentUser();
-  }, [load, loadOperatori, loadCurrentUser]);
+  }, [load, loadOperatori]);
 
   const loadEmailLog = useCallback(async () => {
     try {
@@ -188,6 +197,42 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   useEffect(() => {
     if (ticket) loadEmailLog();
   }, [ticket, loadEmailLog]);
+
+  useEffect(() => {
+    const nome = ticket?.cliente?.trim().toLowerCase();
+    setSchedaCliente(null);
+    if (!ticket || !nome) {
+      setSchedaStato("assente");
+      return;
+    }
+    const clienteNome = ticket.cliente;
+    let vivo = true;
+    (async () => {
+      setSchedaStato("carica");
+      try {
+        const res = await fetch(`/api/clienti?q=${encodeURIComponent(clienteNome)}&limit=20`);
+        const data = (await res.json()) as { clienti?: Cliente[] };
+        const esatto = (data.clienti ?? []).find(
+          (c) => c.ragione_sociale.trim().toLowerCase() === nome
+        );
+        if (!esatto) {
+          if (vivo) setSchedaStato("assente");
+          return;
+        }
+        const det = await fetch(`/api/clienti/${encodeURIComponent(esatto.id)}`);
+        if (!det.ok) throw new Error();
+        if (vivo) {
+          setSchedaCliente((await det.json()) as Cliente);
+          setSchedaStato("ok");
+        }
+      } catch {
+        if (vivo) setSchedaStato("assente");
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [ticket?.cliente]);
 
   const sendManualEmail = useCallback(async () => {
     if (!emailOggetto.trim() || !emailMessaggio.trim()) return;
@@ -229,6 +274,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     setSaved(false);
     setEditingNote(null);
     setNoteForm({ titolo: "", problema: "", soluzione: "" });
+    setNuovoMessaggio("");
   }, [ticket?.id]);
 
   const mutate = useCallback(
@@ -366,8 +412,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       if (editingNote) {
         await mutate(`/api/tickets/${id}/notes/${editingNote.id}`, "PATCH", payload);
       } else {
-        const newNote = await mutate(`/api/tickets/${id}/notes`, "POST", payload);
-        noteId = (newNote as unknown as { note_tecniche?: { id: string }[] })?.note_tecniche?.slice(-1)?.[0]?.id;
+        // La rotta restituisce solo la nota creata: l'id e' li', non serve
+        // ricavarlo dalla coda dell'elenco completo.
+        const creata = (await mutate(`/api/tickets/${id}/notes`, "POST", payload)) as {
+          nota?: TechnicalNote;
+        } | null;
+        noteId = creata?.nota?.id;
       }
       let filesUploaded = 0;
       if (pendingFiles.length > 0 && noteId) {
@@ -381,14 +431,67 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         }
         setPendingFiles([]);
       }
-      if (noteId && !editingNote) {
-        await fetch(`/api/tickets/${id}/notes/${noteId}/send-email`, { method: "POST" });
+      if (noteId && !editingNote && ticket?.email) {
+        // Nessun invio automatica: si apre la dialog di conferma con un testo
+        // cliente-friendly (mai problema/soluzione interni). Senza email sul
+        // ticket non c'e' nessuno a cui scrivere, quindi si salta.
+        setInvioNota({ noteId, titolo });
+        setNotaClienteTesto(
+          "Abbiamo aggiornato il ticket e stiamo lavorando alla soluzione. Ti aggiorneremo appena ci saranno novità."
+        );
       }
       setEditingNote(null);
       setNoteForm({ titolo: "", problema: "", soluzione: "" });
       await load();
     });
-  }, [run, mutate, id, noteForm, editingNote, selectedOperatore, pendingFiles, load]);
+  }, [run, mutate, id, noteForm, editingNote, selectedOperatore, pendingFiles, load, ticket]);
+
+  const inviaNotaAlCliente = useCallback(async () => {
+    if (!invioNota || !notaClienteTesto.trim()) return;
+    setSendingNota(true);
+    try {
+      const res = await fetch(`/api/tickets/${id}/notes/${invioNota.noteId}/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titolo: invioNota.titolo, messaggio: notaClienteTesto }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? "Errore invio email.");
+      }
+      await loadEmailLog();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore invio email.");
+    } finally {
+      setSendingNota(false);
+      setInvioNota(null);
+    }
+  }, [id, invioNota, notaClienteTesto, loadEmailLog]);
+
+  // Nuovo messaggio nel thread: l'endpoint restituisce il ticket completo,
+  // quindi basta rimpiazzare lo stato senza un secondo caricamento.
+  const inviaMessaggio = useCallback(async () => {
+    if (!nuovoMessaggio.trim()) return;
+    setSendingMessage(true);
+    try {
+      const res = await fetch(`/api/tickets/${id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruolo: "assistant", contenuto: nuovoMessaggio }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? "Errore invio messaggio.");
+      }
+      const aggiornato = (await res.json()) as Ticket;
+      setTicket(aggiornato);
+      setNuovoMessaggio("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore invio messaggio.");
+    } finally {
+      setSendingMessage(false);
+    }
+  }, [id, nuovoMessaggio]);
 
   const startEditNote = useCallback((n: TechnicalNote) => {
     setEditingNote(n);
@@ -798,6 +901,79 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
               </div>
             </section>
 
+            {/* Conversazione — thread di messaggi sul ticket. Il cliente
+                risponde via email e l'worker li importa qui; da qui l'operatore
+                puo' aggiungere messaggi alla conversazione. */}
+            <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-6">
+              <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-control border border-stato-info-bordo bg-stato-info-bg text-stato-info-testo">
+                    <MessageIcon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-inchiostro">Conversazione</h2>
+                    <p className="tabular text-xs text-caldo-testo">
+                      {ticket.messaggi.length} {ticket.messaggi.length === 1 ? "messaggio" : "messaggi"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {ticket.messaggi.length === 0 ? (
+                <p className="rounded-panel border border-dashed border-crema-contorno p-4 text-center text-sm text-caldo-testo">
+                  Nessun messaggio nella conversazione.
+                </p>
+              ) : (
+                <div className="max-h-96 space-y-3 overflow-y-auto">
+                  {ticket.messaggi.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`flex ${m.ruolo === "assistant" ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-panel px-4 py-2.5 text-sm leading-relaxed ${
+                          m.ruolo === "assistant"
+                            ? "bg-inchiostro text-white"
+                            : "border border-crema-contorno bg-crema-scuro text-inchiostro"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap">{m.contenuto}</p>
+                        <p
+                          className={`tabular mt-1.5 text-[10px] ${
+                            m.ruolo === "assistant" ? "text-white/60" : "text-caldo-testo"
+                          }`}
+                        >
+                          {m.ruolo === "assistant" ? "Operatore" : "Cliente"} · {m.data_creazione}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!isClosed && (
+                <div className="overflow-hidden rounded-control border border-crema-contorno bg-white transition-colors duration-200 focus-within:border-inchiostro focus-within:ring-2 focus-within:ring-inchiostro/20">
+                  <textarea
+                    value={nuovoMessaggio}
+                    onChange={(e) => setNuovoMessaggio(e.target.value)}
+                    rows={3}
+                    placeholder="Aggiungi un messaggio alla conversazione..."
+                    className="min-h-[72px] w-full resize-y border-0 p-4 text-xs text-inchiostro placeholder-caldo-testo focus:ring-0 sm:text-sm"
+                  />
+                  <div className="flex items-center justify-end border-t border-crema-bordo bg-crema-scuro px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={inviaMessaggio}
+                      disabled={sendingMessage || !nuovoMessaggio.trim()}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-inchiostro px-4 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {sendingMessage ? "Invio..." : "Invia Messaggio"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+
             {/* 2. Quick Reply / Composer */}
             <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-6">
               <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
@@ -1121,6 +1297,57 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
               </div>
             </section>
 
+            {/* Scheda Cliente — anagrafica ERP in sola lettura: qui si
+                consulta, l'aggiornamento resta sull'ERP/Arca. */}
+            {schedaStato === "ok" && schedaCliente && (
+              <section className="space-y-3 rounded-panel border border-crema-contorno bg-white p-5">
+                <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
+                  <div className="flex items-center gap-2">
+                    <FolderIcon className="h-4 w-4 text-caldo-testo" />
+                    <h2 className="text-sm font-bold text-inchiostro">Scheda Cliente</h2>
+                  </div>
+                  <span className="rounded bg-stato-neutro-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-stato-neutro-testo">
+                    Da ERP
+                  </span>
+                </div>
+                <div className="space-y-2.5 text-xs">
+                  {[
+                    { k: "Ragione sociale", v: schedaCliente.ragione_sociale },
+                    { k: "Referente", v: schedaCliente.nome_contatto },
+                    { k: "Email", v: schedaCliente.email },
+                    { k: "Telefono", v: schedaCliente.telefono },
+                    { k: "Indirizzo", v: schedaCliente.indirizzo },
+                    {
+                      k: "Città",
+                      v: [schedaCliente.citta, schedaCliente.provincia, schedaCliente.cap]
+                        .filter(Boolean)
+                        .join(" "),
+                    },
+                    { k: "P. IVA", v: schedaCliente.partita_iva },
+                    { k: "Note", v: schedaCliente.note },
+                  ].map(({ k, v }) =>
+                    v ? (
+                      <div key={k} className="flex justify-between gap-3 border-b border-crema-bordo py-1 last:border-0">
+                        <span className="shrink-0 text-caldo-testo">{k}</span>
+                        <span className="break-all text-right font-medium text-inchiostro">{v}</span>
+                      </div>
+                    ) : null
+                  )}
+                  <p className="pt-1 text-[10px] italic text-caldo-testo">
+                    Anagrafica aggiornata dall&apos;ERP: le modifiche si fanno lì.
+                  </p>
+                </div>
+              </section>
+            )}
+            {schedaStato === "carica" && (
+              <section className="rounded-panel border border-crema-contorno bg-white p-5">
+                <div className="flex items-center gap-2 text-xs text-caldo-testo">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-crema-contorno border-t-inchiostro" />
+                  Caricamento scheda cliente...
+                </div>
+              </section>
+            )}
+
             {/* 2. Status & Assignment Card */}
             <section className="space-y-4 rounded-panel border border-crema-contorno bg-white p-5">
               <div className="flex items-center justify-between border-b border-crema-bordo pb-3">
@@ -1385,6 +1612,68 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
           </div>
         </div>
       </main>
+
+      {/* Conferma invio nota al cliente — l'email parte solo dopo questo passo.
+          Il testo qui sotto e' quello che il cliente riceve: niente "problema",
+          niente "soluzione" interna, niente nome operatore. */}
+      {invioNota && ticket && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-inchiostro/40 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Invia aggiornamento al cliente"
+            className="w-full max-w-lg rounded-card border border-crema-contorno bg-white p-5 shadow-soft"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold text-inchiostro">Invia aggiornamento al cliente</h2>
+                <p className="mt-0.5 text-xs text-caldo-testo">
+                  A: <span className="font-medium text-inchiostro">{ticket.email}</span> · Ticket {ticket.numero}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInvioNota(null)}
+                aria-label="Chiudi"
+                className="cursor-pointer rounded p-1 text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+              >
+                <XIcon className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-caldo-testo">
+              Titolo mostrato al cliente: <span className="font-semibold text-inchiostro">{invioNota.titolo}</span>
+            </p>
+
+            <textarea
+              value={notaClienteTesto}
+              onChange={(e) => setNotaClienteTesto(e.target.value)}
+              rows={5}
+              className="mt-2 w-full resize-y rounded-control border border-crema-contorno bg-white px-3 py-2 text-sm text-inchiostro transition-colors duration-200 placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+              placeholder="Messaggio per il cliente..."
+            />
+
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setInvioNota(null)}
+                className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+              >
+                Non inviare
+              </button>
+              <button
+                type="button"
+                onClick={inviaNotaAlCliente}
+                disabled={sendingNota || !notaClienteTesto.trim()}
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <SendIcon className="h-4 w-4" />
+                {sendingNota ? "Invio..." : "Invia al cliente"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

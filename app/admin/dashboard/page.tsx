@@ -16,6 +16,9 @@ import {
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
+import { useOperatore } from "@/lib/operatore-client";
+import { usePolling } from "@/lib/usePolling";
+import { caricaApi } from "@/lib/api-cache";
 import type { Priorita, StatoTicket } from "@/lib/types";
 
 interface OperatorStats {
@@ -29,6 +32,7 @@ interface OperatorStats {
   ticket_nuovi: number;
   ticket_risolti: number;
   ticket_chiusi: number;
+  ticket_chiusi_settimana: number;
   ticket_totali: number;
   ticket_recenti: {
     id: string;
@@ -126,9 +130,12 @@ function StarIcon({ filled }: { filled: boolean }) {
 }
 
 export default function AdminDashboardPage() {
-  const [currentOperator, setCurrentOperator] = useState<{ nome: string; email: string; ruolo: string } | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  // L'operatore arriva dalla cache condivisa: la richiesta e' una sola per
+  // caricamento, condivisa con la Sidebar.
+  const { operatore: sessione, caricamento: caricamentoSessione } = useOperatore();
+  const currentOperator = sessione;
+  const checking = caricamentoSessione;
+  const isAdmin = sessione?.ruolo === "admin";
 
   const [operators, setOperators] = useState<OperatorStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,48 +143,34 @@ export default function AdminDashboardPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const seqRef = useRef(0);
 
-  useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const res = await fetch("/api/auth/me");
-        if (!res.ok) { setChecking(false); return; }
-        const data = await res.json();
-        setCurrentOperator(data.operator);
-        setIsAdmin(data.operator?.ruolo === "admin");
-      } catch { /* Not logged in */ }
-      finally { setChecking(false); }
-    };
-    checkUser();
-  }, []);
-
-  const fetchOperators = useCallback(async () => {
+  const fetchOperators = useCallback(async (forza = false) => {
     const seq = ++seqRef.current;
     try {
-      const res = await fetch("/api/operatori/stats");
-      if (!res.ok) throw new Error("Errore nel caricamento");
-      const data = await res.json();
+      const data = await caricaApi<{ operatori: OperatorStats[] }>("/api/operatori/stats", { forza });
       if (seq === seqRef.current) {
         setOperators(data.operatori);
-        if (!selectedId && data.operatori.length > 0) {
-          setSelectedId(data.operatori[0].id);
-        }
+        // Funzionale: cosi' la callback non dipende da `selectedId` e non viene
+        // ricreata a ogni selezione (era la causa del poll che ripartiva da zero).
+        setSelectedId((prev) => prev ?? data.operatori[0]?.id ?? null);
       }
     } catch {
       if (seq === seqRef.current) setError("Impossibile caricare le statistiche operatori.");
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
-  }, [selectedId]);
+  }, []);
 
   useEffect(() => {
     if (isAdmin) fetchOperators();
   }, [isAdmin, fetchOperators]);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    const interval = setInterval(fetchOperators, 30000);
-    return () => clearInterval(interval);
-  }, [isAdmin, fetchOperators]);
+  // Un solo poll, fermo a scheda nascosta, con ripresa immediata al ritorno.
+  // Il poll va in rete per definizione: senza `forza` leggerebbe la cache.
+  usePolling(
+    useCallback(() => fetchOperators(true), [fetchOperators]),
+    30000,
+    isAdmin
+  );
 
   const selected = operators.find((o) => o.id === selectedId) ?? null;
 
@@ -239,7 +232,7 @@ export default function AdminDashboardPage() {
           titolo="Dashboard Amministratori"
           sottotitolo="Panoramica in tempo reale dello stato degli operatori e dei ticket."
           azioni={
-            <button onClick={fetchOperators} className="flex cursor-pointer items-center gap-2 self-start rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro">
+            <button onClick={() => fetchOperators(true)} className="flex cursor-pointer items-center gap-2 self-start rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro">
               <RefreshIcon className="h-4 w-4" />
               Aggiorna
             </button>
@@ -525,11 +518,11 @@ export default function AdminDashboardPage() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-caldo-testo">Ticket Chiusi Questa Settimana</span>
-                        <span className="tabular text-lg font-bold text-inchiostro">{selected.ticket_chiusi}</span>
+                        <span className="tabular text-lg font-bold text-inchiostro">{selected.ticket_chiusi_settimana}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-caldo-testo">Media Ticket / Giorno</span>
-                        <span className="tabular text-lg font-bold text-inchiostro">{(selected.ticket_chiusi / 7).toFixed(1)}</span>
+                        <span className="tabular text-lg font-bold text-inchiostro">{(selected.ticket_chiusi_settimana / 7).toFixed(1)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-caldo-testo">Totale Ticket Gestiti</span>

@@ -1,10 +1,10 @@
 import Link from "next/link";
-import type { TicketRow } from "@/lib/types";
+import type { TicketListRow } from "@/lib/types";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { TicketIcon, UserPlusIcon, UserMinusIcon, UserIcon } from "@/components/icons";
 
 interface TicketTableProps {
-  tickets: TicketRow[];
+  tickets: TicketListRow[];
   pagina: number;
   totale: number;
   paginaSize: number;
@@ -26,8 +26,8 @@ export default function TicketTable({
 }: TicketTableProps) {
   const pagine = Math.max(1, Math.ceil(totale / paginaSize));
 
-  const isAssignedToMe = (ticket: TicketRow) => ticket.operatore === currentOperator;
-  const isUnassigned = (ticket: TicketRow) => !ticket.operatore;
+  const isAssignedToMe = (ticket: TicketListRow) => ticket.operatore === currentOperator;
+  const isUnassigned = (ticket: TicketListRow) => !ticket.operatore;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

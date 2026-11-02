@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
+import { useOperatore } from "@/lib/operatore-client";
 
 interface Operator {
   id: string;
@@ -36,9 +37,7 @@ type FormData = {
 const EMPTY_FORM: FormData = { nome: "", email: "", password: "", ruolo: "operatore" };
 
 export default function AdminPage() {
-  const [currentOperator, setCurrentOperator] = useState<{ nome: string; email: string; ruolo: string } | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const seqRef = useRef(0);
 
   // Admin panel state
   const [operatori, setOperatori] = useState<Operator[]>([]);
@@ -51,28 +50,12 @@ export default function AdminPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmPermanentDelete, setConfirmPermanentDelete] = useState<string | null>(null);
-  const seqRef = useRef(0);
 
   // Check current user on mount
-  useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const res = await fetch("/api/auth/me");
-        if (!res.ok) {
-          setChecking(false);
-          return;
-        }
-        const data = await res.json();
-        setCurrentOperator(data.operator);
-        setIsAdmin(data.operator?.ruolo === "admin");
-      } catch {
-        // Not logged in
-      } finally {
-        setChecking(false);
-      }
-    };
-    checkUser();
-  }, []);
+  const { operatore: sessione, caricamento: caricamentoSessione } = useOperatore();
+  const currentOperator = sessione;
+  const checking = caricamentoSessione;
+  const isAdmin = sessione?.ruolo === "admin";
 
   const fetchOperators = useCallback(async () => {
     const seq = ++seqRef.current;

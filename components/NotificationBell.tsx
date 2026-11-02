@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BellIcon, CheckCircleIcon, TicketIcon } from "@/components/icons";
+import { usePolling } from "@/lib/usePolling";
 
 interface Notification {
   id: string;
@@ -22,6 +23,10 @@ export default function NotificationBell() {
   const btnRef = useRef<HTMLButtonElement>(null);
   const seqRef = useRef(0);
 
+  // Una sola funzione per entrambi i casi: l'endpoint restituisce elenco E
+  // conteggio nella stessa risposta (una query in piu' ma un viaggio in meno),
+  // quindi non serve piu' il `?count=true` separato. Il pannello si apre con i
+  // dati gia' in memoria, senza un "Caricamento..." a ogni apertura.
   const fetchNotifications = useCallback(async () => {
     const seq = ++seqRef.current;
     try {
@@ -37,31 +42,16 @@ export default function NotificationBell() {
     }
   }, []);
 
-  const fetchCount = useCallback(async () => {
-    try {
-      const res = await fetch("/api/notifications?count=true");
-      if (!res.ok) return;
-      const data = await res.json();
-      setCount(data.count);
-    } catch {
-      // ignore
-    }
-  }, []);
+  // Poll ogni 30 s invece di 15: la campanella non e' un cruscotto, e ogni
+  // giro e' una query sul DB remoto. Si ferma a scheda nascosta.
+  usePolling(fetchNotifications, 30000);
 
-  // Poll count every 15 seconds
+  // Apertura: un refresh immediato, ma senza spinner se l'elenco c'e' gia'.
   useEffect(() => {
-    fetchCount();
-    const id = setInterval(fetchCount, 15000);
-    return () => clearInterval(id);
-  }, [fetchCount]);
-
-  // Load full list when opening
-  useEffect(() => {
-    if (open) {
-      setLoading(true);
-      fetchNotifications().finally(() => setLoading(false));
-    }
-  }, [open, fetchNotifications]);
+    if (!open) return;
+    if (notifications.length === 0) setLoading(true);
+    fetchNotifications().finally(() => setLoading(false));
+  }, [open, fetchNotifications, notifications.length]);
 
   // Close on outside click and on Escape.
   // Escape non e' un extra: un pannello che si apre col mouse ma si chiude

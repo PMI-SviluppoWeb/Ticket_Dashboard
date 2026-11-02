@@ -20,12 +20,14 @@ import {
   SendIcon,
   TicketIcon,
   TrashIcon,
-  UserIcon,
   XIcon,
 } from "@/components/icons";
 import { perInputDateTime } from "@/lib/calendario";
+import { componiPersone, tutteLePersone } from "@/lib/persone";
 import { iniziali, nuovoId, type CommentoTask, type ExtraTask } from "@/lib/task-local";
+import PersoneCondivise from "@/components/PersoneCondivise";
 import TimerBersaglio from "@/components/TimerBersaglio";
+import { useOperatore } from "@/lib/operatore-client";
 
 // ---------------------------------------------------------------------------
 // Drawer della task.
@@ -37,13 +39,13 @@ import TimerBersaglio from "@/components/TimerBersaglio";
 // i commenti diventerebbero righe da tre parole.
 //
 // Cosa e' PERSISTENTE: titolo, stato, priorita', scadenza, inizio,
-// assegnatario, descrizione -> PATCH /api/attivita/[id], salvato dal bottone
-// in fondo (esplicito, perche' un autosave su un form cosi' grande rende
-// ambiguo cosa e' stato scritto).
+// persone (assegnatario + collaboratori), descrizione -> PATCH
+// /api/attivita/[id], salvato dal bottone in fondo (esplicito, perche' un
+// autosave su un form cosi' grande rende ambiguo cosa e' stato scritto).
 //
-// Cosa e' LOCALE: persone aggiuntive, ticket collegato, sottoattivita' e
-// commenti. Non hanno ancora tabelle: vivono nello stato della board, come
-// concordato, e la forma dei tipi e' gia' quella che usera' il backend.
+// Cosa e' LOCALE: ticket collegato, sottoattivita' e commenti. Non hanno
+// ancora tabelle: vivono nello stato della board, e la forma dei tipi e' gia'
+// quella che usera' il backend.
 // ---------------------------------------------------------------------------
 
 const INPUT_CLASS =
@@ -64,15 +66,9 @@ const PRIORITA_OPTIONS: { value: Priorita; label: string }[] = [
   { value: "ALTA", label: "Alta" },
 ];
 
-interface Dipendente {
-  id: string;
-  nome: string;
-}
-
 interface ProgettoTaskDrawerProps {
   progetto: Progetto;
   attivita: AttivitaRow;
-  operatori: Dipendente[];
   extra: ExtraTask;
   onChangeExtra: (patch: Partial<ExtraTask>) => void;
   onSave: (patch: Record<string, unknown>) => Promise<void>;
@@ -87,7 +83,10 @@ interface Bozza {
   priorita: Priorita;
   data_scadenza: string;
   data_inizio: string;
-  assegnatario: string;
+  // Elenco completo, primo = assegnatario. Un array solo invece di due campi
+  // (primario + collaboratori) perche' in UI sono una cosa sola: spostare una
+  // persona da collaboratore ad assegnatario e' un riordino, non due edit.
+  persone: string[];
 }
 
 function bozzaDa(a: AttivitaRow): Bozza {
@@ -98,14 +97,13 @@ function bozzaDa(a: AttivitaRow): Bozza {
     priorita: a.priorita,
     data_scadenza: perInputDateTime(a.data_scadenza),
     data_inizio: perInputDateTime(a.data_inizio),
-    assegnatario: a.assegnatario ?? "",
+    persone: tutteLePersone(a.assegnatario, a.persone),
   };
 }
 
 export default function ProgettoTaskDrawer({
   progetto,
   attivita,
-  operatori,
   extra,
   onChangeExtra,
   onSave,
@@ -124,8 +122,6 @@ export default function ProgettoTaskDrawer({
 
   const [nuovaSotto, setNuovaSotto] = useState("");
   const [nuovoCommento, setNuovoCommento] = useState("");
-  const [io, setIo] = useState<{ nome: string } | null>(null);
-  const [personeInput, setPersoneInput] = useState("");
 
   const pannelloRef = useRef<HTMLDivElement>(null);
   // `onClose` arriva dal parent come arrow inline: la sua identita' cambia a
@@ -143,15 +139,10 @@ export default function ProgettoTaskDrawer({
 
   // Chi scrive un commento e' l'operatore loggato: il nome lo prendiamo dalla
   // sessione, non da un campo libero, altrimenti i commenti sarebbero
-  // firmabili con qualunque nome.
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d?.operator?.nome) setIo({ nome: d.operator.nome });
-      })
-      .catch(() => {});
-  }, []);
+  // firmabili con qualunque nome. La sessione arriva dalla cache condivisa:
+  // nessuna richiesta in piu' rispetto alla Sidebar.
+  const { operatore: sessione } = useOperatore();
+  const io = sessione ? { nome: sessione.nome } : null;
 
   // Chiusura con Esc + blocco dello scroll del body finche' il drawer e'
   // aperto. Una volta per montaggio: le dipendenze sono volutamente vuote —
@@ -193,7 +184,7 @@ export default function ProgettoTaskDrawer({
       base.priorita !== bozza.priorita ||
       base.data_scadenza !== bozza.data_scadenza ||
       base.data_inizio !== bozza.data_inizio ||
-      base.assegnatario !== bozza.assegnatario
+      base.persone.join("\u0000") !== bozza.persone.join("\u0000")
     );
   }, [attivita, bozza]);
   sporcoRef.current = sporco;
@@ -224,6 +215,10 @@ export default function ProgettoTaskDrawer({
     setSalvando(true);
     setErrore("");
     try {
+      const personeDaSalvare = componiPersone(
+        bozza.persone[0] ?? null,
+        bozza.persone.slice(1)
+      );
       await onSave({
         titolo: bozza.titolo.trim(),
         descrizione: bozza.descrizione || null,
@@ -231,39 +226,16 @@ export default function ProgettoTaskDrawer({
         priorita: bozza.priorita,
         data_scadenza: bozza.data_scadenza || null,
         data_inizio: bozza.data_inizio || null,
-        assegnatario: bozza.assegnatario || null,
+        // Il primo nome va nella colonna storica, gli altri in `persone`:
+        // la separazione e' la regola di lib/persone.ts, applicata qui una
+        // volta sola, al confine con il server.
+        assegnatario: personeDaSalvare.primario,
+        persone: personeDaSalvare.persone,
       });
     } catch (err) {
       setErrore(err instanceof Error ? err.message : "Errore di salvataggio.");
     } finally {
       setSalvando(false);
-    }
-  };
-
-  // -------------------------------------------------------------------------
-  // Persone: l'assegnatario e' il campo REALE dell'attivita' (quello che
-  // alimenta calendario e Google); le altre persone sono un elenco locale.
-  // In UI sono un concetto solo: un chip per persona.
-  // -------------------------------------------------------------------------
-  const personeExtra = extra.persone ?? [];
-  const persone = [bozza.assegnatario, ...personeExtra].filter(Boolean);
-
-  const aggiungiPersona = (nome: string) => {
-    const pulito = nome.trim();
-    if (!pulito || persone.includes(pulito)) return;
-    if (!bozza.assegnatario) {
-      setBozza((b) => ({ ...b, assegnatario: pulito }));
-    } else {
-      onChangeExtra({ persone: [...personeExtra, pulito] });
-    }
-    setPersoneInput("");
-  };
-
-  const rimuoviPersona = (nome: string) => {
-    if (nome === bozza.assegnatario) {
-      setBozza((b) => ({ ...b, assegnatario: "" }));
-    } else {
-      onChangeExtra({ persone: personeExtra.filter((p) => p !== nome) });
     }
   };
 
@@ -456,58 +428,18 @@ export default function ProgettoTaskDrawer({
               </div>
             </div>
 
-            {/* Persone ---------------------------------------------------- */}
+            {/* Persone ----------------------------------------------------
+                L'elenco e' persistente come il resto della bozza: si salva col
+                bottone in fondo. Il primo nome e' l'assegnatario (quello che
+                Google Calendar e la dashboard leggono), gli altri sono i
+                collaboratori. */}
             <div className="mt-4">
               <p className={LABEL_CLASS}>Persone</p>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {persone.map((nome) => (
-                  <span
-                    key={nome}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-crema-scuro py-1 pl-1 pr-2 text-xs font-medium text-inchiostro ring-1 ring-crema-contorno"
-                  >
-                    <span
-                      className="grid h-6 w-6 place-items-center rounded-full bg-lime text-[10px] font-semibold text-lime-testo"
-                      aria-hidden="true"
-                    >
-                      {iniziali(nome)}
-                    </span>
-                    {nome}
-                    <button
-                      type="button"
-                      onClick={() => rimuoviPersona(nome)}
-                      aria-label={`Rimuovi ${nome}`}
-                      className="flex h-4 w-4 items-center justify-center rounded-full text-caldo-testo transition hover:bg-white hover:text-pericolo focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inchiostro"
-                    >
-                      <XIcon className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-
-                <div className="relative">
-                  <UserIcon className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-caldo-testo" />
-                  <input
-                    value={personeInput}
-                    onChange={(e) => setPersoneInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        aggiungiPersona(personeInput);
-                      }
-                    }}
-                    list="operatori-task"
-                    placeholder="Aggiungi persona…"
-                    aria-label="Aggiungi una persona alla task"
-                    className="h-8 w-40 rounded-full border border-dashed border-crema-contorno bg-white pl-8 pr-3 text-xs text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-                  />
-                  <datalist id="operatori-task">
-                    {operatori
-                      .filter((o) => !persone.includes(o.nome))
-                      .map((o) => (
-                        <option key={o.id} value={o.nome} />
-                      ))}
-                  </datalist>
-                </div>
-              </div>
+              <PersoneCondivise
+                persone={bozza.persone}
+                onCambia={(persone) => setBozza((b) => ({ ...b, persone }))}
+                titolo="Persone sulla task"
+              />
             </div>
 
             {/* Ticket collegato ------------------------------------------- */}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteTechnicalNote, getTicket, updateTechnicalNote } from "@/lib/tickets";
+import { deleteTechnicalNote, updateTechnicalNote } from "@/lib/tickets";
 
 function getOperatorId(request: Request): string | null {
   return request.headers.get("x-operator-id");
@@ -36,7 +36,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Nota tecnica non trovata." }, { status: 404 });
   }
 
-  return NextResponse.json(await getTicket(params.id));
+  // Solo la nota: il client ha gia' il ticket e ricarica lui quando serve
+  // (dopo gli allegati). Restituire l'intero ticket era un batch di quattro
+  // SELECT il cui risultato veniva scartato.
+  return NextResponse.json({ nota: note });
 }
 
 export async function DELETE(
@@ -59,5 +62,6 @@ export async function DELETE(
   if (!ok) {
     return NextResponse.json({ error: "Nota tecnica non trovata." }, { status: 404 });
   }
-  return NextResponse.json(await getTicket(params.id));
+  // Niente rilettura del ticket: il client ricarica da se' dopo un'eliminazione.
+  return NextResponse.json({ ok: true });
 }

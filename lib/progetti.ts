@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { parsePersone, serializzaPersone } from "./persone";
 import { deleteAttivita, eliminaAttivitaProgetto, listAttivitaProgetto } from "./attivita";
 import { SOGLIA_SYNC_INLINE } from "./google-sync";
 import type {
@@ -9,7 +10,7 @@ import type {
   ProgettoTicket,
   ProgettoUpdate,
   StatoProgetto,
-  TicketRow,
+  TicketListRow,
 } from "./types";
 
 export const STATI_PROGETTO: StatoProgetto[] = [
@@ -22,12 +23,12 @@ export const STATI_PROGETTO: StatoProgetto[] = [
 
 const ROW_FIELDS = `
   id, codice, nome, descrizione, cliente_id, stato, priorita, responsabile,
-  data_inizio, data_fine, note, attivo, data_creazione, data_aggiornamento
+  persone, data_inizio, data_fine, note, attivo, data_creazione, data_aggiornamento
 `;
 
 const ROW_FIELDS_ALIASED = `
   p.id, p.codice, p.nome, p.descrizione, p.cliente_id, p.stato, p.priorita,
-  p.responsabile, p.data_inizio, p.data_fine, p.note, p.attivo,
+  p.responsabile, p.persone, p.data_inizio, p.data_fine, p.note, p.attivo,
   p.data_creazione, p.data_aggiornamento
 `;
 
@@ -42,6 +43,8 @@ function normalizza(row: Record<string, unknown>): ProgettoListRow {
     // Coercizione esplicita: la barra di avanzamento fa aritmetica su questo
     // valore, e un NULL (nessuna attivita' completata) deve valere 0, non NaN.
     num_attivita_completate: Number(row.num_attivita_completate ?? 0),
+    // La colonna e' JSON: i componenti ricevono sempre un array.
+    persone: parsePersone(row.persone),
   } as unknown as ProgettoListRow;
 }
 
@@ -80,14 +83,15 @@ export async function listProgetti(opts?: {
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
 
-  const countRow = await db
-    .prepare(`SELECT COUNT(*) AS n FROM progetti p LEFT JOIN clienti c ON c.id = p.cliente_id ${whereSql}`)
-    .get(params);
-  const totale = (countRow?.n as number) ?? 0;
-
-  const rows = await db
-    .prepare(
-      `SELECT ${ROW_FIELDS_ALIASED},
+  // Conteggio e pagina nella STESSA richiesta al DB. Prima erano due `await`
+  // in serie: con un database remoto sono due viaggi di rete.
+  const [countRows, rows] = await db.batchRead([
+    {
+      sql: `SELECT COUNT(*) AS n FROM progetti p LEFT JOIN clienti c ON c.id = p.cliente_id ${whereSql}`,
+      params,
+    },
+    {
+      sql: `SELECT ${ROW_FIELDS_ALIASED},
               COALESCE(c.ragione_sociale, p.cliente_id) AS cliente_ragione_sociale,
               (SELECT COUNT(*) FROM attivita a WHERE a.progetto_id = p.id) AS num_attivita,
               (SELECT COUNT(*) FROM attivita a
@@ -97,11 +101,13 @@ export async function listProgetti(opts?: {
        LEFT JOIN clienti c ON c.id = p.cliente_id
        ${whereSql}
        ORDER BY p.data_aggiornamento DESC, p.rowid DESC
-       LIMIT @limit OFFSET @offset`
-    )
-    .all({ ...params, limit: paginaSize, offset: (pagina - 1) * paginaSize });
+       LIMIT @limit OFFSET @offset`,
+      params: { ...params, limit: paginaSize, offset: (pagina - 1) * paginaSize },
+    },
+  ]);
 
-  const progetti = (rows as unknown as Record<string, unknown>[]).map(normalizza);
+  const totale = (countRows[0]?.n as number) ?? 0;
+  const progetti = rows.map(normalizza);
   return { progetti, totale, pagina, paginaSize };
 }
 
@@ -142,10 +148,10 @@ export async function insertProgetto(input: ProgettoInput): Promise<Progetto> {
     .prepare(
       `INSERT INTO progetti (
          id, codice, nome, descrizione, cliente_id, stato, priorita, responsabile,
-         data_inizio, data_fine, note, attivo, data_creazione, data_aggiornamento
+         persone, data_inizio, data_fine, note, attivo, data_creazione, data_aggiornamento
        ) VALUES (
          @id, @codice, @nome, @descrizione, @cliente_id, @stato, @priorita, @responsabile,
-         @data_inizio, @data_fine, @note, 1, @data_creazione, @data_aggiornamento
+         @persone, @data_inizio, @data_fine, @note, 1, @data_creazione, @data_aggiornamento
        )`
     )
     .run({
@@ -157,6 +163,7 @@ export async function insertProgetto(input: ProgettoInput): Promise<Progetto> {
       stato: input.stato ?? "PIANIFICATO",
       priorita: input.priorita ?? "MEDIA",
       responsabile: input.responsabile ?? null,
+      persone: serializzaPersone(input.persone),
       data_inizio: input.data_inizio ?? null,
       data_fine: input.data_fine ?? null,
       note: input.note ?? null,
@@ -185,6 +192,7 @@ export async function updateProgetto(
   if (patch.stato !== undefined) { sets.push("stato = @stato"); params.stato = patch.stato; }
   if (patch.priorita !== undefined) { sets.push("priorita = @priorita"); params.priorita = patch.priorita; }
   if (patch.responsabile !== undefined) { sets.push("responsabile = @responsabile"); params.responsabile = patch.responsabile ?? null; }
+  if (patch.persone !== undefined) { sets.push("persone = @persone"); params.persone = serializzaPersone(patch.persone); }
   if (patch.data_inizio !== undefined) { sets.push("data_inizio = @data_inizio"); params.data_inizio = patch.data_inizio ?? null; }
   if (patch.data_fine !== undefined) { sets.push("data_fine = @data_fine"); params.data_fine = patch.data_fine ?? null; }
   if (patch.note !== undefined) { sets.push("note = @note"); params.note = patch.note ?? null; }
@@ -242,12 +250,12 @@ export async function countProgetti(): Promise<number> {
 // l'insert, che la rotta traduce in 409.
 // ---------------------------------------------------------------------------
 
-export async function listTicketsProgetto(progettoId: string): Promise<TicketRow[]> {
+export async function listTicketsProgetto(progettoId: string): Promise<TicketListRow[]> {
   const rows = await db
     .prepare(
       `SELECT t.id, t.numero, t.cliente, t.contatto, t.telefono, t.email,
-              t.modulo_software, t.sommario_problema, t.descrizione_dettagliata,
-              t.priorita, t.stato, t.note, t.operatore, t.data_creazione,
+              t.modulo_software, t.sommario_problema,
+              t.priorita, t.stato, t.operatore, t.data_creazione,
               t.data_aggiornamento, t.data_chiusura, t.data_inizio_lavoro,
               t.tempo_stimato_minuti, t.tempo_effettivo_minuti
        FROM tickets t
@@ -256,7 +264,7 @@ export async function listTicketsProgetto(progettoId: string): Promise<TicketRow
        ORDER BY t.data_creazione DESC`
     )
     .all({ progetto_id: progettoId });
-  return rows as unknown as TicketRow[];
+  return rows as unknown as TicketListRow[];
 }
 
 export async function linkTicket(

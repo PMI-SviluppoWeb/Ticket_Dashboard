@@ -2,59 +2,43 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { resetOperatore, useOperatore } from "@/lib/operatore-client";
+import { prefetchApi, svuotaCache } from "@/lib/api-cache";
 import {
-  BookIcon,
-  CalendarIcon,
-  FolderIcon,
-  GridIcon,
   HeadsetIcon,
   HelpCircleIcon,
   LogOutIcon,
-  UserCircleIcon,
-  UserPlusIcon,
-  BarChartIcon,
 } from "@/components/icons";
+import { navVisibile, voceAttiva } from "@/lib/nav";
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [operator, setOperator] = useState<{ nome: string; email: string; ruolo: string } | null>(null);
-
-  const NAV_ITEMS = [
-    { href: "/", label: "Dashboard", icon: GridIcon, exact: true },
-    { href: "/calendario", label: "Calendario", icon: CalendarIcon, exact: false },
-    { href: "/progetti", label: "Progetti", icon: FolderIcon, exact: false },
-    { href: "/operatore", label: "I Miei Ticket", icon: UserCircleIcon, exact: false, operatoreOnly: true },
-    { href: "/admin", label: "Operatori", icon: UserPlusIcon, exact: false, adminOnly: true },
-    { href: "/admin/dashboard", label: "Dashboard Admin", icon: BarChartIcon, exact: false, adminOnly: true },
-    { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false },
-  ];
+  // L'operatore arriva dalla cache condivisa (lib/operatore-client): la pagina
+  // che sta accanto alla sidebar chiede lo stesso dato, e cosi' la richiesta e
+  // la query al database sono UNA per caricamento invece di due.
+  const { operatore } = useOperatore();
+  const operator = operatore ? { nome: operatore.nome, email: operatore.email, ruolo: operatore.ruolo } : null;
 
   const isAdmin = operator?.ruolo === "admin";
-  const visibleNav = NAV_ITEMS.filter((item) => {
-    if (item.adminOnly && !isAdmin) return false;
-    if (item.operatoreOnly && isAdmin) return false;
-    return true;
-  });
+  const NAV_ITEMS = navVisibile(isAdmin);
 
-  useEffect(() => {
-    const loadOperator = async () => {
-      try {
-        const res = await fetch("/api/auth/me");
-        if (res.ok) {
-          const data = await res.json();
-          setOperator(data.operator);
-        }
-      } catch {
-        // Ignore
-      }
-    };
-    loadOperator();
-  }, []);
+  // Passando il mouse (o col focus da tastiera) su una voce, il dato che quella
+  // pagina chiede per prima viene richiesto adesso: quando il clic arriva, il
+  // viaggio verso il DB e' gia' in corso o finito. Non si precaricano le pagine
+  // pesanti (elenchi, calendario): il costo di un prefetch sbagliato non deve
+  // superare il beneficio.
+  const riscalda = (item: (typeof NAV_ITEMS)[number]) => {
+    for (const url of item.calda ?? []) prefetchApi(url);
+  };
 
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
+      // La cache dell'operatore appartiene alla sessione: senza reset, il
+      // prossimo accesso nella stessa scheda mostrerebbe l'utente precedente.
+      resetOperatore();
+      // Stesso motivo per la cache delle risposte: sono dati di QUESTO utente.
+      svuotaCache();
       window.location.href = "/login";
     } catch {
       // Ignore
@@ -87,23 +71,15 @@ export default function Sidebar() {
         className="flex flex-col gap-1.5 rounded-full bg-white p-1.5 shadow-soft ring-1 ring-crema-contorno"
         aria-label="Navigazione principale"
       >
-        {visibleNav.map((item) => {
-          // La voce attiva e' quella con il percorso PIU' SPECIFICO:
-          // "/admin/dashboard" inizia anche con "/admin" e il confronto
-          // ingenuo accenderebbe due voci insieme.
-          const corrisponde = (i: (typeof NAV_ITEMS)[number]) =>
-            i.exact
-              ? pathname === i.href
-              : pathname === i.href || pathname.startsWith(`${i.href}/`);
-          const attiva = visibleNav
-            .filter(corrisponde)
-            .sort((a, b) => b.href.length - a.href.length)[0]?.href;
-          const active = item.href === attiva;
+        {NAV_ITEMS.map((item) => {
+          const active = item.href === voceAttiva(NAV_ITEMS, pathname);
           return (
             <Link
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
+              onMouseEnter={() => riscalda(item)}
+              onFocus={() => riscalda(item)}
               className={`${cerchio} ${
                 active
                   ? "bg-inchiostro text-lime"

@@ -8,7 +8,7 @@ import type {
   Progetto,
   StatoAttivita,
   StatoProgetto,
-  TicketRow,
+  TicketListRow,
 } from "@/lib/types";
 import { PriorityBadge, ProgettoStatusBadge } from "@/components/badges";
 import {
@@ -27,10 +27,13 @@ import SectionBar from "@/components/SectionBar";
 import ProgettoTaskBoard from "@/components/ProgettoTaskBoard";
 import ProgettoTaskDrawer from "@/components/ProgettoTaskDrawer";
 import CronometroHeader from "@/components/CronometroHeader";
-import { useTempi } from "@/components/TempiContext";
+import { useTempiStato } from "@/components/TempiContext";
 import { formatData, perInputDateTime } from "@/lib/calendario";
 import { formatDurata, riepilogoTempi } from "@/lib/durata";
+import { componiPersone, tutteLePersone } from "@/lib/persone";
+import PersoneCondivise from "@/components/PersoneCondivise";
 import { iniziali, SEZIONE_INIZIALE, type ExtraTask, type Sezione } from "@/lib/task-local";
+import { caricaApi } from "@/lib/api-cache";
 // La percentuale del dettaglio e' derivata qui dalle attivita' gia' caricate:
 // getProgetto non restituisce conteggi. Stessa funzione pura della lista,
 // cosi' le due schermate non possono divergere.
@@ -71,7 +74,6 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
   const [error, setError] = useState("");
 
   const [clienti, setClienti] = useState<Cliente[]>([]);
-  const [operatori, setOperatori] = useState<{ id: string; nome: string }[]>([]);
 
   // Modifica progetto
   const [editProgetto, setEditProgetto] = useState(false);
@@ -101,7 +103,7 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
   // Ticket collegati
   const [showTicketSearch, setShowTicketSearch] = useState(false);
   const [ticketQuery, setTicketQuery] = useState("");
-  const [ticketRisultati, setTicketRisultati] = useState<TicketRow[]>([]);
+  const [ticketRisultati, setTicketRisultati] = useState<TicketListRow[]>([]);
   const [cercandoTicket, setCercandoTicket] = useState(false);
 
   const requestSeq = useRef(0);
@@ -131,25 +133,17 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
   }, [loadProgetto]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/clienti");
-        if (res.ok) {
-          const data = await res.json();
-          setClienti((data.clienti ?? []) as Cliente[]);
-        }
-      } catch {
+    caricaApi<{ clienti: Cliente[] }>("/api/clienti")
+      .then((data) => setClienti(data.clienti ?? []))
+      .catch(() => {
         // Ignora
-      }
-    })();
+      });
   }, []);
 
-  useEffect(() => {
-    fetch("/api/operatori")
-      .then((res) => (res.ok ? res.json() : { operatori: [] }))
-      .then((data) => setOperatori((data.operatori ?? []) as { id: string; nome: string }[]))
-      .catch(() => {});
-  }, []);
+  // L'elenco operatori non si carica piu' qui: l'editor delle persone
+  // (components/PersoneCondivise.tsx) lo chiede da solo alla prima apertura,
+  // cosi' la pagina non paga una richiesta che serve solo se si modifica
+  // qualcuno. Prima arrivava qui e veniva passato a board e drawer.
 
   // -------------------------------------------------------------------------
   // Progetto
@@ -220,7 +214,7 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
   // lib/attivita.ts e' il punto di aggancio della sincronizzazione Google e
   // una PATCH diretta altrove la salterebbe.
   // -------------------------------------------------------------------------
-  const aggiornaAttivita = async (attivitaId: string, patch: Record<string, unknown>) => {
+  const aggiornaAttivita = useCallback(async (attivitaId: string, patch: Record<string, unknown>) => {
     const res = await fetch(`/api/attivita/${attivitaId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -242,14 +236,75 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
           }
         : p
     );
-  };
+  }, []);
 
-  const cambiaExtra = (attivitaId: string, patch: Partial<ExtraTask>) => {
+  // Persone sul progetto: il primo nome resta in `responsabile` (lo leggono
+  // calendario e liste), gli altri in `persone`. Ottimistico: l'elenco cambia
+  // subito e in caso di errore si riallinea dal server.
+  const cambiaPersoneProgetto = useCallback(
+    async (persone: string[]) => {
+      const { primario, persone: altri } = componiPersone(
+        persone[0] ?? null,
+        persone.slice(1)
+      );
+      setProgetto((p) => (p ? { ...p, responsabile: primario, persone: altri } : p));
+      setError("");
+      try {
+        const res = await fetch(`/api/progetti/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ responsabile: primario, persone: altri }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Errore di salvataggio.");
+        loadProgetto();
+      }
+    },
+    [id, loadProgetto]
+  );
+
+  // Stesso lavoro per la singola task, dalla riga della board. Ottimistico
+  // anche qui: la riga mostra subito l'avatar, e in caso di errore si rilegge
+  // il progetto dal server. Senza, due click rapidi partivano entrambi
+  // dall'elenco vecchio e il secondo poteva cancellare l'aggiunta del primo.
+  const cambiaPersoneTask = useCallback(
+    (attivitaId: string, persone: string[]) => {
+      const { primario, persone: altri } = componiPersone(
+        persone[0] ?? null,
+        persone.slice(1)
+      );
+      setProgetto((p) =>
+        p
+          ? {
+              ...p,
+              attivita: p.attivita.map((a) =>
+                a.id === attivitaId
+                  ? { ...a, assegnatario: primario, persone: altri }
+                  : a
+              ),
+            }
+          : p
+      );
+      setError("");
+      aggiornaAttivita(attivitaId, {
+        assegnatario: primario,
+        persone: altri,
+      }).catch((err) => {
+        setError(err instanceof Error ? err.message : "Errore di aggiornamento.");
+        loadProgetto();
+      });
+    },
+    [aggiornaAttivita, loadProgetto]
+  );
+
+  const cambiaExtra = useCallback((attivitaId: string, patch: Partial<ExtraTask>) => {
     setExtra((prev) => ({
       ...prev,
       [attivitaId]: { ...(prev[attivitaId] ?? {}), ...patch },
     }));
-  };
+  }, []);
 
   const creaTask = async (sezioneId: string, titolo: string) => {
     setError("");
@@ -277,20 +332,25 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
     }
   };
 
-  const completaTask = async (a: AttivitaRow, completata: boolean) => {
-    setError("");
-    try {
-      await aggiornaAttivita(a.id, {
-        stato: (completata ? "COMPLETATA" : "DA_FARE") as StatoAttivita,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore di aggiornamento.");
-    }
-  };
+  // Solo l'id: la riga memoizzata riceve callback stabili e le applica alla
+  // propria task, invece di ricevere una funzione nuova a ogni render.
+  const completaTask = useCallback(
+    async (attivitaId: string, completata: boolean) => {
+      setError("");
+      try {
+        await aggiornaAttivita(attivitaId, {
+          stato: (completata ? "COMPLETATA" : "DA_FARE") as StatoAttivita,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Errore di aggiornamento.");
+      }
+    },
+    [aggiornaAttivita]
+  );
 
   // Restituisce l'esito: il drawer chiude solo dopo un'eliminazione riuscita,
   // altrimenti sparirebbe la task dallo schermo restando viva sul server.
-  const eliminaAttivita = async (attivitaId: string): Promise<boolean> => {
+  const eliminaAttivita = useCallback(async (attivitaId: string): Promise<boolean> => {
     setError("");
     try {
       const res = await fetch(`/api/attivita/${attivitaId}`, { method: "DELETE" });
@@ -315,7 +375,24 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
       setConfirmDeleteAttivita(null);
       return false;
     }
-  };
+  }, [loadProgetto]);
+
+  // Handler stabili per la board: la riga e' memoizzata, quindi una funzione
+  // nuova a ogni render annullerebbe il memo su tutte le righe.
+  const selezionaTask = useCallback((aid: string) => {
+    setSelezionataId(aid);
+    setConfirmDeleteAttivita(null);
+  }, []);
+
+  const gestisciEliminaTask = useCallback(
+    (aid: string) => {
+      if (confirmDeleteAttivita === aid) eliminaAttivita(aid);
+      else setConfirmDeleteAttivita(aid);
+    },
+    [confirmDeleteAttivita, eliminaAttivita]
+  );
+
+  const annullaEliminaTask = useCallback(() => setConfirmDeleteAttivita(null), []);
 
   // -------------------------------------------------------------------------
   // Ticket
@@ -336,7 +413,7 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
       if (res.ok) {
         const data = await res.json();
         if (seq === ticketSeq.current) {
-          setTicketRisultati((data.tickets ?? []) as TicketRow[]);
+          setTicketRisultati((data.tickets ?? []) as TicketListRow[]);
         }
       }
     } catch {
@@ -438,7 +515,7 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
   // Il cronometro puo' cambiare stato da qualsiasi pagina: quando una voce
   // parte o si ferma, i totali del progetto possono essere cambiati. Si
   // rileggono allora, non a intervalli.
-  const { aperta: voceTimerAperta } = useTempi();
+  const { aperta: voceTimerAperta } = useTempiStato();
   const voceTimerId = voceTimerAperta?.id ?? null;
   useEffect(() => {
     if (!voceTimerId) return;
@@ -726,8 +803,22 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
                       </h1>
                       <p className="mt-0.5 text-sm text-caldo-testo">
                         {progetto.cliente_ragione_sociale}
-                        {progetto.responsabile ? ` · ${progetto.responsabile}` : ""}
                       </p>
+                      {/* Il responsabile non si ripete nel testo sopra: e' il
+                          primo avatar di questo controllo, che e' anche
+                          l'editor. Una riga sola per due informazioni. */}
+                      <div className="mt-2">
+                        <PersoneCondivise
+                          persone={tutteLePersone(
+                            progetto.responsabile,
+                            progetto.persone
+                          )}
+                          onCambia={cambiaPersoneProgetto}
+                          titolo="Persone sul progetto"
+                          vuoto="Aggiungi persone"
+                          mostraNomi
+                        />
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -1007,25 +1098,19 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
 
               <ProgettoTaskBoard
                 attivita={progetto.attivita}
-                operatori={operatori}
                 sezioni={sezioni}
                 extra={extra}
                 minutiPerTask={minutiPerTask}
                 selezionataId={selezionataId}
                 confermaEliminaId={confirmDeleteAttivita}
-                onSeleziona={(aid) => {
-                  setSelezionataId(aid);
-                  setConfirmDeleteAttivita(null);
-                }}
+                onSeleziona={selezionaTask}
                 onCambiaExtra={cambiaExtra}
+                onCambiaPersone={cambiaPersoneTask}
                 onCambiaSezioni={setSezioni}
                 onCreaTask={creaTask}
                 onCompleta={completaTask}
-                onElimina={(a) => {
-                  if (confirmDeleteAttivita === a.id) eliminaAttivita(a.id);
-                  else setConfirmDeleteAttivita(a.id);
-                }}
-                onAnnullaElimina={() => setConfirmDeleteAttivita(null)}
+                onElimina={gestisciEliminaTask}
+                onAnnullaElimina={annullaEliminaTask}
               />
             </div>
           </div>
@@ -1159,7 +1244,6 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
           key={attivitaSelezionata.id}
           progetto={progetto}
           attivita={attivitaSelezionata}
-          operatori={operatori}
           extra={extra[attivitaSelezionata.id] ?? {}}
           onChangeExtra={(patch) => cambiaExtra(attivitaSelezionata.id, patch)}
           onSave={(patch) => aggiornaAttivita(attivitaSelezionata.id, patch)}

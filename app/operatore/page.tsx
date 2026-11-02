@@ -3,12 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { Stats, TicketRow } from "@/lib/types";
+import type { Stats, TicketListRow } from "@/lib/types";
 import StatsCards from "@/components/StatsCards";
 import FiltersBar, { DEFAULT_FILTERS, OrdinaPill, type Filters } from "@/components/FiltersBar";
 import TicketTable from "@/components/TicketTable";
 import QuickActions from "@/components/QuickActions";
 import AppHeader from "@/components/AppHeader";
+import { useDebounce } from "@/lib/useDebounce";
+import { usePolling } from "@/lib/usePolling";
+import { useOperatore, resetOperatore } from "@/lib/operatore-client";
+import { caricaApi, datoImmediato, svuotaCache } from "@/lib/api-cache";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
 import {
@@ -24,80 +28,93 @@ export default function OperatoreDashboard() {
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [moduli, setModuli] = useState<string[]>([]);
-  const [tickets, setTickets] = useState<TicketRow[]>([]);
+  const [tickets, setTickets] = useState<TicketListRow[]>([]);
   const [totale, setTotale] = useState(0);
   const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, stato: "IN_CORSO" });
   const [pagina, setPagina] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [operator, setOperator] = useState<{ nome: string; email: string; ruolo: string } | null>(null);
-
   const requestSeq = useRef(0);
 
-  const loadOperator = useCallback(async () => {
+  // L'operatore viene dalla cache condivisa: la Sidebar chiede lo stesso dato,
+  // quindi la richiesta è una sola per caricamento. Da qui serve solo il ruolo.
+  const { operatore, caricamento: caricamentoOperatore } = useOperatore();
+  const operator = operatore;
+
+  useEffect(() => {
+    // Un admin non ha "i propri ticket": questa pagina passa dal router, ma
+    // solo dopo che il ruolo è noto.
+    if (!caricamentoOperatore && operatore?.ruolo === "admin") router.push("/");
+  }, [caricamentoOperatore, operatore, router]);
+
+  // Il logout e' un POST: un <Link> verso /api/auth/logout fa una GET e finisce
+  // in 405, l'utente pensa di uscire ma la sessione resta viva. Stesso
+  // comportamento della Sidebar (reset cache + redirect).
+  const handleLogout = async () => {
     try {
-      const res = await fetch("/api/auth/me");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.operator?.ruolo === "admin") {
-          router.push("/");
-          return;
-        }
-        setOperator(data.operator);
-      }
+      await fetch("/api/auth/logout", { method: "POST" });
+      resetOperatore();
+      svuotaCache();
+      window.location.href = "/login";
     } catch {
       // Ignore
     }
-  }, [router]);
+  };
 
-  const loadStats = useCallback(async () => {
+  const loadStats = useCallback(async (forza = false) => {
     try {
-      const res = await fetch("/api/stats");
-      if (res.ok) {
-        const data = (await res.json()) as { stats: Stats; moduli: string[] };
-        setStats(data.stats);
-        setModuli(data.moduli);
-      }
+      const data = await caricaApi<{ stats: Stats; moduli: string[] }>("/api/stats", { forza });
+      setStats(data.stats);
+      setModuli(data.moduli);
     } catch {
       // Ignore
     }
   }, []);
 
-  const loadList = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    const params = new URLSearchParams({
-      stato: filters.stato,
-      priorita: filters.priorita,
-      q: filters.q,
-      modulo: filters.modulo,
-      ordina: filters.ordina,
-      pagina: String(pagina),
-      paginaSize: String(PAGE_SIZE),
-    });
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/tickets?${params.toString()}`);
-      if (!res.ok) throw new Error(`Errore ${res.status}`);
-      const data = await res.json();
-      if (seq === requestSeq.current) {
-        setTickets(data.tickets as TicketRow[]);
-        setTotale(data.totale as number);
-        setLastUpdate(new Date());
-      }
-    } catch (err) {
-      if (seq === requestSeq.current) {
-        setError(err instanceof Error ? err.message : "Errore di caricamento.");
-      }
-    } finally {
-      if (seq === requestSeq.current) setLoading(false);
-    }
-  }, [filters, pagina]);
+  const qDebounce = useDebounce(filters.q, 250);
 
-  useEffect(() => {
-    loadOperator();
-  }, [loadOperator]);
+  const loadList = useCallback(
+    async (forza = false) => {
+      const seq = ++requestSeq.current;
+      const params = new URLSearchParams({
+        stato: filters.stato,
+        priorita: filters.priorita,
+        q: qDebounce,
+        modulo: filters.modulo,
+        ordina: filters.ordina,
+        pagina: String(pagina),
+        paginaSize: String(PAGE_SIZE),
+      });
+      const url = `/api/tickets?${params.toString()}`;
+
+      // Dato gia' visto: si mostra subito, la richiesta parte comunque.
+      const subito = datoImmediato<{ tickets: TicketListRow[]; totale: number }>(url);
+      if (subito) {
+        setTickets(subito.tickets);
+        setTotale(subito.totale);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+      setError("");
+      try {
+        const data = await caricaApi<{ tickets: TicketListRow[]; totale: number }>(url, { forza });
+        if (seq === requestSeq.current) {
+          setTickets(data.tickets);
+          setTotale(data.totale);
+          setLastUpdate(new Date());
+        }
+      } catch (err) {
+        if (seq === requestSeq.current) {
+          setError(err instanceof Error ? err.message : "Errore di caricamento.");
+        }
+      } finally {
+        if (seq === requestSeq.current) setLoading(false);
+      }
+    },
+    [filters.stato, filters.priorita, filters.modulo, filters.ordina, qDebounce, pagina]
+  );
 
   useEffect(() => {
     loadStats();
@@ -107,13 +124,14 @@ export default function OperatoreDashboard() {
     loadList();
   }, [loadList]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      loadList();
-      loadStats();
-    }, 30000);
-    return () => clearInterval(id);
-  }, [loadList, loadStats]);
+  // Un solo poll, fermo quando la scheda non è visibile.
+  usePolling(
+    useCallback(() => {
+      loadList(true);
+      loadStats(true);
+    }, [loadList, loadStats]),
+    30000
+  );
 
   const handleFiltersChange = useCallback((patch: Partial<Filters>) => {
     setFilters((prev) => ({ ...prev, ...patch }));
@@ -121,8 +139,8 @@ export default function OperatoreDashboard() {
   }, []);
 
   const refresh = useCallback(() => {
-    loadList();
-    loadStats();
+    loadList(true);
+    loadStats(true);
   }, [loadList, loadStats]);
 
   const handleTakeTicket = async (ticketId: string) => {
@@ -189,13 +207,14 @@ export default function OperatoreDashboard() {
                 <p className="text-sm font-semibold text-inchiostro">{operator?.nome ?? "Operatore"}</p>
                 <p className="text-xs capitalize text-caldo-testo">{operator?.ruolo ?? "operatore"}</p>
               </div>
-              <Link
-                href="/api/auth/logout"
+              <button
+                type="button"
+                onClick={handleLogout}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-crema-scuro text-caldo-testo transition-colors duration-200 hover:bg-stato-urgenza-bg hover:text-stato-urgenza-testo"
                 title="Esci"
               >
                 <UserIcon className="h-4 w-4" />
-              </Link>
+              </button>
             </div>
           </>
         }

@@ -1,27 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProgettoListRow } from "@/lib/types";
 import { chip } from "@/components/badges";
-import { ChevronDownIcon } from "@/components/icons";
 import { formatData } from "@/lib/calendario";
+import { caricaApi, datoImmediato } from "@/lib/api-cache";
+import { componiPersone, tutteLePersone } from "@/lib/persone";
+import PersoneCondivise from "@/components/PersoneCondivise";
 
 // Il limite massimo che /api/progetti accetta per pagina (lib/progetti.ts).
 const LIMITE = 100;
 // Orizzonte della colonna "In scadenza": due settimane, scaduti compresi.
 const GIORNI_SCADENZA = 14;
 
-interface Operatore {
-  id: string;
-  nome: string;
-}
-
 interface ProgettiKanbanProps {
   q: string;
   clienteId: string;
   // Incrementato dalla pagina dopo una creazione o un'eliminazione.
   versione: number;
+  // Totale progetti del kanban, riportato alla pagina: il conteggio della
+  // SectionBar sta fuori da qui, e nel kanban la lista della griglia non viene
+  // caricata (era una query doppia per lo stesso dato).
+  onTotale?: (n: number) => void;
 }
 
 const CHIUSI = new Set(["COMPLETATO", "ANNULLATO"]);
@@ -51,13 +52,17 @@ function perScadenza(a: ProgettoListRow, b: ProgettoListRow) {
 // domani compare sia in "In corso" sia in "In scadenza", e "Tutti" li contiene
 // tutti. Per questo i dati stanno in un'unica lista: una riassegnazione si
 // vede subito in ogni colonna in cui compare il progetto.
-export default function ProgettiKanban({ q, clienteId, versione }: ProgettiKanbanProps) {
+export default function ProgettiKanban({ q, clienteId, versione, onTotale }: ProgettiKanbanProps) {
   const [progetti, setProgetti] = useState<ProgettoListRow[]>([]);
   const [totale, setTotale] = useState(0);
-  const [operatori, setOperatori] = useState<Operatore[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [salvando, setSalvando] = useState<string | null>(null);
+
+  // In un ref: la callback della pagina e' una arrow inline e cambierebbe a
+  // ogni render, ricreando `carica` e quindi ricaricando il kanban da zero.
+  const onTotaleRef = useRef(onTotale);
+  onTotaleRef.current = onTotale;
 
   const carica = useCallback(async () => {
     const params = new URLSearchParams({
@@ -67,14 +72,26 @@ export default function ProgettiKanban({ q, clienteId, versione }: ProgettiKanba
       paginaSize: String(LIMITE),
     });
     if (clienteId) params.set("cliente_id", clienteId);
-    setLoading(true);
+    const url = `/api/progetti?${params.toString()}`;
+
+    // Dato gia' visto: si mostra subito, la richiesta parte comunque.
+    const subito = datoImmediato<{ progetti: ProgettoListRow[]; totale: number }>(url);
+    if (subito) {
+      setProgetti(subito.progetti ?? []);
+      setTotale(subito.totale ?? 0);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     setError("");
     try {
-      const res = await fetch(`/api/progetti?${params.toString()}`);
-      if (!res.ok) throw new Error(`Errore ${res.status}`);
-      const data = await res.json();
-      setProgetti((data.progetti ?? []) as ProgettoListRow[]);
-      setTotale((data.totale ?? 0) as number);
+      const data = await caricaApi<{ progetti: ProgettoListRow[]; totale: number }>(url);
+      setProgetti(data.progetti ?? []);
+      const n = data.totale ?? 0;
+      setTotale(n);
+      // Il conteggio e' l'unico dato che serve anche alla pagina: comunicarlo
+      // qui evita la seconda fetch della griglia solo per il numerino.
+      onTotaleRef.current?.(n);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di caricamento.");
     } finally {
@@ -83,34 +100,46 @@ export default function ProgettiKanban({ q, clienteId, versione }: ProgettiKanba
   }, [q, clienteId]);
 
   useEffect(() => {
+    // `versione` cambia dopo una creazione o un'eliminazione: in quel caso la
+    // cache e' gia' stata svuotata dalla scrittura, quindi la forza non serve.
     carica();
   }, [carica, versione]);
 
-  useEffect(() => {
-    fetch("/api/operatori")
-      .then((res) => (res.ok ? res.json() : { operatori: [] }))
-      .then((data) => setOperatori((data.operatori ?? []) as Operatore[]))
-      .catch(() => {});
-  }, []);
-
-  // Aggiornamento ottimistico: la select cambia subito, e se il server rifiuta
-  // si torna al valore precedente con un messaggio.
-  const assegna = async (id: string, responsabile: string) => {
-    const prima = progetti.find((p) => p.id === id)?.responsabile ?? null;
-    const nuovo = responsabile || null;
-    setProgetti((lista) => lista.map((p) => (p.id === id ? { ...p, responsabile: nuovo } : p)));
+  // Aggiornamento ottimistico: gli avatar cambiano subito, e se il server
+  // rifiuta si torna all'elenco precedente con un messaggio. Il primo nome va
+  // in `responsabile` (colonna storica), gli altri in `persone`.
+  const assegna = async (id: string, personeProgetto: string[]) => {
+    const precedente = progetti.find((p) => p.id === id);
+    if (!precedente) return;
+    const { primario, persone } = componiPersone(
+      personeProgetto[0] ?? null,
+      personeProgetto.slice(1)
+    );
+    setProgetti((lista) =>
+      lista.map((p) => (p.id === id ? { ...p, responsabile: primario, persone } : p))
+    );
     setSalvando(id);
     setError("");
     try {
       const res = await fetch(`/api/progetti/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ responsabile: nuovo }),
+        body: JSON.stringify({ responsabile: primario, persone }),
       });
       if (!res.ok) throw new Error();
     } catch {
-      setProgetti((lista) => lista.map((p) => (p.id === id ? { ...p, responsabile: prima } : p)));
-      setError("Assegnazione non salvata. Riprova.");
+      setProgetti((lista) =>
+        lista.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                responsabile: precedente.responsabile,
+                persone: precedente.persone,
+              }
+            : p
+        )
+      );
+      setError("Persone non salvate. Riprova.");
     } finally {
       setSalvando(null);
     }
@@ -180,9 +209,8 @@ export default function ProgettiKanban({ q, clienteId, versione }: ProgettiKanba
                   <RigaProgetto
                     key={p.id}
                     progetto={p}
-                    operatori={operatori}
                     salvando={salvando === p.id}
-                    onAssegna={(nome) => assegna(p.id, nome)}
+                    onAssegna={(persone) => assegna(p.id, persone)}
                   />
                 ))}
               </ul>
@@ -203,12 +231,11 @@ export default function ProgettiKanban({ q, clienteId, versione }: ProgettiKanba
 
 interface RigaProgettoProps {
   progetto: ProgettoListRow;
-  operatori: Operatore[];
   salvando: boolean;
-  onAssegna: (nome: string) => void;
+  onAssegna: (persone: string[]) => void;
 }
 
-function RigaProgetto({ progetto: p, operatori, salvando, onAssegna }: RigaProgettoProps) {
+function RigaProgetto({ progetto: p, salvando, onAssegna }: RigaProgettoProps) {
   const chiuso = CHIUSI.has(p.stato);
   return (
     <li className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-crema-scuro/50">
@@ -222,13 +249,19 @@ function RigaProgetto({ progetto: p, operatori, salvando, onAssegna }: RigaProge
         {p.nome}
       </Link>
       <Scadenza data={p.data_fine} chiuso={chiuso} />
-      <Assegnatario
-        nomeProgetto={p.nome}
-        valore={p.responsabile ?? ""}
-        operatori={operatori}
-        disabled={salvando}
-        onChange={onAssegna}
-      />
+      {/* Persone: avatar cliccabili con lo stesso editor della card e della
+          pagina del progetto. Nella riga stretta del kanban si vedono solo le
+          facce; i nomi stanno nel popover. */}
+      <div className="shrink-0">
+        <PersoneCondivise
+          persone={tutteLePersone(p.responsabile, p.persone)}
+          onCambia={onAssegna}
+          titolo={`Persone sul progetto ${p.nome}`}
+          vuoto=""
+          allinea="destra"
+          disabled={salvando}
+        />
+      </div>
     </li>
   );
 }
@@ -264,49 +297,3 @@ function Scadenza({ data, chiuso }: { data: string | null; chiuso: boolean }) {
   );
 }
 
-interface AssegnatarioProps {
-  nomeProgetto: string;
-  valore: string;
-  operatori: Operatore[];
-  disabled: boolean;
-  onChange: (nome: string) => void;
-}
-
-// Select nativa vestita da pillola con avatar: tastiera, screen reader e
-// mobile funzionano gratis, e sul telefono si apre il picker di sistema.
-function Assegnatario({ nomeProgetto, valore, operatori, disabled, onChange }: AssegnatarioProps) {
-  // `responsabile` e' testo libero: un nome storico che non corrisponde a
-  // nessun operatore attivo va comunque mostrato, altrimenti la select
-  // indicherebbe "Non assegnato" mentendo.
-  const fuoriLista = valore !== "" && !operatori.some((o) => o.nome === valore);
-  const iniziale = valore.trim()[0]?.toUpperCase();
-
-  return (
-    <div className={`relative w-32 shrink-0 ${disabled ? "opacity-60" : ""}`}>
-      <span
-        className={`pointer-events-none absolute left-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-[11px] font-semibold ${
-          iniziale ? "bg-lime text-lime-testo" : "border border-dashed border-caldo-testo/50 text-caldo-testo"
-        }`}
-        aria-hidden="true"
-      >
-        {iniziale ?? "+"}
-      </span>
-      <select
-        value={valore}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={`Assegna il progetto ${nomeProgetto}`}
-        className="h-8 w-full cursor-pointer appearance-none truncate rounded-full border border-crema-contorno bg-white pl-8 pr-6 text-xs font-medium text-inchiostro transition hover:border-caldo-testo/40 focus:outline-none focus:ring-2 focus:ring-inchiostro disabled:cursor-wait"
-      >
-        <option value="">Non assegnato</option>
-        {fuoriLista && <option value={valore}>{valore}</option>}
-        {operatori.map((o) => (
-          <option key={o.id} value={o.nome}>
-            {o.nome}
-          </option>
-        ))}
-      </select>
-      <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-caldo-testo" />
-    </div>
-  );
-}

@@ -4,7 +4,7 @@ import { readFile } from "fs/promises";
 import { getTicket } from "@/lib/tickets";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
-import { emailNuovaNota } from "@/lib/email-templates";
+import { emailAggiornamentoCliente } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
 import type { TechnicalNote, Allegato } from "@/lib/types";
 
@@ -64,13 +64,26 @@ export async function POST(
     }
   }
 
-  const noteOperatore = note.operatore ?? "Operatore";
-  const html = emailNuovaNota({
+  // Il testo per il cliente arriva dalla dialog di conferma (editato
+  // dall'operatore): qui NON si riusa il contenuto tecnico della nota
+  // (problema/soluzione), che e' pensato per il team, non per il cliente.
+  const body = (await request.json().catch(() => ({}))) as {
+    titolo?: string;
+    messaggio?: string;
+  };
+  const messaggio = body.messaggio?.trim();
+  if (!messaggio) {
+    return NextResponse.json(
+      { error: "Messaggio per il cliente obbligatorio." },
+      { status: 400 }
+    );
+  }
+
+  const html = emailAggiornamentoCliente({
     numero: ticket.numero,
     cliente: ticket.cliente,
-    titoloNota: note.titolo,
-    soluzione: note.soluzione,
-    operatore: noteOperatore,
+    titolo: body.titolo?.trim() || note.titolo || "Aggiornamento",
+    messaggio,
     allegati: allegati.map((a) => a.nome_originale),
   });
 

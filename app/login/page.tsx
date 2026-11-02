@@ -3,11 +3,12 @@
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { HeadsetIcon, LockClosedIcon, MailIcon, EyeIcon, EyeSlashIcon, LoaderIcon } from "@/components/icons";
+import { redirectSicuro } from "@/lib/redirect";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? "/";
+  const redirect = redirectSicuro(searchParams.get("redirect"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

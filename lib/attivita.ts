@@ -1,14 +1,16 @@
 import { db } from "./db";
+import { parsePersone, serializzaPersone } from "./persone";
+import { setEtichetteAttivita, getEtichettePerAttivita } from "./etichette";
 import {
   marcaDaCancellare,
   rimuoviEventoAttivita,
   sincronizzaAttivita,
 } from "./google-sync";
 import type {
-  AttivitaCalendario,
   AttivitaInput,
   AttivitaRow,
   AttivitaUpdate,
+  Etichetta,
   EventoCalendario,
   StatoAttivita,
 } from "./types";
@@ -49,7 +51,7 @@ function avviaSyncInBackground(attivitaId: string): void {
 // dominio di `attivita`.
 const ROW_FIELDS = `
   a.id, a.progetto_id, a.cliente_id, a.titolo, a.descrizione, a.stato, a.priorita,
-  a.data_inizio, a.data_scadenza, a.data_completamento, a.assegnatario,
+  a.data_inizio, a.data_scadenza, a.data_completamento, a.assegnatario, a.persone,
   a.data_creazione, a.data_aggiornamento,
   ag.stato         AS google_stato,
   ag.ultimo_errore AS google_ultimo_errore,
@@ -66,6 +68,12 @@ function nowISO(): string {
   return new Date().toISOString();
 }
 
+// `persone` e' TEXT con un array JSON: qui diventa un array vero, una volta
+// sola, per tutte le letture. I componenti non devono mai vedere la stringa.
+function normalizza(row: Record<string, unknown>): AttivitaRow {
+  return { ...row, persone: parsePersone(row.persone) } as unknown as AttivitaRow;
+}
+
 export async function listAttivitaProgetto(progettoId: string): Promise<AttivitaRow[]> {
   const rows = await db
     .prepare(
@@ -74,7 +82,7 @@ export async function listAttivitaProgetto(progettoId: string): Promise<Attivita
        ORDER BY a.data_scadenza IS NULL, a.data_scadenza ASC, a.rowid DESC`
     )
     .all({ progetto_id: progettoId });
-  return rows as unknown as AttivitaRow[];
+  return (rows as unknown as Record<string, unknown>[]).map(normalizza);
 }
 
 // Eventi fuori progetto, con filtro opzionale sull'intervallo di scadenza.
@@ -110,14 +118,14 @@ export async function listEventiSenzaProgetto(opts?: {
        LIMIT @limit`
     )
     .all(params);
-  return rows as unknown as AttivitaRow[];
+  return (rows as unknown as Record<string, unknown>[]).map(normalizza);
 }
 
 export async function getAttivita(id: string): Promise<AttivitaRow | null> {
   const row = await db
     .prepare(`SELECT ${ROW_FIELDS} FROM ${FROM_ATTIVITA} WHERE a.id = ?`)
     .get(id);
-  return (row as unknown as AttivitaRow | undefined) ?? null;
+  return row ? normalizza(row as unknown as Record<string, unknown>) : null;
 }
 
 export async function insertAttivita(input: AttivitaInput): Promise<AttivitaRow> {
@@ -129,11 +137,11 @@ export async function insertAttivita(input: AttivitaInput): Promise<AttivitaRow>
     .prepare(
       `INSERT INTO attivita (
          id, progetto_id, cliente_id, titolo, descrizione, stato, priorita,
-         data_inizio, data_scadenza, data_completamento, assegnatario,
+         data_inizio, data_scadenza, data_completamento, assegnatario, persone,
          data_creazione, data_aggiornamento
        ) VALUES (
          @id, @progetto_id, @cliente_id, @titolo, @descrizione, @stato, @priorita,
-         @data_inizio, @data_scadenza, @data_completamento, @assegnatario,
+         @data_inizio, @data_scadenza, @data_completamento, @assegnatario, @persone,
          @data_creazione, @data_aggiornamento
        )`
     )
@@ -150,9 +158,17 @@ export async function insertAttivita(input: AttivitaInput): Promise<AttivitaRow>
       // Coerente con updateAttivita: completata => data di completamento valorizzata.
       data_completamento: stato === "COMPLETATA" ? ts : null,
       assegnatario: input.assegnatario ?? null,
+      persone: serializzaPersone(input.persone),
       data_creazione: ts,
       data_aggiornamento: ts,
     });
+
+  // Etichette: la pivot si scrive DOPO che la riga esiste. La chiamata e'
+  // best effort come la sync Google: un errore qui non deve perdere
+  // l'attivita' appena creata.
+  if (input.etichette && input.etichette.length > 0) {
+    await setEtichetteAttivita(id, input.etichette);
+  }
 
   // Sincronizzazione in background: un errore verso Google diventa una riga in
   // stato ERRORE, non un fallimento del salvataggio.
@@ -185,6 +201,7 @@ export async function updateAttivita(
   if (patch.data_inizio !== undefined) { sets.push("data_inizio = @data_inizio"); params.data_inizio = patch.data_inizio ?? null; }
   if (patch.data_scadenza !== undefined) { sets.push("data_scadenza = @data_scadenza"); params.data_scadenza = patch.data_scadenza ?? null; }
   if (patch.assegnatario !== undefined) { sets.push("assegnatario = @assegnatario"); params.assegnatario = patch.assegnatario ?? null; }
+  if (patch.persone !== undefined) { sets.push("persone = @persone"); params.persone = serializzaPersone(patch.persone); }
 
   if (patch.stato !== undefined) {
     sets.push("stato = @stato");
@@ -203,6 +220,12 @@ export async function updateAttivita(
   params.data_aggiornamento = ts;
 
   await db.prepare(`UPDATE attivita SET ${sets.join(", ")} WHERE id = @id`).run(params);
+
+  // Etichette: set sostitutivo, scritto DOPO la riga. Best effort come la
+  // sync Google: un errore qui non deve perdere la modifica ai campi.
+  if (patch.etichette !== undefined) {
+    await setEtichetteAttivita(id, patch.etichette);
+  }
 
   const row = await getAttivita(id);
 
@@ -229,8 +252,12 @@ export async function deleteAttivita(
     await rimuoviEventoAttivita(id);
   }
 
-  const res = await db.prepare("DELETE FROM attivita WHERE id = ?").run(id);
-  return res.changes > 0;
+  // La pivot non ha cascata applicata dal DB: la pulizia e' obbligatoria qui.
+  const risultati = await db.batch([
+    { sql: "DELETE FROM attivita_etichette WHERE attivita_id = ?", params: [id] },
+    { sql: "DELETE FROM attivita WHERE id = ?", params: [id] },
+  ]);
+  return (risultati[1]?.changes ?? 0) > 0;
 }
 
 // Cancellazione in massa delle attivita' di un progetto, senza chiamare Google.
@@ -244,6 +271,12 @@ export async function eliminaAttivitaProgetto(
   await db.batch([
     {
       sql: `UPDATE attivita_google SET stato = 'DA_CANCELLARE', ultimo_errore = NULL
+            WHERE attivita_id IN (SELECT id FROM attivita WHERE progetto_id = @progetto_id)`,
+      params: { progetto_id: progettoId },
+    },
+    {
+      // La pivot non ha cascata: si pulisce prima di cancellare le righe.
+      sql: `DELETE FROM attivita_etichette
             WHERE attivita_id IN (SELECT id FROM attivita WHERE progetto_id = @progetto_id)`,
       params: { progetto_id: progettoId },
     },
@@ -278,6 +311,7 @@ export async function listEventiCalendario(opts: {
   progetto_id?: string;
   cliente_id?: string;
   stato?: StatoAttivita | "TUTTE";
+  etichetta_id?: string;
 }): Promise<EventoCalendario[]> {
   const where: string[] = ["a.data_scadenza >= @dal", "a.data_scadenza <= @al"];
   const params: Record<string, string> = { dal: opts.dal, al: opts.al };
@@ -296,12 +330,20 @@ export async function listEventiCalendario(opts: {
     where.push("a.stato = @stato");
     params.stato = opts.stato;
   }
+  if (opts.etichetta_id) {
+    // Solo gli eventi che portano l'etichetta: EXISTS sulla pivot, costa
+    // pochi seek con l'indice (attivita_id, etichetta_id).
+    where.push(
+      "EXISTS (SELECT 1 FROM attivita_etichette ae WHERE ae.attivita_id = a.id AND ae.etichetta_id = @etichetta_id)"
+    );
+    params.etichetta_id = opts.etichetta_id;
+  }
 
   const rows = await db
     .prepare(
       `SELECT a.id, a.progetto_id, a.cliente_id, a.titolo, a.descrizione, a.stato,
               a.priorita, a.data_inizio, a.data_scadenza, a.data_completamento,
-              a.assegnatario, a.data_creazione, a.data_aggiornamento,
+              a.assegnatario, a.persone, a.data_creazione, a.data_aggiornamento,
               ag.stato         AS google_stato,
               ag.ultimo_errore AS google_ultimo_errore,
               ag.data_sync     AS google_data_sync,
@@ -318,8 +360,25 @@ export async function listEventiCalendario(opts: {
     )
     .all(params);
 
-  return (rows as unknown as AttivitaCalendario[]).map((r) => {
-    const evento: EventoCalendario = { ...r, tipo: "attivita" };
+  // Le etichette arrivano con un secondo round-trip (una sola query per
+  // tutti gli id): SQLite non ha un modo pulito di fare JSON aggregation
+  // multi-join qui, e il calendario e' l'unico caller che le vuole.
+  const etichettePerId = await getEtichettePerAttivita(
+    (rows as unknown as { id: string }[]).map((r) => r.id)
+  );
+
+  return (rows as unknown as Record<string, unknown>[]).map((r): EventoCalendario => {
+    const evento: EventoCalendario = {
+      ...normalizza(r),
+      // Le tre colonne del JOIN ci sono gia' nella riga, ma `normalizza`
+      // restituisce il tipo base dell'attivita': qui vanno riportate perche'
+      // il calendario le mostra (nome e codice del progetto, ragione sociale).
+      progetto_nome: (r.progetto_nome as string | null) ?? null,
+      progetto_codice: (r.progetto_codice as string | null) ?? null,
+      cliente_ragione_sociale: (r.cliente_ragione_sociale as string | null) ?? null,
+      etichette: etichettePerId.get(r.id as string) ?? [],
+      tipo: "attivita",
+    };
     return evento;
   });
 }

@@ -51,11 +51,11 @@ export default function AppHeader({ children, azioni, bersaglioTimer = null }: A
             l'orologio, e deve seguire la pagina senza spostarsi. Sullo sfondo
             nero usa il tema scuro (pillola lime quando corre). */}
         <CronometroHeader tema="scuro" bersaglio={bersaglioTimer} />
+        {/* Punto di stato, senza `animate-ping`: un'animazione che gira per
+            sempre su ogni pagina consuma compositing per un segnale che non
+            cambia mai. Il puntino fermo dice la stessa cosa. */}
         <span className="ml-auto mr-3 flex shrink-0 items-center gap-2 text-xs text-white/60">
-          <span className="relative flex h-2 w-2" aria-hidden="true">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-lime" />
-          </span>
+          <span className="h-2 w-2 rounded-full bg-lime" aria-hidden="true" />
           <span className="hidden lg:inline">Sincronizzato</span>
         </span>
       </div>

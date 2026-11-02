@@ -29,17 +29,16 @@ import type { VoceTempoEstesa } from "@/lib/types";
 // accumula secondi (un intervallo deriva col tempo, e a scheda in background
 // il browser lo rallenta). Un tick al secondo serve solo a far ri-renderizzare
 // il numero.
+//
+// TRE CONTESTI, NON UNO. Con un solo oggetto, il tick da 1 s cambiava il value
+// e React ri-renderizzava OGNI consumatore — quindi l'intera pagina del
+// progetto e tutte le righe della board, una volta al secondo, per aggiornare
+// una cifra. Con tre contesti separati il tick invalida solo chi legge il
+// numero; chi legge lo stato (chi e' aperto) cambia solo su start/stop, e le
+// azioni non cambiano mai dopo il mount.
 // ===========================================================================
 
-interface TempiContextValue {
-  // Voce attualmente in corso, se c'e'.
-  aperta: VoceTempoEstesa | null;
-  // Ultime voci dell'operatore, per il pannello a tendina.
-  voci: VoceTempoEstesa[];
-  caricamento: boolean;
-  errore: string;
-  // Secondi trascorsi della voce aperta. Si aggiorna ogni secondo.
-  secondi: number;
+interface TempiAzioni {
   // Avvia (o sposta) il cronometro. Chiude l'eventuale voce in corso.
   avvia: (bersaglio: { attivita_id?: string; ticket_id?: string; descrizione?: string }) => Promise<void>;
   ferma: () => Promise<void>;
@@ -50,17 +49,59 @@ interface TempiContextValue {
   inCorsoSu: (bersaglio: { attivita_id?: string; ticket_id?: string }) => boolean;
 }
 
-const TempiContext = createContext<TempiContextValue | null>(null);
+interface TempiStato {
+  // Voce attualmente in corso, se c'e'.
+  aperta: VoceTempoEstesa | null;
+  // Ultime voci dell'operatore, per il pannello a tendina.
+  voci: VoceTempoEstesa[];
+  caricamento: boolean;
+  errore: string;
+}
 
-export function useTempi(): TempiContextValue {
-  const ctx = useContext(TempiContext);
-  if (!ctx) {
-    // Errore esplicito invece di un default silenzioso: un componente fuori
-    // dal provider mostrerebbe uno stato vuoto per sempre, che sembra un bug
-    // del backend.
-    throw new Error("useTempi va usato dentro <TempiProvider>.");
-  }
+const AzioniContext = createContext<TempiAzioni | null>(null);
+const StatoContext = createContext<TempiStato | null>(null);
+const TickContext = createContext<number>(0);
+
+function useAzioni(): TempiAzioni {
+  const ctx = useContext(AzioniContext);
+  // Errore esplicito invece di un default silenzioso: un componente fuori
+  // dal provider mostrerebbe uno stato vuoto per sempre, che sembra un bug
+  // del backend.
+  if (!ctx) throw new Error("useTempiAzioni va usato dentro <TempiProvider>.");
   return ctx;
+}
+
+function useStateTempi(): TempiStato {
+  const ctx = useContext(StatoContext);
+  if (!ctx) throw new Error("useTempiStato va usato dentro <TempiProvider>.");
+  return ctx;
+}
+
+// Solo le azioni: non cambiano mai, quindi il componente non si ridisegna ne'
+// al tick ne' su start/stop.
+export function useTempiAzioni(): TempiAzioni {
+  return useAzioni();
+}
+
+// Solo lo stato: cambia su start/stop, MAI al tick.
+export function useTempiStato(): TempiStato {
+  return useStateTempi();
+}
+
+// Solo il numero: e' l'unico che cambia ogni secondo. Da usare in un componente
+// foglia dedicato (es. <CifraCronometro />), non in una riga di tabella.
+export function useSecondi(): number {
+  return useContext(TickContext);
+}
+
+// Compatibilita': unisce i tre. Chi lo usa si ridisegna ogni secondo, quindi i
+// consumatori esistenti sono stati migrati ai tre hook sopra; questo resta per
+// non rompere eventuali usi futuri che hanno davvero bisogno di tutto insieme.
+export function useTempi(): TempiStato & TempiAzioni & { secondi: number } {
+  const stato = useStateTempi();
+  const azioni = useAzioni();
+  const secondi = useContext(TickContext);
+  return useMemo(() => ({ ...stato, ...azioni, secondi }), [stato, azioni, secondi]);
 }
 
 export function TempiProvider({ children }: { children: ReactNode }) {
@@ -76,6 +117,15 @@ export function TempiProvider({ children }: { children: ReactNode }) {
   // corsa che lo state non intercetta, perche' il setState e' asincrono.
   const inVolo = useRef(false);
 
+  // Specchio sincrono di `aperta`, cosi' `ferma` e `inCorsoSu` non devono
+  // elencarlo nelle dipendenze. Erano le due uniche azioni che cambiavano a
+  // ogni start/stop, e quindi le uniche a invalidare chi le usa.
+  const apertaRef = useRef<VoceTempoEstesa | null>(null);
+  const applicaAperta = useCallback((voce: VoceTempoEstesa | null) => {
+    apertaRef.current = voce;
+    setAperta(voce);
+  }, []);
+
   const carica = useCallback(async () => {
     try {
       const res = await fetch("/api/tempi", { cache: "no-store" });
@@ -85,7 +135,7 @@ export function TempiProvider({ children }: { children: ReactNode }) {
       if (res.status === 401) return;
       if (!res.ok) throw new Error(`Errore ${res.status}`);
       const data = (await res.json()) as { aperta: VoceTempoEstesa | null; voci: VoceTempoEstesa[] };
-      setAperta(data.aperta ?? null);
+      applicaAperta(data.aperta ?? null);
       setVoci(data.voci ?? []);
       setErrore("");
     } catch (err) {
@@ -93,7 +143,7 @@ export function TempiProvider({ children }: { children: ReactNode }) {
     } finally {
       setCaricamento(false);
     }
-  }, []);
+  }, [applicaAperta]);
 
   useEffect(() => {
     carica();
@@ -130,7 +180,7 @@ export function TempiProvider({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
         // Lo stato si allinea alla RISPOSTA, non all'ottimismo: e' il server a
         // sapere quale voce e' rimasta aperta dopo aver chiuso la precedente.
-        setAperta(data as VoceTempoEstesa);
+        applicaAperta(data as VoceTempoEstesa);
         setAdesso(Date.now());
         await carica();
       } catch (err) {
@@ -140,19 +190,20 @@ export function TempiProvider({ children }: { children: ReactNode }) {
         setRichiestaInCorso(false);
       }
     },
-    [carica]
+    [applicaAperta, carica]
   );
 
   const ferma = useCallback(async () => {
-    if (inVolo.current || !aperta) return;
+    const voce = apertaRef.current;
+    if (inVolo.current || !voce) return;
     inVolo.current = true;
     setRichiestaInCorso(true);
     setErrore("");
     try {
-      const res = await fetch(`/api/tempi/${aperta.id}`, { method: "PATCH" });
+      const res = await fetch(`/api/tempi/${voce.id}`, { method: "PATCH" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
-      setAperta(null);
+      applicaAperta(null);
       await carica();
     } catch (err) {
       setErrore(err instanceof Error ? err.message : "Errore di arresto.");
@@ -160,7 +211,7 @@ export function TempiProvider({ children }: { children: ReactNode }) {
       inVolo.current = false;
       setRichiestaInCorso(false);
     }
-  }, [aperta, carica]);
+  }, [applicaAperta, carica]);
 
   const elimina = useCallback(
     async (id: string) => {
@@ -177,33 +228,37 @@ export function TempiProvider({ children }: { children: ReactNode }) {
     [carica]
   );
 
-  const inCorsoSu = useCallback(
-    (bersaglio: { attivita_id?: string; ticket_id?: string }) => {
-      if (!aperta) return false;
-      if (bersaglio.attivita_id) return aperta.attivita_id === bersaglio.attivita_id;
-      if (bersaglio.ticket_id) return aperta.ticket_id === bersaglio.ticket_id;
-      // Nessun id: e' il tempo generico, che corrisponde solo a una voce
-      // generica (nessuno dei due id valorizzato).
-      return !aperta.attivita_id && !aperta.ticket_id;
-    },
-    [aperta]
+  const inCorsoSu = useCallback((bersaglio: { attivita_id?: string; ticket_id?: string }) => {
+    const voce = apertaRef.current;
+    if (!voce) return false;
+    if (bersaglio.attivita_id) return voce.attivita_id === bersaglio.attivita_id;
+    if (bersaglio.ticket_id) return voce.ticket_id === bersaglio.ticket_id;
+    // Nessun id: e' il tempo generico, che corrisponde solo a una voce
+    // generica (nessuno dei due id valorizzato).
+    return !voce.attivita_id && !voce.ticket_id;
+  }, []);
+
+  // Stabile per costruzione: tutte le funzioni sopra leggono da ref o da
+  // callback con dipendenze stabili.
+  const azioni = useMemo<TempiAzioni>(
+    () => ({ avvia, ferma, elimina, ricarica: carica, inCorsoSu }),
+    [avvia, ferma, elimina, carica, inCorsoSu]
   );
 
-  const value = useMemo<TempiContextValue>(
-    () => ({
-      aperta,
-      voci,
-      caricamento: caricamento || richiestaInCorso,
-      errore,
-      secondi,
-      avvia,
-      ferma,
-      elimina,
-      ricarica: carica,
-      inCorsoSu,
-    }),
-    [aperta, voci, caricamento, richiestaInCorso, errore, secondi, avvia, ferma, elimina, carica, inCorsoSu]
+  // Cambia solo su start/stop, non al tick.
+  const stato = useMemo<TempiStato>(
+    () => ({ aperta, voci, caricamento: caricamento || richiestaInCorso, errore }),
+    [aperta, voci, caricamento, richiestaInCorso, errore]
   );
 
-  return <TempiContext.Provider value={value}>{children}</TempiContext.Provider>;
+  return (
+    <AzioniContext.Provider value={azioni}>
+      <StatoContext.Provider value={stato}>
+        {/* Il numero e' l'unico valore che cambia ogni secondo. I `children`
+            passano per identita': React non li ridisegna quando cambia solo
+            questo provider. */}
+        <TickContext.Provider value={secondi}>{children}</TickContext.Provider>
+      </StatoContext.Provider>
+    </AzioniContext.Provider>
+  );
 }

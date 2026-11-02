@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   listNotifications,
+  listNotificationsConConteggio,
   getUnreadCount,
   markAllAsRead,
   createNotification,
@@ -17,8 +18,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ count: n });
     }
 
-    const notifications = await listNotifications({ solo_non_lette: soloNonLette });
-    const count = await getUnreadCount();
+    const { notifications, count } = await listNotificationsConConteggio({ solo_non_lette: soloNonLette });
     return NextResponse.json({ notifications, count });
   } catch (err) {
     console.error("GET /api/notifications", err);

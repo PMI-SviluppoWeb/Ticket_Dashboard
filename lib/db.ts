@@ -223,6 +223,9 @@ CREATE TABLE IF NOT EXISTS progetti (
                      CHECK (stato IN ('PIANIFICATO','IN_CORSO','IN_PAUSA','COMPLETATO','ANNULLATO')),
   priorita           TEXT NOT NULL DEFAULT 'MEDIA' CHECK (priorita IN ('BASSA','MEDIA','ALTA')),
   responsabile       TEXT,
+  -- Collaboratori oltre al responsabile: array JSON di nomi (lib/persone.ts).
+  -- Il responsabile NON si ripete qui: e' il primo nome, nella colonna sopra.
+  persone            TEXT NOT NULL DEFAULT '[]',
   data_inizio        TEXT,
   data_fine          TEXT,
   note               TEXT,
@@ -247,6 +250,10 @@ CREATE TABLE IF NOT EXISTS attivita (
   data_scadenza      TEXT,
   data_completamento TEXT,
   assegnatario       TEXT,
+  -- Collaboratori oltre all'assegnatario: array JSON di nomi (lib/persone.ts).
+  -- L'assegnatario NON si ripete qui: Google Calendar e la dashboard leggono
+  -- quella colonna, e due elenchi divergerebbero.
+  persone            TEXT NOT NULL DEFAULT '[]',
   data_creazione     TEXT NOT NULL,
   data_aggiornamento TEXT NOT NULL
 );
@@ -255,6 +262,28 @@ CREATE INDEX IF NOT EXISTS idx_attivita_progetto ON attivita (progetto_id);
 CREATE INDEX IF NOT EXISTS idx_attivita_cliente  ON attivita (cliente_id);
 CREATE INDEX IF NOT EXISTS idx_attivita_scadenza ON attivita (data_scadenza);
 CREATE INDEX IF NOT EXISTS idx_attivita_stato    ON attivita (stato);
+
+-- Etichette personalizzate del calendario. Il colore e' un hex libero
+-- scelto dall'utente: la leggibilita' sui chip piccoli e' garantita dal
+-- calcolo della luminanza lato client (testo bianco/nero), non da una
+-- lista di token.
+CREATE TABLE IF NOT EXISTS etichette (
+  id             TEXT PRIMARY KEY,
+  nome           TEXT NOT NULL UNIQUE,
+  colore         TEXT NOT NULL DEFAULT '#6B7280',
+  data_creazione TEXT NOT NULL
+);
+
+-- Assegnazione N:N tra attivita' ed etichette. Senza foreign key
+-- applicate (coerente col resto del DB): la pulizia orfani la fa la
+-- DELETE dell'etichetta.
+CREATE TABLE IF NOT EXISTS attivita_etichette (
+  attivita_id   TEXT NOT NULL,
+  etichetta_id  TEXT NOT NULL,
+  PRIMARY KEY (attivita_id, etichetta_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attivita_etichette_etichetta ON attivita_etichette (etichetta_id);
 
 CREATE TABLE IF NOT EXISTS progetti_tickets (
   id             TEXT PRIMARY KEY,
@@ -349,6 +378,19 @@ async function initSchema(): Promise<void> {
   // serie, cioe' 50 round-trip (~10s su un DB remoto) pagati al primo accesso
   // di ogni processo. Gli statement sono idempotenti (`IF NOT EXISTS`).
   await client.executeMultiple(SCHEMA);
+
+  // Aggiunta di colonne (non dati): deve girare a OGNI avvio, anche su un
+  // database che ha gia' registrato la versione dello schema. Il gate sotto
+  // protegge le migrazioni pesanti (o di dati), non queste. `CREATE TABLE IF
+  // NOT EXISTS` sopra non tocca una tabella esistente, quindi senza questo
+  // blocco un DB gia' creato resterebbe senza `persone` e ogni SELECT
+  // fallirebbe con "no such column".
+  try {
+    await getClient().execute("ALTER TABLE progetti ADD COLUMN persone TEXT NOT NULL DEFAULT '[]'");
+  } catch { /* Column already exists */ }
+  try {
+    await getClient().execute("ALTER TABLE attivita ADD COLUMN persone TEXT NOT NULL DEFAULT '[]'");
+  } catch { /* Column already exists */ }
 
   // Le migrazioni sotto restano idempotenti, ma la pulizia dei contatti legge
   // tutta la tabella `tickets`: gira una volta per database, non a ogni avvio.
@@ -499,6 +541,33 @@ function toRow(r: unknown): Row {
   return r as Row;
 }
 
+// Contatore diagnostico, spento salvo DB_TRACE=1. Serve a CONTARE le richieste
+// vere verso Turso per schermata: con un DB remoto "piu' veloce" senza numeri e'
+// un'opinione. Fuori dalla traccia il costo e' un `if` su una costante.
+const TRACE = process.env.DB_TRACE === "1";
+const contatori = { richieste: 0, msTotale: 0 };
+
+async function tracciata<T>(etichetta: string, sql: string, fn: () => Promise<T>): Promise<T> {
+  if (!TRACE) return fn();
+  const t0 = performance.now();
+  try {
+    return await fn();
+  } finally {
+    const ms = performance.now() - t0;
+    contatori.richieste += 1;
+    contatori.msTotale += ms;
+    console.log(`[db] ${ms.toFixed(0)}ms ${etichetta} ${sql.replace(/\s+/g, " ").slice(0, 90)}`);
+  }
+}
+
+// Snapshot dei contatori, azzerandoli: si chiama a inizio e fine schermata.
+export function dbStats(): { richieste: number; msTotale: number } {
+  const snapshot = { ...contatori };
+  contatori.richieste = 0;
+  contatori.msTotale = 0;
+  return snapshot;
+}
+
 // better-sqlite3 accetta anche uno scalare come binding posizionale
 // (es. db.prepare("... WHERE id = ?").get(id)); qui lo normalizziamo.
 function normalizeArgs(params?: Params): InArgs | undefined {
@@ -514,18 +583,24 @@ function prepare(sql: string) {
   return {
     async get(params?: Params): Promise<Row | undefined> {
       await ensureSchema();
-      const result = await getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) });
+      const result = await tracciata("get", sqlFixed, () =>
+        getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) })
+      );
       const row = result.rows[0];
       return row ? toRow(row) : undefined;
     },
     async all(params?: Params): Promise<Row[]> {
       await ensureSchema();
-      const result = await getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) });
+      const result = await tracciata("all", sqlFixed, () =>
+        getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) })
+      );
       return result.rows.map(toRow);
     },
     async run(params?: Params): Promise<{ changes: number }> {
       await ensureSchema();
-      const result = await getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) });
+      const result = await tracciata("run", sqlFixed, () =>
+        getClient().execute({ sql: sqlFixed, args: normalizeArgs(params) })
+      );
       return { changes: result.rowsAffected };
     },
   };
@@ -543,18 +618,46 @@ export const db = {
   async batch(statements: BatchStatement[]): Promise<{ changes: number }[]> {
     if (statements.length === 0) return [];
     await ensureSchema();
-    const risultati = await getClient().batch(
-      statements.map((s) => ({
-        sql: s.sql.replace(/@([A-Za-z0-9_]+)/g, ":$1"),
-        args: s.params,
-      })),
-      "write"
+    const risultati = await tracciata("batch", `${statements.length} statement`, () =>
+      getClient().batch(
+        statements.map((s) => ({
+          sql: s.sql.replace(/@([A-Za-z0-9_]+)/g, ":$1"),
+          args: normalizeArgs(s.params),
+        })),
+        "write"
+      )
     );
     return risultati.map((r) => ({ changes: r.rowsAffected }));
   },
+
+  // N SELECT indipendenti in UNA richiesta HTTP.
+  //
+  // Perche' esiste: il database e' remoto, quindi ogni `execute()` e' una
+  // richiesta di rete e la latenza si paga per richiesta, non per riga.
+  // `Promise.all` mette due query in parallelo ma emette DUE richieste; questo
+  // ne emette UNA. Lato server le SELECT vengono eseguite in sequenza, cioe'
+  // si sommano i microsecondi dell'SQL invece dei millisecondi del viaggio.
+  //
+  // Uso: solo per letture indipendenti. Una lista che dipende dal risultato
+  // della prima query non entra in un batch (non c'e' il risultato).
+  async batchRead(statements: BatchStatement[]): Promise<Row[][]> {
+    if (statements.length === 0) return [];
+    await ensureSchema();
+    const risultati = await tracciata("batchRead", `${statements.length} select`, () =>
+      getClient().batch(
+        statements.map((s) => ({
+          sql: s.sql.replace(/@([A-Za-z0-9_]+)/g, ":$1"),
+          args: normalizeArgs(s.params),
+        })),
+        "read"
+      )
+    );
+    return risultati.map((r) => r.rows.map(toRow));
+  },
+
   async exec(sql: string): Promise<void> {
     await ensureSchema();
-    await getClient().execute(sql);
+    await tracciata("exec", sql, () => getClient().execute(sql));
   },
   async ping(): Promise<void> {
     await ensureSchema();

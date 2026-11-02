@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTempi } from "@/components/TempiContext";
+import CronometroLive from "@/components/CronometroLive";
+import { useTempiAzioni, useTempiStato } from "@/components/TempiContext";
 import { ClockIcon, TimerIcon } from "@/components/icons";
-import { formatCronometro, formatDurata } from "@/lib/durata";
+import { formatDurata } from "@/lib/durata";
 import type { VoceTempoEstesa } from "@/lib/types";
 
 // ===========================================================================
@@ -40,7 +41,11 @@ export default function TimerBersaglio({
   compatto = false,
   minutiRegistrati: minutiDalChiamante,
 }: TimerBersaglioProps) {
-  const { aperta, secondi, inCorsoSu, avvia, ferma, caricamento } = useTempi();
+  // Stato e azioni separati: lo stato cambia solo su start/stop, le azioni mai.
+  // Il numero che scorre sta in <CronometroLive />, che e' l'unico a leggere il
+  // tick — questa riga non si ridisegna ogni secondo.
+  const { aperta, caricamento } = useTempiStato();
+  const { inCorsoSu, avvia, ferma } = useTempiAzioni();
   const [minutiLetti, setMinutiLetti] = useState<number | null>(null);
   const inCorso = inCorsoSu({ attivita_id, ticket_id });
   const minutiRegistrati = minutiDalChiamante ?? minutiLetti;
@@ -88,10 +93,10 @@ export default function TimerBersaglio({
     // il totale puo' essere cambiato, e l'unico motivo corretto per rileggerlo.
   }, [chiave, attivita_id, ticket_id, statoVoce, minutiDalChiamante]);
 
-  // Minuti della voce in corso su QUESTO bersaglio, sommati "al volo" ai
-  // minuti registrati: il totale mostrato e' quindi sempre aggiornato.
-  const minutiTotali =
-    minutiRegistrati == null ? null : minutiRegistrati + (inCorso ? Math.floor(secondi / 60) : 0);
+  // Il totale si mostra SOLO a cronometro fermo: mentre corre, al suo posto c'e'
+  // la cifra live. Quindi qui non serve il tick — e non leggerlo e' cio' che
+  // tiene fuori ogni riga della board dal ri-render al secondo.
+  const minutiTotali = minutiRegistrati ?? null;
 
   const avviaQua = () =>
     avvia(attivita_id ? { attivita_id } : ticket_id ? { ticket_id } : {});
@@ -126,9 +131,7 @@ export default function TimerBersaglio({
           {inCorso ? <span className="h-2 w-2 rounded-[2px] bg-current" /> : <TimerIcon className="h-3.5 w-3.5" />}
         </button>
         {inCorso ? (
-          <span className="tabular text-[11px] font-semibold text-inchiostro">
-            {formatCronometro(secondi)}
-          </span>
+          <CronometroLive className="tabular text-[11px] font-semibold text-inchiostro" />
         ) : minutiTotali !== null && minutiTotali > 0 ? (
           <span className="tabular text-[11px] font-medium text-caldo-testo">
             {formatDurata(minutiTotali)}
@@ -149,7 +152,7 @@ export default function TimerBersaglio({
           <p className="tabular mt-0.5 text-base font-semibold text-inchiostro">
             {inCorso ? (
               <>
-                {formatCronometro(secondi)}
+                <CronometroLive />
                 <span className="ml-1.5 text-xs font-medium text-caldo-testo">in corso</span>
               </>
             ) : minutiTotali === null ? (

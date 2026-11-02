@@ -57,6 +57,30 @@ export async function getUnreadCount(): Promise<number> {
   return (row?.n as number) ?? 0;
 }
 
+// Elenco e conteggio in UNA richiesta al DB. La campanella li chiede sempre
+// insieme, e separatamente erano due viaggi di rete ogni volta.
+export async function listNotificationsConConteggio(opts?: {
+  solo_non_lette?: boolean;
+  limit?: number;
+}): Promise<{ notifications: Notification[]; count: number }> {
+  const limit = opts?.limit ?? 50;
+  const where = opts?.solo_non_lette ? "WHERE letta = 0" : "";
+  const [rows, conteggio] = await db.batchRead([
+    {
+      sql: `SELECT id, titolo, messaggio, ticket_id, tipo, letta, data_creazione
+       FROM notifications ${where}
+       ORDER BY data_creazione DESC
+       LIMIT @limit`,
+      params: { limit },
+    },
+    { sql: `SELECT COUNT(*) AS n FROM notifications WHERE letta = 0` },
+  ]);
+  return {
+    notifications: rows.map((r) => ({ ...r, letta: !!r.letta })) as unknown as Notification[],
+    count: (conteggio[0]?.n as number) ?? 0,
+  };
+}
+
 export async function markAsRead(id: string): Promise<void> {
   await db.prepare(`UPDATE notifications SET letta = 1 WHERE id = @id`).run({ id });
 }

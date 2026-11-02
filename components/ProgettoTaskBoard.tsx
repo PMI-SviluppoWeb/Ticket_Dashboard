@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { AttivitaRow, StatoAttivita } from "@/lib/types";
 import { PriorityBadge } from "@/components/badges";
 import {
@@ -14,7 +14,9 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import { formatData } from "@/lib/calendario";
-import { iniziali, nuovoId, type ExtraTask, type Sezione } from "@/lib/task-local";
+import { tutteLePersone } from "@/lib/persone";
+import { nuovoId, type ExtraTask, type Sezione } from "@/lib/task-local";
+import PersoneCondivise from "@/components/PersoneCondivise";
 import TimerBersaglio from "@/components/TimerBersaglio";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +42,6 @@ const FILTRI: { value: StatoAttivita | "TUTTE"; label: string }[] = [
 
 interface ProgettoTaskBoardProps {
   attivita: AttivitaRow[];
-  operatori: { id: string; nome: string }[];
   sezioni: Sezione[];
   extra: Record<string, ExtraTask>;
   // Minuti registrati per task, gia' aggregati dal server in una sola query
@@ -50,18 +51,20 @@ interface ProgettoTaskBoardProps {
   minutiPerTask?: Record<string, number>;
   selezionataId: string | null;
   confermaEliminaId: string | null;
+  // Callback per ID, non per oggetto: la riga e' memoizzata, quindi le funzioni
+  // devono essere riferimenti stabili. Il chiamante le crea con useCallback.
   onSeleziona: (id: string) => void;
   onCambiaExtra: (attivitaId: string, patch: Partial<ExtraTask>) => void;
+  onCambiaPersone: (attivitaId: string, persone: string[]) => void;
   onCambiaSezioni: (sezioni: Sezione[]) => void;
   onCreaTask: (sezioneId: string, titolo: string) => Promise<void>;
-  onCompleta: (a: AttivitaRow, completata: boolean) => void;
-  onElimina: (a: AttivitaRow) => void;
+  onCompleta: (id: string, completata: boolean) => void;
+  onElimina: (id: string) => void;
   onAnnullaElimina: () => void;
 }
 
 export default function ProgettoTaskBoard({
   attivita,
-  operatori,
   sezioni,
   extra,
   minutiPerTask,
@@ -69,6 +72,7 @@ export default function ProgettoTaskBoard({
   confermaEliminaId,
   onSeleziona,
   onCambiaExtra,
+  onCambiaPersone,
   onCambiaSezioni,
   onCreaTask,
   onCompleta,
@@ -431,17 +435,16 @@ export default function ProgettoTaskBoard({
                           <RigaTask
                             key={a.id}
                             attivita={a}
-                            extra={extra[a.id] ?? {}}
+                            extra={extra[a.id] ?? EXTRA_VUOTO}
                             sezioni={sezioni}
                             sezioneId={sezione.id}
                             minutiRegistrati={minutiPerTask?.[a.id] ?? 0}
                             selezionata={selezionataId === a.id}
-                            onSeleziona={() => onSeleziona(a.id)}
-                            onCompleta={(v) => onCompleta(a, v)}
-                            onSposta={(idSezione) =>
-                              onCambiaExtra(a.id, { sezione: idSezione })
-                            }
-                            onElimina={() => onElimina(a)}
+                            onSeleziona={onSeleziona}
+                            onCompleta={onCompleta}
+                            onSposta={onCambiaExtra}
+                            onCambiaPersone={onCambiaPersone}
+                            onElimina={onElimina}
                             confermaElimina={confermaEliminaId === a.id}
                             onAnnullaElimina={onAnnullaElimina}
                           />
@@ -464,6 +467,10 @@ export default function ProgettoTaskBoard({
 // Riga di una task
 // ---------------------------------------------------------------------------
 
+// Elemento condiviso per le task senza stato locale: un oggetto nuovo a ogni
+// render (`extra[a.id] ?? {}`) renderebbe inutile il memo della riga.
+const EXTRA_VUOTO: ExtraTask = {};
+
 interface RigaTaskProps {
   attivita: AttivitaRow;
   extra: ExtraTask;
@@ -473,15 +480,25 @@ interface RigaTaskProps {
   // board: la riga non fa richieste proprie.
   minutiRegistrati: number;
   selezionata: boolean;
-  onSeleziona: () => void;
-  onCompleta: (completata: boolean) => void;
-  onSposta: (sezioneId: string) => void;
-  onElimina: () => void;
+  onSeleziona: (id: string) => void;
+  onCompleta: (id: string, completata: boolean) => void;
+  onSposta: (attivitaId: string, patch: Partial<ExtraTask>) => void;
+  // Persone della task: elenco completo (primo = assegnatario), salvato dal
+  // genitore con una PATCH. Sta fuori da `extra` perche' non e' stato locale.
+  onCambiaPersone: (attivitaId: string, persone: string[]) => void;
+  onElimina: (id: string) => void;
   confermaElimina: boolean;
   onAnnullaElimina: () => void;
 }
 
-function RigaTask({
+// `memo`: la board si ridisegna a ogni tasto digitato nell'input di creazione
+// rapida (lo stato vive li'), e senza memo ogni tasto ridisegnava tutte le
+// righe del progetto. Le prop della riga sono riferimenti stabili (vedi
+// EXTRA_VUOTO e le callback per id), quindi il confronto costa poco e salta
+// quasi sempre il sottoalbero.
+const RigaTask = memo(RigaTaskBase);
+
+function RigaTaskBase({
   attivita: a,
   extra,
   sezioni,
@@ -491,6 +508,7 @@ function RigaTask({
   onSeleziona,
   onCompleta,
   onSposta,
+  onCambiaPersone,
   onElimina,
   confermaElimina,
   onAnnullaElimina,
@@ -499,11 +517,8 @@ function RigaTask({
   const sotto = extra.sotto ?? [];
   const fatte = sotto.filter((s) => s.fatta).length;
   const commenti = extra.commenti ?? [];
-  // Il type predicate non e' cosmetico: `filter(Boolean)` lascia `string | null`
-  // e a valle `iniziali()` rifiuterebbe il null.
-  const persone = [a.assegnatario, ...(extra.persone ?? [])].filter(
-    (n): n is string => Boolean(n)
-  );
+  // Le persone sono ora PERSISTENTI sulla task: assegnatario + collaboratori.
+  const persone = tutteLePersone(a.assegnatario, a.persone);
 
   return (
     // Il contenitore e' cliccabile per intero, ma i controlli interni sono
@@ -512,7 +527,7 @@ function RigaTask({
     // drawer tramite onClick sul contenitore, e i bottoni fermano la
     // propagazione.
     <li
-      onClick={onSeleziona}
+      onClick={() => onSeleziona(a.id)}
       // La riga e' cliccabile per intero: senza tabIndex/role resterebbe
       // raggiungibile solo col mouse. Enter e Spazio aprono il drawer; i
       // bottoni interni, avendo il loro keydown nativo, funzionano come prima.
@@ -526,7 +541,7 @@ function RigaTask({
         if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onSeleziona();
+          onSeleziona(a.id);
         }
       }}
       className={`group/riga relative flex cursor-pointer items-start gap-3 border-l-2 py-2.5 pl-4 pr-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inchiostro ${
@@ -542,7 +557,7 @@ function RigaTask({
         aria-label={`Segna ${a.titolo} come ${completata ? "da fare" : "completata"}`}
         onClick={(e) => {
           e.stopPropagation();
-          onCompleta(!completata);
+          onCompleta(a.id, !completata);
         }}
         className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inchiostro focus-visible:ring-offset-2 ${
           completata
@@ -593,27 +608,17 @@ function RigaTask({
         </div>
       </div>
 
-      {/* Avatar delle persone: massimo tre, poi "+n" */}
-      {persone.length > 0 && (
-        <div className="mt-0.5 flex shrink-0 items-center" aria-label={`Assegnata a ${persone.join(", ")}`}>
-          {persone.slice(0, 3).map((nome, i) => (
-            <span
-              key={nome}
-              title={nome}
-              className={`grid h-6 w-6 place-items-center rounded-full text-[9px] font-semibold ring-2 ring-white ${
-                i === 0 ? "bg-lime text-lime-testo" : "bg-crema-scuro text-inchiostro"
-              } ${i > 0 ? "-ml-1.5" : ""}`}
-            >
-              {iniziali(nome)}
-            </span>
-          ))}
-          {persone.length > 3 && (
-            <span className="-ml-1.5 grid h-6 w-6 place-items-center rounded-full bg-crema-scuro text-[9px] font-semibold text-caldo-testo ring-2 ring-white">
-              +{persone.length - 3}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Persone: avatar cliccabili. Non e' un conflitto con la riga
+          cliccabile — il controllo ferma i propri eventi (PersoneCondivise). */}
+      <div className="mt-0.5 shrink-0">
+        <PersoneCondivise
+          persone={persone}
+          onCambia={(nuove) => onCambiaPersone(a.id, nuove)}
+          titolo={`Persone sulla task «${a.titolo}»`}
+          vuoto=""
+          allinea="destra"
+        />
+      </div>
 
       {/* Controlli: timer, sposta di sezione + elimina, visibili su hover/focus */}
       <div className="mt-0.5 flex shrink-0 items-center gap-1">
@@ -644,7 +649,7 @@ function RigaTask({
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {
               e.stopPropagation();
-              onSposta(e.target.value);
+              onSposta(a.id, { sezione: e.target.value });
             }}
             className="h-6 max-w-[7.5rem] cursor-pointer appearance-none truncate rounded-full border border-crema-contorno bg-white pl-2 pr-6 text-[11px] font-medium text-caldo-testo transition hover:border-caldo-testo/40 hover:text-inchiostro focus:outline-none focus:ring-2 focus:ring-inchiostro"
           >
@@ -663,7 +668,7 @@ function RigaTask({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onElimina();
+                onElimina(a.id);
               }}
               className="shrink-0 rounded-full bg-pericolo px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-pericolo-scuro focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pericolo"
             >
@@ -685,7 +690,7 @@ function RigaTask({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onElimina();
+              onElimina(a.id);
             }}
             aria-label={`Elimina la task ${a.titolo}`}
             className="flex h-6 w-6 items-center justify-center rounded-full text-caldo-testo opacity-0 transition hover:bg-stato-urgenza-bg hover:text-pericolo focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inchiostro group-hover/riga:opacity-100"

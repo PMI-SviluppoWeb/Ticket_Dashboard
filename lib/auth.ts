@@ -2,8 +2,32 @@ import "server-only";
 import { db } from "./db";
 import { cookies } from "next/headers";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-in-production";
+const JWT_SECRET_FALLBACK = "dev-secret-change-in-production";
 const SESSION_COOKIE = "session";
+
+// Il secret viene letto alla prima use (sign/verify), non al load del modulo:
+// un throw a livello di modulo in produzione rischia di far fallire l'init di
+// middleware/rotte in modi non controllati. Qui invece ogni firma e ogni
+// verifica passa da qui, quindi senza JWT_SECRET nessuna sessione puo' essere
+// creata ne' validata: fail-closed, mai il secret di sviluppo in produzione.
+let secretMemo: string | null = null;
+
+function jwtSecret(): string {
+  if (secretMemo) return secretMemo;
+  const secret = process.env.JWT_SECRET;
+  if (secret) {
+    secretMemo = secret;
+    return secret;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "JWT_SECRET non impostata: in produzione le sessioni sarebbero forgiabili con il secret di sviluppo. Imposta JWT_SECRET in .env e riavvia il server."
+    );
+  }
+  console.warn("[auth] JWT_SECRET mancante: uso il secret di sviluppo (solo locale).");
+  secretMemo = JWT_SECRET_FALLBACK;
+  return secretMemo;
+}
 
 let cryptoKey: CryptoKey | null = null;
 
@@ -11,7 +35,7 @@ async function getCryptoKey(): Promise<CryptoKey> {
   if (cryptoKey) return cryptoKey;
   cryptoKey = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(JWT_SECRET),
+    new TextEncoder().encode(jwtSecret()),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"]

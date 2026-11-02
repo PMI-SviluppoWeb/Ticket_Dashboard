@@ -18,9 +18,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    const config = await getConfigGoogle();
-    const conteggi = await conteggiGoogle();
-    const errori = await listaErroriGoogle(20);
+    // Le tre letture sono indipendenti: in serie erano tre viaggi uno dopo
+    // l'altro, qui si sovrappongono (restano tre richieste, ma un solo tempo di
+    // attesa). Per ridurne anche il NUMERO servirebbe un `batchRead` unico, che
+    // richiederebbe di riscrivere le tre funzioni di lib/google-sync.
+    const [config, conteggi, errori] = await Promise.all([
+      getConfigGoogle(),
+      conteggiGoogle(),
+      listaErroriGoogle(20),
+    ]);
 
     return NextResponse.json({
       configurato: credenzialiPresenti(),

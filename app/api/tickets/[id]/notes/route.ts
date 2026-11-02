@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getTicket, insertTechnicalNote } from "@/lib/tickets";
+import { db } from "@/lib/db";
+import { insertTechnicalNote } from "@/lib/tickets";
 
 export async function POST(
   request: Request,
@@ -30,17 +31,23 @@ export async function POST(
     );
   }
 
-  const ticket = await getTicket(params.id);
-  if (!ticket) {
+  // Esistenza del ticket con una SELECT che non legge nulla: `getTicket`
+  // caricava riga, messaggi, note e allegati solo per decidere se rispondere
+  // 404, ed era il viaggio piu' costoso della richiesta.
+  const esiste = await db.prepare(`SELECT 1 AS uno FROM tickets WHERE id = ?`).get(params.id);
+  if (!esiste) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
 
-  await insertTechnicalNote(params.id, {
+  // Si restituisce SOLO la nota creata. Il client la inserisce nel ticket che
+  // ha gia' in memoria; rileggere l'intero ticket qui era un secondo viaggio
+  // per dati che il chiamante non usa.
+  const nota = await insertTechnicalNote(params.id, {
     titolo,
     problema,
     soluzione,
     operatore: body.operatore ?? operatorName ?? null,
   });
 
-  return NextResponse.json(await getTicket(params.id));
+  return NextResponse.json({ nota }, { status: 201 });
 }

@@ -118,8 +118,14 @@ export interface Stats {
   aperti: number;
 }
 
+// Riga di una LISTA. I due testi lunghi restano fuori: nessuna tabella li
+// mostra, e possono essere di migliaia di caratteri per riga — su una pagina da
+// 25 risultati sono decine di kB trasportati per niente. Il dettaglio
+// (`getTicket`) continua a leggerli.
+export type TicketListRow = Omit<TicketRow, "descrizione_dettagliata" | "note">;
+
 export interface TicketListResult {
-  tickets: TicketRow[];
+  tickets: TicketListRow[];
   totale: number;
   pagina: number;
   paginaSize: number;
@@ -263,6 +269,15 @@ export type StatoAttivita = "DA_FARE" | "IN_CORSO" | "COMPLETATA";
 // Origine di un elemento di calendario, derivata dagli id (non e' una colonna).
 export type OrigineEvento = "progetto" | "cliente" | "generico";
 
+// Etichetta personalizzata del calendario. Il colore e' un hex libero
+// ("#RRGGBB") scelto dall'utente.
+export interface Etichetta {
+  id: string;
+  nome: string;
+  colore: string;
+  data_creazione: string;
+}
+
 export interface ProgettoRow {
   id: string;
   codice: string;
@@ -272,6 +287,9 @@ export interface ProgettoRow {
   stato: StatoProgetto;
   priorita: Priorita;
   responsabile: string | null;
+  // Collaboratori OLTRE al responsabile. Sempre un array (il data layer
+  // decodifica la colonna JSON), mai la stringa grezza.
+  persone: string[];
   data_inizio: string | null;
   data_fine: string | null;
   note: string | null;
@@ -296,7 +314,9 @@ export interface ProgettoListRow extends ProgettoRow {
 export interface Progetto extends ProgettoRow {
   cliente_ragione_sociale: string;
   attivita: AttivitaRow[];
-  tickets: TicketRow[];
+  // Riga di lista: il progetto mostra numero/cliente/sommario, non i testi
+  // lunghi del ticket (che arrivano solo aprendo il dettaglio).
+  tickets: TicketListRow[];
 }
 
 export interface ProgettoInput {
@@ -306,6 +326,9 @@ export interface ProgettoInput {
   stato?: StatoProgetto;
   priorita?: Priorita;
   responsabile?: string | null;
+  // Solo i collaboratori: il responsabile ha il suo campo. Passare qui anche
+  // il responsabile non lo duplica (lib/persone.ts lo toglie).
+  persone?: string[];
   data_inizio?: string | null;
   data_fine?: string | null;
   note?: string | null;
@@ -331,6 +354,9 @@ export interface AttivitaRow {
   data_scadenza: string | null;
   data_completamento: string | null;
   assegnatario: string | null;
+  // Collaboratori OLTRE all'assegnatario. Sempre un array (il data layer
+  // decodifica la colonna JSON).
+  persone: string[];
   data_creazione: string;
   data_aggiornamento: string;
   // Stato della sincronizzazione verso Google Calendar, risolto via LEFT JOIN
@@ -339,6 +365,9 @@ export interface AttivitaRow {
   google_stato?: GoogleStato | null;
   google_ultimo_errore?: string | null;
   google_data_sync?: string | null;
+  // Etichette personalizzate assegnate (risolte via JOIN). Opzionale e
+  // additivo: assente = nessuna etichetta o lettura che non le richiede.
+  etichette?: Etichetta[];
 }
 
 export interface AttivitaInput {
@@ -351,6 +380,11 @@ export interface AttivitaInput {
   data_inizio?: string | null;
   data_scadenza?: string | null;
   assegnatario?: string | null;
+  // Solo i collaboratori: l'assegnatario ha il suo campo (lib/persone.ts
+  // toglie un eventuale doppione).
+  persone?: string[];
+  // Id delle etichette da assegnare (sostituisce l'intero set).
+  etichette?: string[];
 }
 
 export type AttivitaUpdate = Partial<Omit<AttivitaInput, "progetto_id">> & {
@@ -468,6 +502,106 @@ export interface VoceTempoInput {
   attivita_id?: string | null;
   ticket_id?: string | null;
   descrizione?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Home: sintesi, agenda e lavoro personale.
+//
+// Un solo endpoint (`/api/dashboard`) e un solo `batchRead` alimentano tutta la
+// fascia sopra la tabella ticket. I tipi qui sotto sono PROIEZIONI snelle: non
+// estendono `EventoCalendario`/`ProgettoListRow`, perche' la home non mostra
+// descrizioni, note ne' lo stato della sincronizzazione Google, e trasportarli
+// costerebbe payload a ogni poll.
+//
+// `mia` e `in_ritardo` arrivano calcolati dal server: il browser non deve
+// confrontare le proprie date con le stringhe naive di `data_scadenza`, che
+// darebbero un risultato diverso per un utente in un altro fuso.
+// ---------------------------------------------------------------------------
+
+export interface TempoDashboard {
+  minuti_oggi: number;
+  minuti_settimana: number;
+}
+
+export interface DashboardSintesi {
+  ticket: {
+    miei: { aperti: number; nuovi: number; in_corso: number };
+    tutti: { aperti: number; nuovi: number; in_corso: number; da_prendere: number };
+  };
+  task_miei: { in_scadenza: number; in_ritardo: number };
+  progetti_attivi: number;
+  tempo: { mio: TempoDashboard; tutti: TempoDashboard };
+}
+
+export interface EventoAgendaDashboard {
+  id: string;
+  titolo: string;
+  stato: StatoAttivita;
+  priorita: Priorita;
+  // "YYYY-MM-DDTHH:mm" dell'ora di Roma, come tutte le scadenze delle attivita'.
+  data_scadenza: string;
+  assegnatario: string | null;
+  progetto_id: string | null;
+  cliente_id: string | null;
+  progetto_nome: string | null;
+  progetto_codice: string | null;
+  cliente_ragione_sociale: string | null;
+  mia: boolean;
+  in_ritardo: boolean;
+  // Etichette personalizzate (opzionale: la home puo' non richiederle).
+  etichette?: Etichetta[];
+}
+
+export interface TaskScadenzaDashboard {
+  id: string;
+  titolo: string;
+  stato: StatoAttivita;
+  priorita: Priorita;
+  data_scadenza: string;
+  assegnatario: string | null;
+  progetto_id: string | null;
+  progetto_nome: string | null;
+  progetto_codice: string | null;
+  cliente_ragione_sociale: string | null;
+  in_ritardo: boolean;
+}
+
+export interface ProgettoDashboard {
+  id: string;
+  codice: string;
+  nome: string;
+  stato: StatoProgetto;
+  data_fine: string | null;
+  cliente_ragione_sociale: string;
+  num_attivita: number;
+  num_attivita_completate: number;
+  num_ticket: number;
+}
+
+export interface VoceApertaDashboard {
+  operatore_id: string;
+  operatore: string;
+  inizio: string;
+  // Minuti maturati fino al momento della query. Il client vi somma il
+  // cronometro che scorre, cosi' il numero mostrato non dipende dall'orologio
+  // del browser ne' dal fuso della macchina server.
+  minuti_finora: number;
+  tipo: TipoVoceTempo;
+  bersaglio: string | null;
+}
+
+export interface DashboardData {
+  operatore: { id: string; nome: string; ruolo: "admin" | "operatore" };
+  // ISO: mostrato come "aggiornato alle HH:mm" e usato per delimitare il poll.
+  generato_il: string;
+  sintesi: DashboardSintesi;
+  agenda: EventoAgendaDashboard[];
+  mie_task: TaskScadenzaDashboard[];
+  progetti: ProgettoDashboard[];
+  // Vuoto per i non admin: l'elenco nomina i colleghi e cosa stanno facendo,
+  // informazione che il resto dell'app riserva agli amministratori
+  // (`/api/operatori/stats`).
+  in_corso_ora: VoceApertaDashboard[];
 }
 
 

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTempi } from "@/components/TempiContext";
+import CronometroLive from "@/components/CronometroLive";
+import { useTempiAzioni, useTempiStato } from "@/components/TempiContext";
 import { ChevronDownIcon, ClockIcon, TimerIcon, XIcon } from "@/components/icons";
-import { formatCronometro, formatDurata, ORE_AVVISO_TIMER, timerDimenticato } from "@/lib/durata";
+import { formatDurata, ORE_AVVISO_TIMER, timerDimenticato } from "@/lib/durata";
 import type { VoceTempoEstesa } from "@/lib/types";
 
 // ===========================================================================
@@ -36,7 +37,10 @@ interface CronometroHeaderProps {
 }
 
 export default function CronometroHeader({ tema = "scuro", bersaglio = null }: CronometroHeaderProps) {
-  const { aperta, voci, secondi, avvia, ferma, elimina, caricamento, errore } = useTempi();
+  // Il pannello (fino a 50 voci) non deve ridisegnarsi ogni secondo: legge lo
+  // stato, che cambia solo su start/stop, e lascia la cifra a <CronometroLive />.
+  const { aperta, voci, caricamento, errore } = useTempiStato();
+  const { avvia, ferma, elimina } = useTempiAzioni();
   const [aperto, setAperto] = useState(false);
   const [descrizione, setDescrizione] = useState("");
   const [confermaElimina, setConfermaElimina] = useState<string | null>(null);
@@ -117,9 +121,7 @@ export default function CronometroHeader({ tema = "scuro", bersaglio = null }: C
         >
           <TimerIcon className="h-3.5 w-3.5 shrink-0" />
           {aperta ? (
-            <span className="tabular text-[13px] font-semibold tracking-tight">
-              {formatCronometro(secondi)}
-            </span>
+            <CronometroLive className="tabular text-[13px] font-semibold tracking-tight" />
           ) : (
             <span className="hidden sm:inline">Timer</span>
           )}
@@ -171,9 +173,7 @@ export default function CronometroHeader({ tema = "scuro", bersaglio = null }: C
                 {aperta ? "In corso" : "Cronometro"}
               </span>
               {aperta && (
-                <span className="tabular text-sm font-semibold text-inchiostro">
-                  {formatCronometro(secondi)}
-                </span>
+                <CronometroLive className="tabular text-sm font-semibold text-inchiostro" />
               )}
             </div>
             <p className="mt-1 truncate text-sm font-semibold text-inchiostro">{etichetta}</p>

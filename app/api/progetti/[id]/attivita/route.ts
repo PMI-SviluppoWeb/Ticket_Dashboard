@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { insertAttivita, listAttivitaProgetto, STATI_ATTIVITA } from "@/lib/attivita";
 import { getProgetto } from "@/lib/progetti";
+import { parsePersone } from "@/lib/persone";
 import { RE_DATETIME_LOCAL } from "@/lib/calendario";
 import type { AttivitaInput, Priorita, StatoAttivita } from "@/lib/types";
 
@@ -58,6 +59,9 @@ export async function POST(
     if (body.priorita !== undefined && !PRIORITA.includes(body.priorita)) {
       return NextResponse.json({ error: "Priorita' non valida." }, { status: 400 });
     }
+    if (body.persone !== undefined && !Array.isArray(body.persone)) {
+      return NextResponse.json({ error: "Formato persone non valido." }, { status: 400 });
+    }
     for (const campo of ["data_inizio", "data_scadenza"] as const) {
       const v = body[campo];
       if (v !== undefined && v !== null && v !== "" && (typeof v !== "string" || !RE_DATETIME_LOCAL.test(v))) {
@@ -75,6 +79,7 @@ export async function POST(
       data_inizio: body.data_inizio || null,
       data_scadenza: body.data_scadenza || null,
       assegnatario: body.assegnatario ?? null,
+      persone: parsePersone(body.persone),
     });
 
     return NextResponse.json(attivita, { status: 201 });

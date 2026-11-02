@@ -6,7 +6,9 @@ import {
   STATI_ATTIVITA,
   updateAttivita,
 } from "@/lib/attivita";
+import { esistonoEtichette, getEtichettePerAttivita } from "@/lib/etichette";
 import { getProgetto } from "@/lib/progetti";
+import { parsePersone } from "@/lib/persone";
 import { RE_DATETIME_LOCAL } from "@/lib/calendario";
 import type { AttivitaUpdate, Priorita } from "@/lib/types";
 
@@ -32,7 +34,9 @@ export async function GET(
   if (!attivita) {
     return NextResponse.json({ error: "Attività non trovata." }, { status: 404 });
   }
-  return NextResponse.json(attivita);
+  // Il form di modifica ha bisogno delle etichette correnti.
+  const etichette = await getEtichettePerAttivita([params.id]);
+  return NextResponse.json({ ...attivita, etichette: etichette.get(params.id) ?? [] });
 }
 
 export async function PATCH(
@@ -74,6 +78,21 @@ export async function PATCH(
     }
     if (body.descrizione !== undefined) patch.descrizione = body.descrizione;
     if (body.assegnatario !== undefined) patch.assegnatario = body.assegnatario;
+    if (body.persone !== undefined) {
+      if (!Array.isArray(body.persone)) {
+        return NextResponse.json({ error: "Formato persone non valido." }, { status: 400 });
+      }
+      patch.persone = parsePersone(body.persone);
+    }
+    if (body.etichette !== undefined) {
+      if (!Array.isArray(body.etichette) || body.etichette.some((e) => typeof e !== "string")) {
+        return NextResponse.json({ error: "Formato etichette non valido." }, { status: 400 });
+      }
+      if (!(await esistonoEtichette(body.etichette))) {
+        return NextResponse.json({ error: "Una o più etichette non esistono." }, { status: 400 });
+      }
+      patch.etichette = body.etichette;
+    }
 
     // Spostamento tra contenitori: progetto e cliente restano mutuamente
     // esclusivi, e il nuovo contenitore deve esistere.
@@ -111,7 +130,8 @@ export async function PATCH(
     if (!attivita) {
       return NextResponse.json({ error: "Attività non trovata." }, { status: 404 });
     }
-    return NextResponse.json(attivita);
+    const etichette = await getEtichettePerAttivita([params.id]);
+    return NextResponse.json({ ...attivita, etichette: etichette.get(params.id) ?? [] });
   } catch (err) {
     console.error("PATCH /api/attivita/[id]", err);
     return NextResponse.json({ error: "Errore interno del server." }, { status: 500 });

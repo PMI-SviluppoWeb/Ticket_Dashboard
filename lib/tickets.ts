@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { invalidaMemo } from "./cache";
 import type {
   Allegato,
   Message,
@@ -9,6 +10,7 @@ import type {
   Ticket,
   TicketInput,
   TicketListResult,
+  TicketListRow,
   TicketRow,
   TicketUpdate,
 } from "./types";
@@ -19,6 +21,16 @@ export const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 const ROW_FIELDS = `
   id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
   descrizione_dettagliata, priorita, stato, note, operatore,
+  data_creazione, data_aggiornamento, data_chiusura,
+  data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti
+`;
+
+// Senza i due testi lunghi (descrizione, note): le liste non li mostrano, e
+// trasportarli costa quanto il resto della riga moltiplicato. Il dettaglio usa
+// ROW_FIELDS.
+const ROW_FIELDS_LIST = `
+  id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
+  priorita, stato, operatore,
   data_creazione, data_aggiornamento, data_chiusura,
   data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti
 `;
@@ -80,6 +92,10 @@ export async function createTicket(input: TicketInput): Promise<TicketRow> {
     })),
   ];
   await db.batch(statements);
+  // L'elenco dei moduli (usato dai filtri) e' memorizzato per 60 s: senza
+  // questa riga un ticket creato con un modulo nuovo non comparirebbe nel
+  // filtro fino alla scadenza.
+  invalidaMemo("moduli");
 
   return (await getTicket(id))!;
 }
@@ -123,7 +139,7 @@ export async function listTickets(opts: {
     params.stato = opts.stato;
   } else {
     // When showing all tickets, exclude closed ones (they go in the dedicated section)
-    where.push("stato != 'CHIUSO'");
+    where.push("stato IN ('NUOVO','IN_CORSO','RISOLTO')");
   }
   if (opts.priorita && opts.priorita !== "TUTTE") {
     where.push("priorita = @priorita");
@@ -163,66 +179,66 @@ export async function listTickets(opts: {
         ? `CASE priorita WHEN 'ALTA' THEN 0 WHEN 'MEDIA' THEN 1 ELSE 2 END, data_creazione DESC`
         : "data_creazione DESC";
 
-  // Conteggio e pagina sono indipendenti: in parallelo sono UN round-trip
-  // invece di due in serie.
-  const [countRow, rows] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS n FROM tickets ${whereSql}`).get(params),
-    db
-      .prepare(
-        `SELECT ${ROW_FIELDS} FROM tickets ${whereSql}
-         ORDER BY ${order} LIMIT @limit OFFSET @offset`
-      )
-      .all({ ...params, limit: paginaSize, offset: (pagina - 1) * paginaSize }),
+  // Conteggio e pagina nella STESSA richiesta al DB: con un DB remoto due
+  // `Promise.all` sono ancora due viaggi di rete, solo sovrapposti.
+  const [countRows, rows] = await db.batchRead([
+    { sql: `SELECT COUNT(*) AS n FROM tickets ${whereSql}`, params },
+    {
+      sql: `SELECT ${ROW_FIELDS_LIST} FROM tickets ${whereSql}
+         ORDER BY ${order} LIMIT @limit OFFSET @offset`,
+      params: { ...params, limit: paginaSize, offset: (pagina - 1) * paginaSize },
+    },
   ]);
-  const totale = (countRow?.n as number) ?? 0;
-  const tickets = rows as unknown as TicketRow[];
+  const totale = (countRows[0]?.n as number) ?? 0;
+  const tickets = rows as unknown as TicketListRow[];
 
   return { tickets, totale, pagina, paginaSize };
 }
 
 export async function getTicket(id: string): Promise<Ticket | null> {
-  const row = await db.prepare(`SELECT ${ROW_FIELDS} FROM tickets WHERE id = ?`).get(id);
-  if (!row) return null;
-
-  // Le tre letture sotto sono indipendenti: partono insieme invece che in
-  // serie (erano tre round-trip consecutivi verso il DB remoto).
-  const [messaggi, noteTecniche] = await Promise.all([
-    db
-      .prepare(
-        `SELECT id, ruolo, contenuto, data_creazione FROM messages
-         WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
-      )
-      .all(id) as unknown as Promise<Message[]>,
-    db
-      .prepare(
-        `SELECT id, ticket_id, titolo, problema, soluzione, operatore, data_creazione
-         FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`
-      )
-      .all(id) as unknown as Promise<TechnicalNote[]>,
+  // Riga + messaggi + note in UNA richiesta. Gli allegati si prendono con una
+  // sottoquery su `note_tecnica_id`, cosi' anche loro stanno nello stesso
+  // batch: non serve sapere gli id delle note prima (era il motivo per cui
+  // erano una quarta richiesta).
+  const [righe, messaggi, noteTecniche, allegati] = await db.batchRead([
+    { sql: `SELECT ${ROW_FIELDS} FROM tickets WHERE id = ?`, params: [id] },
+    {
+      sql: `SELECT id, ruolo, contenuto, data_creazione FROM messages
+         WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`,
+      params: [id],
+    },
+    {
+      sql: `SELECT id, ticket_id, titolo, problema, soluzione, operatore, data_creazione
+         FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`,
+      params: [id],
+    },
+    {
+      sql: `SELECT id, note_tecnica_id, ticket_id, nome_file, nome_originale, dimensione, tipo_mime, data_creazione
+         FROM allegati
+         WHERE note_tecnica_id IN (SELECT id FROM technical_notes WHERE ticket_id = ?)
+         ORDER BY data_creazione ASC`,
+      params: [id],
+    },
   ]);
 
-  // Allegati di tutte le note in UNA query, invece di una per nota (N+1).
-  if (noteTecniche.length > 0) {
-    const segnaposto = noteTecniche.map(() => "?").join(", ");
-    const allegati = (await db
-      .prepare(
-        `SELECT id, note_tecnica_id, ticket_id, nome_file, nome_originale, dimensione, tipo_mime, data_creazione
-         FROM allegati WHERE note_tecnica_id IN (${segnaposto}) ORDER BY data_creazione ASC`
-      )
-      .all(noteTecniche.map((n) => n.id))) as unknown as Allegato[];
+  const row = righe[0];
+  if (!row) return null;
 
-    const perNota = new Map<string, Allegato[]>();
-    for (const a of allegati) {
-      const lista = perNota.get(a.note_tecnica_id);
-      if (lista) lista.push(a);
-      else perNota.set(a.note_tecnica_id, [a]);
-    }
-    for (const note of noteTecniche) {
-      note.allegati = perNota.get(note.id) ?? [];
-    }
+  const perNota = new Map<string, Allegato[]>();
+  for (const a of allegati as unknown as Allegato[]) {
+    const lista = perNota.get(a.note_tecnica_id);
+    if (lista) lista.push(a);
+    else perNota.set(a.note_tecnica_id, [a]);
+  }
+  for (const note of noteTecniche as unknown as TechnicalNote[]) {
+    note.allegati = perNota.get(note.id) ?? [];
   }
 
-  return { ...row, messaggi, note_tecniche: noteTecniche } as unknown as Ticket;
+  return {
+    ...row,
+    messaggi: messaggi as unknown as Message[],
+    note_tecniche: noteTecniche as unknown as TechnicalNote[],
+  } as unknown as Ticket;
 }
 
 export async function getTicketByNumero(numero: string): Promise<TicketRow | null> {
@@ -352,13 +368,21 @@ export async function updateTicket(
   } as Ticket;
 }
 
+// Accetta ENTRAMBI i formati: "14/09/2026, 17:30" (quello scritto da `now()`) e
+// ISO. Serve perche' in tabella convivono: le righe vecchie sono italiane, e il
+// giorno in cui si passera' a scrivere ISO questa funzione deve continuare a
+// funzionare invece di restituire null e saltare il calcolo in silenzio.
 function parseItalianDate(dateStr: string): number | null {
+  const iso = Date.parse(dateStr);
+  if (Number.isFinite(iso)) return iso;
+
   try {
     // Format: "14/09/2026, 17:30"
     const [datePart, timePart] = dateStr.split(", ");
     if (!datePart || !timePart) return null;
     const [day, month, year] = datePart.split("/").map(Number);
     const [hour, minute] = timePart.split(":").map(Number);
+    if ([day, month, year, hour, minute].some((n) => !Number.isFinite(n))) return null;
     return new Date(year, month - 1, day, hour, minute).getTime();
   } catch {
     return null;
@@ -389,6 +413,8 @@ export async function insertTechnicalNote(
   }
 ): Promise<TechnicalNote> {
   const id = crypto.randomUUID();
+  const operatore = input.operatore || null;
+  const data_creazione = now();
   await db
     .prepare(
       `INSERT INTO technical_notes (id, ticket_id, titolo, problema, soluzione, operatore, data_creazione)
@@ -400,10 +426,22 @@ export async function insertTechnicalNote(
       titolo: input.titolo,
       problema: input.problema,
       soluzione: input.soluzione,
-      operatore: input.operatore || null,
-      data_creazione: now(),
+      operatore,
+      data_creazione,
     });
-  return (await getTechnicalNote(id))!;
+  // La riga si ricostruisce da cio' che abbiamo appena scritto: rileggerla
+  // costava un altro viaggio verso il DB remoto per riportare gli stessi valori.
+  // `allegati` e' vuoto per costruzione (nessun upload puo' precedere la nota).
+  return {
+    id,
+    ticket_id: ticketId,
+    titolo: input.titolo,
+    problema: input.problema,
+    soluzione: input.soluzione,
+    operatore,
+    data_creazione,
+    allegati: [],
+  };
 }
 
 export async function updateTechnicalNote(

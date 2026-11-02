@@ -6,6 +6,7 @@ import { LinkIcon, TrashIcon, PlusIcon, ExternalLinkIcon, EditIcon, BookIcon } f
 import AppHeader from "@/components/AppHeader";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
+import { useDebounce } from "@/lib/useDebounce";
 
 const CATEGORIES = [
   { value: "tutte", label: "Tutte" },
@@ -64,19 +65,20 @@ export default function KnowledgePage() {
   }, []);
 
   // Load links
-  const loadLinks = useCallback(async (search?: string) => {
+  const loadLinks = useCallback(async (search?: string, signal?: AbortSignal) => {
     const seq = ++requestSeqLinks.current;
     const params = new URLSearchParams();
     if (search) params.set("q", search);
     if (filterCategoria && filterCategoria !== "tutte") params.set("categoria", filterCategoria);
     try {
-      const res = await fetch(`/api/knowledge/links?${params.toString()}`);
+      const res = await fetch(`/api/knowledge/links?${params.toString()}`, { signal });
       if (!res.ok) throw new Error(`Errore ${res.status}`);
       const data = await res.json();
       if (seq === requestSeqLinks.current) {
         setLinks(data.links as KnowledgeLinkItem[]);
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       if (seq === requestSeqLinks.current) {
         setError(err instanceof Error ? err.message : "Errore caricamento link.");
       }
@@ -87,9 +89,15 @@ export default function KnowledgePage() {
     loadDocs();
   }, [loadDocs]);
 
+  // La ricerca dei link parte a ogni tasto: senza debounce ogni carattere era
+  // una richiesta HTTP e una LIKE sul DB remoto.
+  const linkSearchDebounce = useDebounce(linkSearch, 250);
+
   useEffect(() => {
-    loadLinks(linkSearch);
-  }, [loadLinks, linkSearch]);
+    const ctrl = new AbortController();
+    loadLinks(linkSearchDebounce, ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadLinks, linkSearchDebounce]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
