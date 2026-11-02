@@ -3,6 +3,16 @@ import PostalMime from "postal-mime";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL ?? "http://localhost:3001/api/hooks/email";
 const POLL_INTERVAL_MS = parseInt(process.env.IMAP_POLL_INTERVAL_MS ?? "120000", 10);
+// Segreto condiviso con l'app: senza questo header la rotta /api/hooks/email
+// rifiuta le richieste. Deve essere IDENTICO alla variabile WEBHOOK_SECRET in .env.
+// Lettura lazy: in start-worker.ts le import girano PRIMA di dotenv.config(),
+// quindi una variabile catturata a livello di modulo resterebbe vuota.
+function webhookHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const secret = process.env.WEBHOOK_SECRET;
+  if (secret) headers["x-webhook-secret"] = secret;
+  return headers;
+}
 
 interface ImapConfig {
   host: string;
@@ -59,7 +69,7 @@ async function processEmail(raw: Uint8Array): Promise<void> {
 
   const response = await fetch(WEBHOOK_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: webhookHeaders(),
     body: JSON.stringify({
       messageId,
       from: fromAddress,
@@ -140,6 +150,11 @@ async function pollOnce(client: ImapFlow): Promise<void> {
 
 export async function startImapWorker(): Promise<void> {
   const config = getImapConfig();
+  if (!process.env.WEBHOOK_SECRET) {
+    console.warn(
+      "[IMAP] WEBHOOK_SECRET non impostata: in produzione il server rifiuterà le richieste webhook."
+    );
+  }
   console.log(`[IMAP] Connessione a ${config.host}:${config.port}...`);
 
   let client = new ImapFlow({

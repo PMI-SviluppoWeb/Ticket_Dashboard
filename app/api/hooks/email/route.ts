@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { db } from "@/lib/db";
 import { createTicket } from "@/lib/tickets";
 import { createNotification } from "@/lib/notifications";
@@ -65,8 +66,35 @@ async function findClienteByEmail(email: string): Promise<{ nome: string } | nul
   return row ? { nome: row.ragione_sociale as string } : null;
 }
 
+// L'endpoint resta pubblico (è un webhook, non una sessione) ma autenticato con
+// un segreto condiviso con l'IMAP worker: senza, chiunque sulla rete creerebbe
+// ticket e farrebbe partire autorisposte SMTP a indirizzi scelti.
+// Fail-closed: in produzione un WEBHOOK_SECRET mancante blocca tutto.
+function verificaSegreto(request: Request): { ok: true } | { ok: false; status: number; error: string } {
+  const segreto = process.env.WEBHOOK_SECRET;
+  if (!segreto) {
+    if (process.env.NODE_ENV === "production") {
+      return { ok: false, status: 503, error: "WEBHOOK_SECRET non configurata sul server." };
+    }
+    // Solo in sviluppo locale il webhook gira senza segreto.
+    return { ok: true };
+  }
+  const ricevuto = request.headers.get("x-webhook-secret") ?? "";
+  const a = Buffer.from(segreto, "utf8");
+  const b = Buffer.from(ricevuto, "utf8");
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return { ok: false, status: 401, error: "Segreto webhook non valido." };
+  }
+  return { ok: true };
+}
+
 export async function POST(request: Request) {
   try {
+    const segreto = verificaSegreto(request);
+    if (!segreto.ok) {
+      return NextResponse.json({ error: segreto.error }, { status: segreto.status });
+    }
+
     const email: IncomingEmail = await request.json();
 
     if (!email.messageId || !email.from || !email.subject) {

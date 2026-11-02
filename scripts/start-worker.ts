@@ -16,6 +16,7 @@ console.log(`  User: ${process.env.IMAP_USER ?? "(non configurato)"}`);
 console.log(`  Port: ${process.env.IMAP_PORT ?? "993"}`);
 console.log(`  Poll interval: ${process.env.IMAP_POLL_INTERVAL_MS ?? "120000"}ms`);
 console.log(`  Webhook: ${process.env.WEBHOOK_URL ?? "http://localhost:3001/api/hooks/email"}`);
+console.log(`  Webhook secret: ${process.env.WEBHOOK_SECRET ? "configurato" : "(non configurato - il server prod rifiuterà le richieste)"}`);
 console.log(`  OpenRouter: ${process.env.OPENROUTER_API_KEY ? "configurato" : "(non configurato - fallback regex)"}`);
 console.log("=================================");
 
