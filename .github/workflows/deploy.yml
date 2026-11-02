@@ -1,19 +1,24 @@
-name: Deploy su server Windows
+name: Deploy to Windows Server
 
 on:
   push:
-    branches: [main]
-
-concurrency:
-  group: deploy-server
-  cancel-in-progress: false
+    branches: [ main ] # o master
+  workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, Windows]
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-      - run: npm ci
-      - run: npm run build
-      - run: pm2 restart Ticket_Dashboard --update-env
-      - run: pm2 restart mcp-ticket-server --update-env
+      # 1. Scarica il codice aggiornato da GitHub
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Esegue i comandi direttamente nella cartella del progetto sul server
+      - name: Install, Build and Restart
+        run: |
+          cd C:\Users\Mirko Pandolfi\Desktop\Ticket_Dashboard
+          git pull origin main
+          npm install
+          npm run build
+          pm2 restart Ticket_Dashboard
+        shell: cmd
