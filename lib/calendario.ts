@@ -7,11 +7,12 @@ import type {
 // Funzioni pure di supporto al calendario: nessun accesso al DB, nessuna
 // libreria di date. Tutto con Date nativo.
 
-export type VistaCalendario = "mese" | "settimana" | "agenda";
+export type VistaCalendario = "giorno" | "settimana" | "mese" | "agenda";
 
 export const VISTE: { id: VistaCalendario; label: string }[] = [
-  { id: "mese", label: "Mese" },
+  { id: "giorno", label: "Giorno" },
   { id: "settimana", label: "Settimana" },
+  { id: "mese", label: "Mese" },
   { id: "agenda", label: "Agenda" },
 ];
 
@@ -88,6 +89,9 @@ export function rangeVista(
     const giorni = giorniSettimana(anchor);
     primo = giorni[0];
     ultimo = giorni[6];
+  } else if (vista === "giorno") {
+    primo = anchor;
+    ultimo = anchor;
   } else {
     primo = anchor;
     ultimo = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + 29);
@@ -170,7 +174,12 @@ export const ORIGINE_LABELS: Record<OrigineEvento, string> = {
   generico: "Evento generico",
 };
 
-export function etichettaOrigine(e: EventoCalendario): string {
+// Basta la coppia di campi che serve all'etichetta: cosi' anche le proiezioni
+// snelle della home (EventoAgendaDashboard) possono usarla senza portarsi
+// dietro l'intero EventoCalendario.
+export function etichettaOrigine(
+  e: Pick<EventoCalendario, "progetto_nome" | "cliente_ragione_sociale">
+): string {
   if (e.progetto_nome) return e.progetto_nome;
   if (e.cliente_ragione_sociale) return e.cliente_ragione_sociale;
   return "Generico";
@@ -178,10 +187,14 @@ export function etichettaOrigine(e: EventoCalendario): string {
 
 // Raggruppa per giorno locale. E' l'unico punto in cui gli eventi vengono
 // indicizzati per data: la vista agenda e le griglie leggono tutte da qui.
-export function raggruppaPerGiorno(
-  eventi: EventoCalendario[]
-): Map<string, EventoCalendario[]> {
-  const mappa = new Map<string, EventoCalendario[]>();
+//
+// Generica sul tipo di evento (basta `data_scadenza`): la home usa una
+// proiezione snella, e obbligarla a portare tutti i campi di EventoCalendario
+// solo per raggrupparli sarebbe peso inutile nel payload.
+export function raggruppaPerGiorno<T extends { data_scadenza: string | null }>(
+  eventi: T[]
+): Map<string, T[]> {
+  const mappa = new Map<string, T[]>();
   for (const e of eventi) {
     if (!e.data_scadenza) continue;
     const d = new Date(e.data_scadenza);
@@ -193,7 +206,7 @@ export function raggruppaPerGiorno(
   }
   // Ordinamento cronologico dentro il giorno.
   Array.from(mappa.values()).forEach((lista) => {
-    lista.sort((a: EventoCalendario, b: EventoCalendario) =>
+    lista.sort((a, b) =>
       (a.data_scadenza ?? "").localeCompare(b.data_scadenza ?? "")
     );
   });
@@ -201,7 +214,7 @@ export function raggruppaPerGiorno(
 }
 
 // Chiavi ordinate: l'ordinamento di stringhe "YYYY-MM-DD" e' cronologico.
-export function giorniOrdinati(mappa: Map<string, EventoCalendario[]>): string[] {
+export function giorniOrdinati<T>(mappa: Map<string, T[]>): string[] {
   return Array.from(mappa.keys()).sort();
 }
 
@@ -221,6 +234,15 @@ export function etichettaGiorno(k: string): string {
 }
 
 export function etichettaPeriodo(vista: VistaCalendario, anchor: Date): string {
+  if (vista === "giorno") {
+    const s = anchor.toLocaleDateString("it-IT", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
   if (vista === "mese") {
     const s = anchor.toLocaleDateString("it-IT", { month: "long", year: "numeric" });
     return s.charAt(0).toUpperCase() + s.slice(1);
@@ -239,6 +261,9 @@ export function spostaAnchor(vista: VistaCalendario, anchor: Date, passo: number
   }
   if (vista === "settimana") {
     return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + passo * 7);
+  }
+  if (vista === "giorno") {
+    return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + passo);
   }
   return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + passo * 30);
 }

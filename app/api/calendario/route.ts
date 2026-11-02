@@ -37,6 +37,7 @@ export async function GET(request: Request) {
 
   const progettoId = searchParams.get("progetto_id") || undefined;
   const clienteId = searchParams.get("cliente_id") || undefined;
+  const etichettaId = searchParams.get("etichetta_id") || undefined;
   const statoParam = searchParams.get("stato") ?? "TUTTE";
   const stato: StatoAttivita | "TUTTE" = STATI_ATTIVITA.includes(statoParam as StatoAttivita)
     ? (statoParam as StatoAttivita)
@@ -49,6 +50,7 @@ export async function GET(request: Request) {
       progetto_id: progettoId,
       cliente_id: clienteId,
       stato,
+      etichetta_id: etichettaId,
     });
     return NextResponse.json({ eventi, dal, al });
   } catch (err) {

@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type {
   Cliente,
   ConfigGoogle,
+  Etichetta,
   EventoCalendario,
   GoogleModalita,
   OrigineEvento,
@@ -16,19 +17,49 @@ import AppHeader from "@/components/AppHeader";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
 import { ORIGINI, ORIGINI_LABELS, TIMEZONE_DEFAULT } from "@/lib/google-evento";
+import { caricaApi } from "@/lib/api-cache";
+import { useOperatore } from "@/lib/operatore-client";
+import {
+  type DatiEventoCompatto,
+  type FormEvento,
+  datiCompattiDaEvento,
+  datiNuoviDaSlot,
+  formDaDatiCompatti,
+  formDaEvento,
+  formVuoto,
+  payloadDaForm,
+} from "@/lib/calendario-form";
+import {
+  MINUTI_GIORNO,
+  calcolaRidimensionamento,
+  calcolaSpostamento,
+  chiaveNaive,
+  diffMinuti,
+  inizioFineEvento,
+  limitiDaGiorni,
+} from "@/lib/calendario-griglia";
+import PannelloCalendario from "@/components/calendario/PannelloCalendario";
+import PopoverEvento from "@/components/calendario/PopoverEvento";
+import VistaGiorno from "@/components/calendario/VistaGiorno";
+import VistaSettimanaOraria from "@/components/calendario/VistaSettimanaOraria";
+import { INPUT_CLASS, LABEL_CLASS } from "@/components/calendario/stili";
 import {
   AlertCircleIcon,
   CalendarIcon,
   CheckCircleIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  LayersIcon,
   PlusIcon,
+  TrashIcon,
+  XIcon,
 } from "@/components/icons";
 import {
   ORIGINE_LABELS,
   ORIGINE_STYLES,
   VISTE,
   chiaveGiorno,
+  daChiaveGiorno,
   etichettaGiorno,
   etichettaOrigine,
   etichettaPeriodo,
@@ -50,21 +81,6 @@ const STATI_ATTIVITA_OPTIONS: { value: StatoAttivita; label: string }[] = [
   { value: "IN_CORSO", label: "In corso" },
   { value: "COMPLETATA", label: "Completata" },
 ];
-
-const INPUT_CLASS =
-  "w-full rounded-control border border-crema-contorno bg-white py-1.5 px-3 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro";
-const LABEL_CLASS = "text-[10px] font-semibold uppercase tracking-wider text-caldo-testo";
-
-interface FormEvento {
-  titolo: string;
-  descrizione: string;
-  cliente_id: string;
-  stato: StatoAttivita;
-  priorita: "BASSA" | "MEDIA" | "ALTA";
-  data_inizio: string;
-  data_scadenza: string;
-  assegnatario: string;
-}
 
 // Risposta di GET /api/google/stato
 interface StatoGoogle {
@@ -96,17 +112,6 @@ interface CalendarioGoogle {
   summary: string;
 }
 
-const EMPTY_FORM: FormEvento = {
-  titolo: "",
-  descrizione: "",
-  cliente_id: "",
-  stato: "DA_FARE",
-  priorita: "MEDIA",
-  data_inizio: "",
-  data_scadenza: "",
-  assegnatario: "",
-};
-
 // Puntino di stato Google nel chip: il badge testuale affollerebbe le celle
 // del mese, quindi qui basta il colore, con il dettaglio nel title.
 //
@@ -129,12 +134,20 @@ const GOOGLE_DOT_LABEL: Record<string, string> = {
   DA_CANCELLARE: "da rimuovere da Google",
 };
 
-function ChipEvento({ e }: { e: EventoCalendario }) {
+function ChipEvento({ e, onModifica }: { e: EventoCalendario; onModifica?: (e: EventoCalendario) => void }) {
   const origine: OrigineEvento = origineEvento(e);
   const classe = `block truncate rounded-control border px-1.5 py-0.5 text-[10px] font-medium transition-colors duration-200 ${ORIGINE_STYLES[origine]}`;
   const google = e.google_stato ? ` · ${GOOGLE_DOT_LABEL[e.google_stato]}` : "";
-  const titolo = `${e.titolo} — ${etichettaOrigine(e)}${e.data_scadenza ? ` (${formatOra(e.data_scadenza)})` : ""}${google}`;
+  const etichette = e.etichette ?? [];
+  const etichetteTitolo = etichette.length
+    ? ` · etichette: ${etichette.map((et) => et.nome).join(", ")}`
+    : "";
+  const titolo = `${e.titolo} — ${etichettaOrigine(e)}${e.data_scadenza ? ` (${formatOra(e.data_scadenza)})` : ""}${google}${etichetteTitolo}`;
   const dot = e.google_stato ? GOOGLE_DOT[e.google_stato] : null;
+
+  // Pallini etichette: il colore e' libero (hex dell'utente), quindi via
+  // style inline. Max 3 nella cella stretta del mese, il resto va nel title.
+  const pallini = etichette.slice(0, 3);
 
   if (e.progetto_id) {
     return (
@@ -145,14 +158,35 @@ function ChipEvento({ e }: { e: EventoCalendario }) {
       >
         {dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}
         <span className="truncate">{e.titolo}</span>
+        {pallini.map((et) => (
+          <span
+            key={et.id}
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: et.colore }}
+          />
+        ))}
       </Link>
     );
   }
+  // Evento libero (non di progetto): il click apre la modifica, che fino a
+  // oggi non esisteva — l'evento si poteva solo creare e guardare.
   return (
-    <span className={`${classe} flex items-center gap-1`} title={titolo}>
+    <button
+      type="button"
+      onClick={() => onModifica?.(e)}
+      className={`${classe} flex w-full cursor-pointer items-center gap-1 text-left`}
+      title={`${titolo} — clicca per modificare`}
+    >
       {dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}
       <span className="truncate">{e.titolo}</span>
-    </span>
+      {pallini.map((et) => (
+        <span
+          key={et.id}
+          className="h-1.5 w-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: et.colore }}
+        />
+      ))}
+    </button>
   );
 }
 
@@ -536,24 +570,324 @@ function RigaCalendario({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Modale di gestione delle etichette personalizzate. Ogni etichetta ha un
+// nome e un colore libero (hex): la leggibilita' sui chip e' garantita dal
+// pallino pieno, che non ha bisogno di contrasto col testo.
+// ---------------------------------------------------------------------------
+
+function EtichetteModal({
+  etichette,
+  nuova,
+  setNuova,
+  saving,
+  errore,
+  esito,
+  onCrea,
+  onAggiorna,
+  onElimina,
+  onChiudi,
+}: {
+  etichette: Etichetta[];
+  nuova: { nome: string; colore: string };
+  setNuova: React.Dispatch<React.SetStateAction<{ nome: string; colore: string }>>;
+  saving: boolean;
+  errore: string;
+  esito: string;
+  onCrea: () => void;
+  onAggiorna: (id: string, patch: { nome?: string; colore?: string }) => void;
+  onElimina: (id: string) => void;
+  onChiudi: () => void;
+}) {
+  const [inModifica, setInModifica] = useState<Record<string, { nome: string; colore: string }>>({});
+  const [confermaDelete, setConfermaDelete] = useState<string | null>(null);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-inchiostro/40 px-4 py-6"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onChiudi();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Gestione etichette"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-card border border-crema-contorno bg-white shadow-soft"
+      >
+        {/* Intestazione */}
+        <div className="flex items-start justify-between gap-4 border-b border-crema-bordo px-5 py-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-crema-scuro">
+              <LayersIcon className="h-4 w-4 text-inchiostro" />
+            </span>
+            <div>
+              <h2 className="text-base font-bold text-inchiostro">Etichette del calendario</h2>
+              <p className="mt-0.5 text-xs text-caldo-testo">
+                Tag con colore libero da assegnare agli eventi: compaiono come pallini sui chip
+                e nell&apos;agenda della dashboard.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onChiudi}
+            aria-label="Chiudi"
+            className="shrink-0 cursor-pointer rounded p-1 text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Corpo scrollabile */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {(errore || esito) && (
+            <p
+              className={`mb-3 rounded-control border px-3 py-2 text-xs font-medium ${
+                errore
+                  ? "border-stato-urgenza-bordo bg-stato-urgenza-bg text-stato-urgenza-testo"
+                  : "border-stato-ok-bordo bg-stato-ok-bg text-stato-ok-testo"
+              }`}
+            >
+              {errore || esito}
+            </p>
+          )}
+
+          {/* Creazione */}
+          <div className="mb-4 rounded-control border border-crema-bordo bg-crema-scuro p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-caldo-testo">
+              Nuova etichetta
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={nuova.nome}
+                onChange={(e) => setNuova((n) => ({ ...n, nome: e.target.value }))}
+                placeholder="Es. Cliente premium"
+                maxLength={40}
+                className="min-w-0 flex-1 rounded-control border border-crema-contorno bg-white py-1.5 px-3 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+              />
+              <input
+                type="color"
+                value={nuova.colore}
+                onChange={(e) => setNuova((n) => ({ ...n, colore: e.target.value }))}
+                aria-label="Colore dell'etichetta"
+                className="h-9 w-12 shrink-0 cursor-pointer rounded-control border border-crema-contorno bg-white p-1"
+              />
+              <button
+                type="button"
+                onClick={onCrea}
+                disabled={saving || !nuova.nome.trim()}
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-control bg-inchiostro px-3.5 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                {saving ? "Creazione…" : "Crea"}
+              </button>
+            </div>
+          </div>
+
+          {/* Elenco */}
+          {etichette.length === 0 ? (
+            <p className="py-6 text-center text-xs text-caldo-testo">
+              Nessuna etichetta ancora. Creane una qui sopra.
+            </p>
+          ) : (
+            <ul className="divide-y divide-crema-bordo">
+              {etichette.map((et) => {
+                const edit = inModifica[et.id];
+                return (
+                  <li key={et.id} className="flex flex-wrap items-center gap-2 py-2.5">
+                    <span
+                      className="h-4 w-4 shrink-0 rounded-full"
+                      style={{ backgroundColor: et.colore }}
+                      aria-hidden="true"
+                    />
+                    {edit ? (
+                      <>
+                        <input
+                          value={edit.nome}
+                          onChange={(e) =>
+                            setInModifica((m) => ({ ...m, [et.id]: { ...m[et.id], nome: e.target.value } }))
+                          }
+                          maxLength={40}
+                          className="w-40 rounded-control border border-crema-contorno bg-white py-1 px-2 text-sm text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                        />
+                        <input
+                          type="color"
+                          value={edit.colore}
+                          onChange={(e) =>
+                            setInModifica((m) => ({ ...m, [et.id]: { ...m[et.id], colore: e.target.value } }))
+                          }
+                          aria-label={`Colore di ${et.nome}`}
+                          className="h-8 w-11 shrink-0 cursor-pointer rounded-control border border-crema-contorno bg-white p-1"
+                        />
+                        <button
+                          type="button"
+                          disabled={saving || !edit.nome.trim()}
+                          onClick={() => {
+                            onAggiorna(et.id, { nome: edit.nome.trim(), colore: edit.colore });
+                            setInModifica((m) => {
+                              const copy = { ...m };
+                              delete copy[et.id];
+                              return copy;
+                            });
+                          }}
+                          className="cursor-pointer rounded-control bg-inchiostro px-3 py-1 text-[11px] font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Salva
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setInModifica((m) => {
+                              const copy = { ...m };
+                              delete copy[et.id];
+                              return copy;
+                            })
+                          }
+                          className="cursor-pointer rounded-control border border-crema-contorno px-3 py-1 text-[11px] font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro"
+                        >
+                          Annulla
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-inchiostro">
+                          {et.nome}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setInModifica((m) => ({ ...m, [et.id]: { nome: et.nome, colore: et.colore } }))
+                          }
+                          className="cursor-pointer rounded-control border border-crema-contorno px-2.5 py-1 text-[11px] font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                        >
+                          Modifica
+                        </button>
+                        {confermaDelete === et.id ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium text-stato-urgenza-testo">
+                              Eliminare dai eventi?
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onElimina(et.id);
+                                setConfermaDelete(null);
+                              }}
+                              disabled={saving}
+                              className="cursor-pointer rounded-control bg-pericolo px-2.5 py-1 text-[11px] font-semibold text-white transition-colors duration-200 hover:bg-pericolo-scuro disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Sì, elimina
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfermaDelete(null)}
+                              className="cursor-pointer rounded-control border border-crema-contorno px-2.5 py-1 text-[11px] font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro"
+                            >
+                              No
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfermaDelete(et.id)}
+                            className="inline-flex cursor-pointer items-center gap-1 rounded-control border border-transparent bg-pericolo/10 px-2.5 py-1 text-[11px] font-semibold text-pericolo transition-colors duration-200 hover:bg-pericolo/20"
+                          >
+                            <TrashIcon className="h-3 w-3" />
+                            Elimina
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Piè di pagina */}
+        <div className="flex justify-end border-t border-crema-bordo px-5 py-3">
+          <button
+            type="button"
+            onClick={onChiudi}
+            className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+          >
+            Chiudi
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CalendarioPage() {
-  const [vista, setVista] = useState<VistaCalendario>("mese");
+  // La pagina nasce sulla griglia settimanale: è la vista che mostra durate
+  // e sovrapposizioni, cioè il motivo per cui il calendario è stato rifatto.
+  const [vista, setVista] = useState<VistaCalendario>("settimana");
   const [riferimento, setRiferimento] = useState<Date>(() => new Date());
   const [eventi, setEventi] = useState<EventoCalendario[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Annuncio per aria-live dopo spostamenti da tastiera o rollback.
+  const [avviso, setAvviso] = useState("");
 
   const [filtroProgetto, setFiltroProgetto] = useState("");
   const [filtroCliente, setFiltroCliente] = useState("");
   const [filtroStato, setFiltroStato] = useState<StatoAttivita | "TUTTE">("TUTTE");
 
+  // --- Filtri client-side --------------------------------------------------
+  // Origini, etichette e persona non hanno parametri API dedicati: filtrarli
+  // qui li rende istantanei e non fa ripartire la fetch a ogni toggle.
+  const [originiAttive, setOriginiAttive] = useState<Set<OrigineEvento>>(
+    () => new Set<OrigineEvento>(["progetto", "cliente", "generico"])
+  );
+  // Insieme vuoto = tutte le etichette. Il primo click isola quella scelta.
+  const [etichetteAttive, setEtichetteAttive] = useState<Set<string>>(
+    () => new Set<string>()
+  );
+  const [personaFiltro, setPersonaFiltro] = useState("");
+
+  const [showPannello, setShowPannello] = useState(false);
+  const [showFiltri, setShowFiltri] = useState(false);
+  const [operatori, setOperatori] = useState<{ id: string; nome: string }[]>([]);
+  const { operatore } = useOperatore();
+
+  // --- Popover compatto ----------------------------------------------------
+  const [popover, setPopover] = useState<{
+    evento: EventoCalendario | null;
+    ancora: { x: number; y: number };
+    dati: DatiEventoCompatto;
+  } | null>(null);
+  const [popoverSaving, setPopoverSaving] = useState(false);
+  const [popoverErrore, setPopoverErrore] = useState("");
+  // Conservato per riaprire il popover se l'utente annulla il modal completo
+  // aperto con «Tutti i dettagli».
+  const [pendingCompact, setPendingCompact] = useState<{
+    evento: EventoCalendario | null;
+    ancora: { x: number; y: number };
+    dati: DatiEventoCompatto;
+  } | null>(null);
+
   const [progetti, setProgetti] = useState<ProgettoListRow[]>([]);
   const [clienti, setClienti] = useState<Cliente[]>([]);
+  // Anagrafica etichette, caricata una volta e ricaricata dopo ogni CRUD.
+  const [etichette, setEtichette] = useState<Etichetta[]>([]);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<FormEvento>(EMPTY_FORM);
+  const [form, setForm] = useState<FormEvento>(formVuoto);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  // null = creazione; con un id si modifica quell'evento via PATCH.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // --- Gestione etichette --------------------------------------------------
+  const [showEtichette, setShowEtichette] = useState(false);
+  const [nuovaEtichetta, setNuovaEtichetta] = useState({ nome: "", colore: "#6B7280" });
+  const [etichetteSaving, setEtichetteSaving] = useState(false);
+  const [etichetteErrore, setEtichetteErrore] = useState("");
+  const [etichetteEsito, setEtichetteEsito] = useState("");
 
   // --- Google Calendar -----------------------------------------------------
   const [showGoogle, setShowGoogle] = useState(false);
@@ -568,6 +902,22 @@ export default function CalendarioPage() {
   const [gVerifica, setGVerifica] = useState<Record<string, string>>({});
 
   const requestSeq = useRef(0);
+  // Trigger del drawer: serve a restituirgli il focus alla chiusura.
+  const agendeRef = useRef<HTMLButtonElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const pannelloAperto = useRef(false);
+  pannelloAperto.current = showPannello;
+
+  // --- Pianificazione ottimistica ------------------------------------------
+  // Il drag deve aggiornare la UI subito e fare UN solo PATCH al rilascio.
+  // Un ref all'array serve a leggere lo stato corrente dentro i callback
+  // stabilizzati (che altrimenti vedrebbero una lista vecchia).
+  const eventiRef = useRef(eventi);
+  eventiRef.current = eventi;
+  const pianificazioneSeq = useRef<Record<string, number>>({});
+  const nudgeTimer = useRef<Record<string, number>>({});
+  const nudgeSnapshot = useRef<Record<string, EventoCalendario>>({});
+  const nudgeUltimo = useRef<Record<string, { inizio: string; fine: string }>>({});
 
   const loadEventi = useCallback(async () => {
     const seq = ++requestSeq.current;
@@ -609,13 +959,42 @@ export default function CalendarioPage() {
 
   const loadClienti = useCallback(async () => {
     try {
-      const res = await fetch("/api/clienti");
+      const data = await caricaApi<{ clienti: Cliente[] }>("/api/clienti");
+      setClienti(data.clienti ?? []);
+    } catch {
+      // Ignora
+    }
+  }, []);
+
+  const loadEtichette = useCallback(async () => {
+    try {
+      const res = await fetch("/api/etichette");
       if (res.ok) {
         const data = await res.json();
-        setClienti((data.clienti ?? []) as Cliente[]);
+        setEtichette((data.etichette ?? []) as Etichetta[]);
       }
     } catch {
       // Ignora
+    }
+  }, []);
+
+  const loadOperatori = useCallback(async () => {
+    try {
+      const res = await fetch("/api/operatori");
+      if (!res.ok) return;
+      const data = await res.json();
+      const righe = (data.operatori ?? []) as {
+        id: string;
+        nome: string;
+        attivo?: boolean;
+      }[];
+      setOperatori(
+        righe
+          .filter((r) => r.attivo !== false)
+          .map((r) => ({ id: r.id, nome: r.nome }))
+      );
+    } catch {
+      // Il team è un di più: senza anagrafica restano i nomi degli eventi.
     }
   }, []);
 
@@ -626,7 +1005,9 @@ export default function CalendarioPage() {
   useEffect(() => {
     loadProgetti();
     loadClienti();
-  }, [loadProgetti, loadClienti]);
+    loadEtichette();
+    loadOperatori();
+  }, [loadProgetti, loadClienti, loadEtichette, loadOperatori]);
 
   // --- Google Calendar -----------------------------------------------------
 
@@ -753,15 +1134,197 @@ export default function CalendarioPage() {
     setGConfig((c) => (c ? { ...c, mappatura: { ...c.mappatura, [origine]: valore } } : c));
   };
 
-  const perGiorno = raggruppaPerGiorno(eventi);
   const oggiChiave = chiaveGiorno(new Date());
+
+  // --- Filtri client-side --------------------------------------------------
+  // Semantica: origini = AND tra famiglie attive; etichette = OR ("una di
+  // queste"), insieme vuoto = tutte; persona = uguaglianza sul nome, perché
+  // l'assegnatario è testo libero e non un id.
+  const eventiVisibili = useMemo(() => {
+    const persona = personaFiltro.trim().toLowerCase();
+    return eventi.filter((e) => {
+      if (!originiAttive.has(origineEvento(e))) return false;
+
+      if (etichetteAttive.size > 0) {
+        const ids = (e.etichette ?? []).map((et) => et.id);
+        if (!ids.some((id) => etichetteAttive.has(id))) return false;
+      }
+
+      if (persona) {
+        const persone = [e.assegnatario, ...(e.persone ?? [])]
+          .filter((p): p is string => Boolean(p && p.trim()))
+          .map((p) => p.trim().toLowerCase());
+        if (!persone.includes(persona)) return false;
+      }
+
+      return true;
+    });
+  }, [eventi, originiAttive, etichetteAttive, personaFiltro]);
+
+  // Riordino per giorno, non a ogni render: senza memo ogni carattere digitato
+  // nel form di un evento ri-raggruppava tutti gli eventi dell'anno.
+  const perGiorno = useMemo(
+    () => raggruppaPerGiorno(eventiVisibili),
+    [eventiVisibili]
+  );
+
+  // I conteggi del pannello derivano dagli eventi NON filtrati: servono a
+  // spiegare cosa si sta escludendo, non a ripetere ciò che si vede.
+  const conteggioOrigini = useMemo(() => {
+    const out: Record<OrigineEvento, number> = {
+      progetto: 0,
+      cliente: 0,
+      generico: 0,
+    };
+    for (const e of eventi) out[origineEvento(e)] += 1;
+    return out;
+  }, [eventi]);
+
+  const conteggioEtichette = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const e of eventi) {
+      for (const et of e.etichette ?? []) {
+        out.set(et.id, (out.get(et.id) ?? 0) + 1);
+      }
+    }
+    return out;
+  }, [eventi]);
+
+  const giorniConEventi = useMemo(() => {
+    const out = new Set<string>();
+    for (const e of eventiVisibili) {
+      const k = chiaveNaive(e.data_scadenza);
+      if (k) out.add(k);
+    }
+    return out;
+  }, [eventiVisibili]);
+
+  const team = useMemo(() => {
+    const nomi = new Map<string, string>();
+    for (const o of operatori) nomi.set(o.nome.toLowerCase(), o.nome);
+    for (const e of eventi) {
+      for (const n of [e.assegnatario, ...(e.persone ?? [])]) {
+        const t = n?.trim();
+        if (t && !nomi.has(t.toLowerCase())) nomi.set(t.toLowerCase(), t);
+      }
+    }
+    if (operatore?.nome) {
+      nomi.set(operatore.nome.toLowerCase(), operatore.nome);
+    }
+    return Array.from(nomi.values()).sort((a, b) => a.localeCompare(b, "it"));
+  }, [operatori, eventi, operatore]);
+
+  const giorniVista = useMemo(
+    () => (vista === "giorno" ? [riferimento] : giorniSettimana(riferimento)),
+    [vista, riferimento]
+  );
+
+  const toggleOrigine = useCallback((origine: OrigineEvento) => {
+    setOriginiAttive((prev) => {
+      const prossimo = new Set(prev);
+      if (prossimo.has(origine)) prossimo.delete(origine);
+      else prossimo.add(origine);
+      return prossimo;
+    });
+  }, []);
+
+  const toggleEtichetta = useCallback((id: string) => {
+    setEtichetteAttive((prev) => {
+      // Dal "tutte" si passa direttamente a "solo questa": è il gesto che
+      // serve più spesso e non richiede due click.
+      if (prev.size === 0) return new Set([id]);
+      const prossimo = new Set(prev);
+      if (prossimo.has(id)) prossimo.delete(id);
+      else prossimo.add(id);
+      return prossimo;
+    });
+  }, []);
+
+  const selezionaPersona = useCallback((nome: string) => {
+    setPersonaFiltro((prev) =>
+      prev.toLowerCase() === nome.toLowerCase() ? "" : nome
+    );
+  }, []);
+
+  const chiudiPannello = useCallback(() => {
+    setShowPannello(false);
+    // Il focus non deve cadere sul body quando il drawer scompare.
+    window.setTimeout(() => agendeRef.current?.focus(), 0);
+  }, []);
+
+  const selezionaGiorno = useCallback((giorno: Date) => {
+    setRiferimento(giorno);
+    if (pannelloAperto.current) chiudiPannello();
+  }, [chiudiPannello]);
+
+  // All'apertura il drawer è un dialogo modale: il focus entra nel pannello e
+  // non resta sul bottone che l'ha aperto.
+  useEffect(() => {
+    if (showPannello) drawerCloseRef.current?.focus();
+  }, [showPannello]);
 
   const apriNuovoEvento = (giorno?: Date) => {
     const base = giorno ?? riferimento;
     const k = chiaveGiorno(base);
-    setForm({ ...EMPTY_FORM, data_scadenza: `${k}T09:00` });
+    // Un'ora di default (09:00–10:00): la griglia mostra subito un blocco
+    // della durata giusta invece di derivarla dalla sola scadenza.
+    setForm({
+      ...formVuoto(),
+      data_inizio: `${k}T09:00`,
+      data_scadenza: `${k}T10:00`,
+    });
     setFormError("");
+    setEditingId(null);
+    setConfirmDeleteId(null);
+    setPendingCompact(null);
     setShowForm(true);
+  };
+
+  // Le date arrivano gia' in formato datetime-local (RE_DATETIME_LOCAL),
+  // quindi il form si riempie senza conversioni.
+  const apriModificaEvento = (e: EventoCalendario) => {
+    setForm(formDaEvento(e));
+    setFormError("");
+    setEditingId(e.id);
+    setConfirmDeleteId(null);
+    setPendingCompact(null);
+    setShowForm(true);
+  };
+
+  // Duplica: crea una copia apribile subito in modifica, cosi' si puo'
+  // cambiare data/titolo senza rifare tutto a mano. Le etichette vengono
+  // copiate; progetto e cliente restano quelli originali (se esistono).
+  const duplicaEvento = async () => {
+    if (!form.titolo.trim()) {
+      setFormError("Compila il titolo prima di duplicare.");
+      return;
+    }
+    setSaving(true);
+    setFormError("");
+    try {
+      // Il form ora porta anche progetto_id: la copia mantiene il
+      // collegamento al progetto senza doverlo recuperare dall'originale.
+      const res = await fetch("/api/attivita", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          payloadDaForm({
+            ...form,
+            titolo: `Copia di ${form.titolo.trim()}`,
+          })
+        ),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      loadEventi();
+      // Si rimane sul form di modifica dell'ORIGINALE: la copia esiste gia'
+      // in calendario.
+      setFormError("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Errore di duplicazione.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const salvaEvento = async (ev: React.FormEvent) => {
@@ -769,24 +1332,18 @@ export default function CalendarioPage() {
     setSaving(true);
     setFormError("");
     try {
-      const res = await fetch("/api/attivita", {
-        method: "POST",
+      const payload = payloadDaForm(form);
+      const res = await fetch(editingId ? `/api/attivita/${editingId}` : "/api/attivita", {
+        method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          titolo: form.titolo,
-          descrizione: form.descrizione || null,
-          cliente_id: form.cliente_id || null,
-          stato: form.stato,
-          priorita: form.priorita,
-          data_inizio: form.data_inizio || null,
-          data_scadenza: form.data_scadenza || null,
-          assegnatario: form.assegnatario || null,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
       setShowForm(false);
-      setForm(EMPTY_FORM);
+      setPendingCompact(null);
+      setForm(formVuoto());
+      setEditingId(null);
       loadEventi();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Errore di salvataggio.");
@@ -794,6 +1351,538 @@ export default function CalendarioPage() {
       setSaving(false);
     }
   };
+
+  // --- Popover compatto ----------------------------------------------------
+  // Il popover è un editor a sé: crea o modifica un evento con i campi
+  // essenziali e passa al modal completo solo su richiesta. Anche qui il
+  // payload passa da payloadDaForm, così progetto_id non va più perso.
+
+  const apriPopoverNuovo = useCallback(
+    (chiave: string, minuti: number, ancora: { x: number; y: number }) => {
+      setPopoverErrore("");
+      setPopover({
+        evento: null,
+        ancora,
+        dati: datiNuoviDaSlot(chiave, minuti),
+      });
+    },
+    []
+  );
+
+  const apriPopoverEvento = useCallback(
+    (e: EventoCalendario, ancora: { x: number; y: number }) => {
+      const range = inizioFineEvento(e);
+      // Il popover compatto ha una sola data: un evento di più giorni
+      // verrebbe compresso a 24h al primo salvataggio. Per quelli si apre
+      // direttamente il modal completo, che ha inizio e fine separati.
+      if (range && diffMinuti(range.fine, range.inizio) > MINUTI_GIORNO) {
+        setForm(formDaEvento(e));
+        setFormError("");
+        setEditingId(e.id);
+        setConfirmDeleteId(null);
+        setPendingCompact(null);
+        setShowForm(true);
+        return;
+      }
+      setPopoverErrore("");
+      setPopover({ evento: e, ancora, dati: datiCompattiDaEvento(e) });
+    },
+    []
+  );
+
+  const chiudiPopover = useCallback(() => {
+    setPopover(null);
+    setPopoverErrore("");
+  }, []);
+
+  const cambiaPopover = useCallback((patch: Partial<DatiEventoCompatto>) => {
+    setPopover((p) => {
+      if (!p) return p;
+      const dati = { ...p.dati, ...patch };
+      // Se l'utente tocca gli orari, il "finisce il giorno dopo" va
+      // ricalcolato dal confronto fine/inizio: tenere il flag vecchio
+      // salverebbe l'evento di un giorno in più senza che nulla lo dica.
+      // I casi notturni restano coperti dallo stesso confronto in
+      // formDaDatiCompatti.
+      if (patch.inizio !== undefined || patch.fine !== undefined) {
+        dati.giornoFineSuccessivo = false;
+      }
+      return { ...p, dati };
+    });
+  }, []);
+
+  const salvaPopover = async () => {
+    if (!popover) return;
+    const titolo = popover.dati.titolo.trim();
+    if (!titolo) {
+      setPopoverErrore("Il titolo è obbligatorio.");
+      return;
+    }
+
+    const base = popover.evento ? formDaEvento(popover.evento) : formVuoto();
+    const completa = formDaDatiCompatti({ ...popover.dati, titolo }, base);
+    setPopoverSaving(true);
+    setPopoverErrore("");
+    try {
+      const res = await fetch(
+        popover.evento
+          ? `/api/attivita/${popover.evento.id}`
+          : "/api/attivita",
+        {
+          method: popover.evento ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payloadDaForm(completa)),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      chiudiPopover();
+      // Il POST non restituisce nomi di progetto/cliente né etichette: per
+      // la creazione il refetch è obbligatorio. Per la modifica lo stesso
+      // refetch evita di dover fondere a mano etichette e relazioni.
+      loadEventi();
+    } catch (err) {
+      setPopoverErrore(
+        err instanceof Error ? err.message : "Errore di salvataggio."
+      );
+    } finally {
+      setPopoverSaving(false);
+    }
+  };
+
+  const eliminaPopover = async () => {
+    if (!popover?.evento) return;
+    setPopoverSaving(true);
+    setPopoverErrore("");
+    try {
+      const res = await fetch(`/api/attivita/${popover.evento.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      chiudiPopover();
+      loadEventi();
+    } catch (err) {
+      setPopoverErrore(
+        err instanceof Error ? err.message : "Errore di eliminazione."
+      );
+    } finally {
+      setPopoverSaving(false);
+    }
+  };
+
+  const duplicaPopover = async () => {
+    if (!popover?.evento) return;
+    setPopoverSaving(true);
+    setPopoverErrore("");
+    try {
+      // Si duplica ciò che è a schermo, non l'originale salvato: se l'utente
+      // ha già cambiato orario o titolo, la copia deve partire da lì.
+      const base = formDaDatiCompatti(
+        {
+          ...popover.dati,
+          titolo: `Copia di ${
+            popover.dati.titolo.trim() || popover.evento.titolo
+          }`,
+        },
+        formDaEvento(popover.evento)
+      );
+      const res = await fetch("/api/attivita", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadDaForm(base)),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      chiudiPopover();
+      loadEventi();
+    } catch (err) {
+      setPopoverErrore(
+        err instanceof Error ? err.message : "Errore di duplicazione."
+      );
+    } finally {
+      setPopoverSaving(false);
+    }
+  };
+
+  // «Tutti i dettagli»: il popover resta in sospeso, così annullare il modal
+  // riporta all'editor compatto invece di perdere quanto digitato.
+  const vaiAiDettagli = useCallback(() => {
+    if (!popover) return;
+    const base = popover.evento ? formDaEvento(popover.evento) : formVuoto();
+    setForm(formDaDatiCompatti(popover.dati, base));
+    setEditingId(popover.evento?.id ?? null);
+    setConfirmDeleteId(null);
+    setFormError("");
+    setPendingCompact(popover);
+    setPopover(null);
+    setShowForm(true);
+  }, [popover]);
+
+  // --- Pianificazione ottimistica ------------------------------------------
+  // Il drag aggiorna la UI subito e fa UN solo PATCH al rilascio. Se il PATCH
+  // fallisce si torna all'ora precedente; un errore Google non deve
+  // trascinare indietro l'evento, quindi si guarda solo la risposta HTTP.
+
+  const applicaPianificazione = useCallback(
+    (id: string, inizio: string, fine: string) => {
+      setEventi((prev) =>
+        prev.map((e) =>
+          e.id === id ? { ...e, data_inizio: inizio, data_scadenza: fine } : e
+        )
+      );
+    },
+    []
+  );
+
+  const inviaPianificazione = useCallback(
+    async (
+      id: string,
+      inizio: string,
+      fine: string,
+      snapshot: EventoCalendario | null,
+      annuncio?: string
+    ) => {
+      const seq = (pianificazioneSeq.current[id] ?? 0) + 1;
+      pianificazioneSeq.current[id] = seq;
+      try {
+        const res = await fetch(`/api/attivita/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data_inizio: inizio, data_scadenza: fine }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+        // Una risposta vecchia non deve sovrascrivere uno spostamento più
+        // recente partito nel frattempo.
+        if (pianificazioneSeq.current[id] !== seq) return;
+        setEventi((prev) =>
+          prev.map((e) =>
+            e.id === id
+              ? {
+                  ...e,
+                  data_inizio: (data.data_inizio as string | null) ?? inizio,
+                  data_scadenza: (data.data_scadenza as string | null) ?? fine,
+                }
+              : e
+          )
+        );
+        setAvviso(annuncio ?? "Evento spostato.");
+      } catch (err) {
+        if (pianificazioneSeq.current[id] !== seq) return;
+        if (snapshot) {
+          setEventi((prev) =>
+            prev.map((e) =>
+              e.id === id
+                ? {
+                    ...e,
+                    data_inizio: snapshot.data_inizio,
+                    data_scadenza: snapshot.data_scadenza,
+                  }
+                : e
+            )
+          );
+        }
+        setAvviso(
+          `Spostamento non salvato: ${
+            err instanceof Error ? err.message : "errore di rete"
+          }. Ripristinata l'ora precedente.`
+        );
+      }
+    },
+    []
+  );
+
+  // Un drag che parte mentre un nudge da tastiera è ancora in attesa deve
+  // annullarlo: altrimenti il timer invierebbe la posizione vecchia sopra
+  // quella appena rilasciata.
+  const annullaNudge = useCallback((id: string) => {
+    const timer = nudgeTimer.current[id];
+    if (timer) window.clearTimeout(timer);
+    delete nudgeTimer.current[id];
+    delete nudgeUltimo.current[id];
+    delete nudgeSnapshot.current[id];
+  }, []);
+
+  const spostaEvento = useCallback(
+    (evento: EventoCalendario, inizio: string, fine: string) => {
+      annullaNudge(evento.id);
+      applicaPianificazione(evento.id, inizio, fine);
+      void inviaPianificazione(evento.id, inizio, fine, evento);
+    },
+    [annullaNudge, applicaPianificazione, inviaPianificazione]
+  );
+
+  const ridimensionaEvento = useCallback(
+    (evento: EventoCalendario, fine: string) => {
+      const range = inizioFineEvento(evento);
+      if (!range) return;
+      annullaNudge(evento.id);
+      applicaPianificazione(evento.id, range.inizio, fine);
+      void inviaPianificazione(evento.id, range.inizio, fine, evento);
+    },
+    [annullaNudge, applicaPianificazione, inviaPianificazione]
+  );
+
+  // Alternativa al drag per WCAG 2.2 «Dragging Movements»: Alt+frecce sul
+  // blocco evento. Le raffiche sono debounced (400 ms) in un solo PATCH, e
+  // lo snapshot è quello del PRIMO movimento della raffica, non dell'ultimo.
+  const nudgeEvento = useCallback(
+    (
+      evento: EventoCalendario,
+      deltaMinuti: number,
+      deltaGiorni: number,
+      ridimensiona: boolean
+    ) => {
+      const range = inizioFineEvento(evento);
+      if (!range) return;
+      const limiti = limitiDaGiorni(giorniVista);
+
+      let inizio = range.inizio;
+      let fine = range.fine;
+      if (ridimensiona) {
+        fine = calcolaRidimensionamento({
+          inizio,
+          fine0: fine,
+          deltaMinuti,
+          limiteFine: limiti.fine,
+        }).fine;
+      } else {
+        const spostato = calcolaSpostamento({
+          inizio0: inizio,
+          fine0: fine,
+          deltaMinuti,
+          deltaGiorni,
+          limiteInizio: limiti.inizio,
+          limiteFine: limiti.fine,
+        });
+        inizio = spostato.inizio;
+        fine = spostato.fine;
+      }
+      if (inizio === range.inizio && fine === range.fine) return;
+
+      if (!nudgeSnapshot.current[evento.id]) {
+        nudgeSnapshot.current[evento.id] =
+          eventiRef.current.find((e) => e.id === evento.id) ?? evento;
+      }
+      nudgeUltimo.current[evento.id] = { inizio, fine };
+      applicaPianificazione(evento.id, inizio, fine);
+
+      const precedente = nudgeTimer.current[evento.id];
+      if (precedente) window.clearTimeout(precedente);
+      nudgeTimer.current[evento.id] = window.setTimeout(() => {
+        const ultimo = nudgeUltimo.current[evento.id];
+        const snapshot = nudgeSnapshot.current[evento.id] ?? null;
+        delete nudgeTimer.current[evento.id];
+        delete nudgeUltimo.current[evento.id];
+        delete nudgeSnapshot.current[evento.id];
+        if (!ultimo) return;
+        void inviaPianificazione(
+          evento.id,
+          ultimo.inizio,
+          ultimo.fine,
+          snapshot,
+          `Evento ${ridimensiona ? "ridimensionato" : "spostato"}: ${etichettaGiorno(
+            chiaveNaive(ultimo.inizio) ?? ultimo.inizio.slice(0, 10)
+          )}, ${ultimo.inizio.slice(11, 16)}–${ultimo.fine.slice(11, 16)}.`
+        );
+      }, 400);
+
+      setAvviso(
+        `Evento ${ridimensiona ? "ridimensionato" : "spostato"}: ${inizio.slice(
+          11,
+          16
+        )}–${fine.slice(11, 16)}.`
+      );
+    },
+    [giorniVista, applicaPianificazione, inviaPianificazione]
+  );
+
+  // Timer pendenti alla chiusura della pagina: nessun PATCH orfano.
+  useEffect(
+    () => () => {
+      for (const timer of Object.values(nudgeTimer.current)) {
+        window.clearTimeout(timer);
+      }
+    },
+    []
+  );
+
+  // --- Gestione etichette --------------------------------------------------
+
+  const creaEtichetta = async () => {
+    const nome = nuovaEtichetta.nome.trim();
+    if (!nome) {
+      setEtichetteErrore("Il nome è obbligatorio.");
+      return;
+    }
+    setEtichetteSaving(true);
+    setEtichetteErrore("");
+    setEtichetteEsito("");
+    try {
+      const res = await fetch("/api/etichette", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome, colore: nuovaEtichetta.colore }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      // La nuova etichetta viene subito assegnata all'evento aperto, se c'e'.
+      if (showForm) {
+        setForm((f) => ({ ...f, etichette: [...f.etichette, data.id as string] }));
+      }
+      setNuovaEtichetta({ nome: "", colore: "#6B7280" });
+      setEtichetteEsito(`Etichetta «${nome}» creata.`);
+      await loadEtichette();
+    } catch (err) {
+      setEtichetteErrore(err instanceof Error ? err.message : "Errore di creazione.");
+    } finally {
+      setEtichetteSaving(false);
+    }
+  };
+
+  const aggiornaEtichetta = async (id: string, patch: { nome?: string; colore?: string }) => {
+    setEtichetteSaving(true);
+    setEtichetteErrore("");
+    setEtichetteEsito("");
+    try {
+      const res = await fetch(`/api/etichette/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      await loadEtichette();
+    } catch (err) {
+      setEtichetteErrore(err instanceof Error ? err.message : "Errore di aggiornamento.");
+    } finally {
+      setEtichetteSaving(false);
+    }
+  };
+
+  const eliminaEtichetta = async (id: string) => {
+    setEtichetteSaving(true);
+    setEtichetteErrore("");
+    setEtichetteEsito("");
+    try {
+      const res = await fetch(`/api/etichette/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      // Se l'etichetta era nel filtro o nel form corrente, si toglie.
+      setEtichetteAttive((prev) => {
+        if (!prev.has(id)) return prev;
+        const prossimo = new Set(prev);
+        prossimo.delete(id);
+        return prossimo;
+      });
+      setForm((f) => ({ ...f, etichette: f.etichette.filter((e) => e !== id) }));
+      setEtichetteEsito("Etichetta eliminata.");
+      await loadEtichette();
+    } catch (err) {
+      setEtichetteErrore(err instanceof Error ? err.message : "Errore di eliminazione.");
+    } finally {
+      setEtichetteSaving(false);
+    }
+  };
+
+  const eliminaEvento = async (id: string) => {
+    setSaving(true);
+    setFormError("");
+    try {
+      const res = await fetch(`/api/attivita/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      setShowForm(false);
+      setPendingCompact(null);
+      setForm(formVuoto());
+      setEditingId(null);
+      setConfirmDeleteId(null);
+      loadEventi();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Errore di eliminazione.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const chiudiForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setConfirmDeleteId(null);
+    setFormError("");
+    // Il modal può essere stato aperto da «Tutti i dettagli»: annullarlo
+    // riporta al popover compatto con i dati di partenza.
+    if (pendingCompact) {
+      setPopover(pendingCompact);
+      setPendingCompact(null);
+    }
+  };
+
+  // ESC chiude il livello più alto: etichette (se aperte da dentro), poi il
+  // modal evento, poi il drawer del pannello. Il popover ha il suo listener.
+  useEffect(() => {
+    if (!showForm && !showEtichette && !showPannello) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showEtichette) {
+        setShowEtichette(false);
+        setEtichetteErrore("");
+        setEtichetteEsito("");
+      } else if (showForm) {
+        chiudiForm();
+      } else {
+        chiudiPannello();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, showEtichette, showPannello]);
+
+  // Lo stesso pannello serve al desktop (colonna fissa) e al drawer mobile.
+  // Nessun id interno: le due copie possono convivere nel DOM senza
+  // duplicare `htmlFor`/`id`.
+  const pannello = (
+    <PannelloCalendario
+      riferimento={riferimento}
+      oggiChiave={oggiChiave}
+      giorniConEventi={giorniConEventi}
+      onSelezionaGiorno={selezionaGiorno}
+      originiAttive={originiAttive}
+      conteggioOrigini={conteggioOrigini}
+      onToggleOrigine={toggleOrigine}
+      etichette={etichette}
+      etichetteAttive={etichetteAttive}
+      conteggioEtichette={conteggioEtichette}
+      onToggleEtichetta={toggleEtichetta}
+      onGestisciEtichette={() => {
+        setShowEtichette(true);
+        setShowPannello(false);
+      }}
+      team={team}
+      personaFiltro={personaFiltro}
+      operatoreCorrente={operatore?.nome ?? null}
+      onPersona={selezionaPersona}
+      showFiltri={showFiltri}
+      onToggleFiltri={() => setShowFiltri((v) => !v)}
+      filtriAvanzati={{
+        progetti,
+        clienti,
+        filtroProgetto,
+        filtroCliente,
+        filtroStato,
+        onProgetto: setFiltroProgetto,
+        onCliente: setFiltroCliente,
+        onStato: setFiltroStato,
+        onAzzera: () => {
+          setFiltroProgetto("");
+          setFiltroCliente("");
+          setFiltroStato("TUTTE");
+        },
+      }}
+    />
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -808,6 +1897,29 @@ export default function CalendarioPage() {
       <AppHeader
         azioni={
           <>
+            <button
+              type="button"
+              onClick={() => setShowEtichette((v) => !v)}
+              title="Gestisci le etichette del calendario"
+              aria-expanded={showEtichette}
+              className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors duration-200 ${
+                showEtichette
+                  ? "border-inchiostro bg-inchiostro text-white"
+                  : "border-crema-contorno bg-white text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
+              }`}
+            >
+              <LayersIcon className="h-3.5 w-3.5" />
+              Etichette
+              {etichette.length > 0 && (
+                <span
+                  className={`rounded-full px-1.5 text-[10px] font-bold ${
+                    showEtichette ? "bg-white/20 text-white" : "bg-crema-scuro text-caldo-testo"
+                  }`}
+                >
+                  {etichette.length}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setShowGoogle((v) => !v)}
@@ -862,99 +1974,91 @@ export default function CalendarioPage() {
           }
         />
 
-        {/* La barra di sezione porta il periodo come titolo e, sulla stessa
-            riga, i comandi che agiscono su quel periodo: e' il ritmo
-            `titolo · controlli` della reference.
-            E' una striscia a se', NON il contenitore del calendario: la
-            griglia ha gia' la sua card con bordo e raggio, e annidare card
-            dentro card produce due bordi paralleli a 4px l'uno dall'altro. */}
-        <div className="mb-4 overflow-hidden rounded-card border border-crema-contorno bg-white">
-          <SectionBar titolo={etichettaPeriodo(vista, riferimento)} icona={CalendarIcon}>
-            <div className="inline-flex rounded-full border border-crema-contorno bg-white p-0.5">
-              {VISTE.map((v) => (
+        {/* Due pannelli come nella reference: a sinistra mini-mese, agende,
+            etichette e squadra; a destra il periodo e la griglia. Sotto lg il
+            pannello diventa un drawer: 272px fissi lascerebbero al calendario
+            meno di 400px, cioè titoli spezzati a metà parola. */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[272px_minmax(0,1fr)] lg:items-start">
+          <aside className="hidden lg:sticky lg:top-0 lg:block lg:max-h-[calc(100dvh-2.5rem)] lg:overflow-y-auto lg:overscroll-contain">
+            {pannello}
+          </aside>
+
+          <div className="min-w-0">
+            {/* La barra di sezione porta il periodo come titolo e, sulla
+                stessa riga, i comandi che agiscono su quel periodo. E' una
+                striscia a sé, NON il contenitore della griglia: quella ha già
+                la sua card, e due bordi paralleli a 4px sono rumore. */}
+            <div className="mb-4 overflow-hidden rounded-card border border-crema-contorno bg-white">
+              <SectionBar
+                titolo={etichettaPeriodo(vista, riferimento)}
+                icona={CalendarIcon}
+              >
                 <button
-                  key={v.id}
+                  ref={agendeRef}
                   type="button"
-                  onClick={() => setVista(v.id)}
-                  aria-pressed={vista === v.id}
-                  className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors duration-200 ${
-                    vista === v.id
-                      ? "bg-inchiostro text-white"
-                      : "text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
-                  }`}
+                  onClick={() => setShowPannello(true)}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-full border border-crema-contorno bg-white px-3 py-1.5 text-xs font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro lg:hidden"
                 >
-                  {v.label}
+                  <LayersIcon className="h-3.5 w-3.5" />
+                  Agende
                 </button>
-              ))}
+
+                <div className="inline-flex rounded-full border border-crema-contorno bg-white p-0.5">
+                  {VISTE.map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => setVista(v.id)}
+                      aria-pressed={vista === v.id}
+                      className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors duration-200 ${
+                        vista === v.id
+                          ? "bg-inchiostro text-white"
+                          : "text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
+                      }`}
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRiferimento((d) => spostaAnchor(vista, d, -1))
+                    }
+                    className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-crema-contorno text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                    aria-label="Periodo precedente"
+                  >
+                    <ChevronLeftIcon className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRiferimento(new Date())}
+                    className="cursor-pointer rounded-full border border-crema-contorno px-2.5 py-1 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                  >
+                    Oggi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRiferimento((d) => spostaAnchor(vista, d, 1))
+                    }
+                    className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-crema-contorno text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                    aria-label="Periodo successivo"
+                  >
+                    <ChevronRightIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </SectionBar>
             </div>
 
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setRiferimento((d) => spostaAnchor(vista, d, -1))}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-crema-contorno text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
-                aria-label="Periodo precedente"
-              >
-                <ChevronLeftIcon className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setRiferimento(new Date())}
-                className="cursor-pointer rounded-full border border-crema-contorno px-2.5 py-1 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
-              >
-                Oggi
-              </button>
-              <button
-                type="button"
-                onClick={() => setRiferimento((d) => spostaAnchor(vista, d, 1))}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-crema-contorno text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
-                aria-label="Periodo successivo"
-              >
-                <ChevronRightIcon className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            <select
-              value={filtroProgetto}
-              onChange={(e) => setFiltroProgetto(e.target.value)}
-              aria-label="Filtra per progetto"
-              className="w-[10.5rem] cursor-pointer truncate rounded-full border border-crema-contorno bg-white py-1.5 px-3 text-xs font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-            >
-              <option value="">Tutti i progetti</option>
-              {progetti.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.codice} · {p.nome}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filtroCliente}
-              onChange={(e) => setFiltroCliente(e.target.value)}
-              aria-label="Filtra per cliente"
-              className="w-[10.5rem] cursor-pointer truncate rounded-full border border-crema-contorno bg-white py-1.5 px-3 text-xs font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-            >
-              <option value="">Tutti i clienti</option>
-              {clienti.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.ragione_sociale}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filtroStato}
-              onChange={(e) => setFiltroStato(e.target.value as StatoAttivita | "TUTTE")}
-              aria-label="Filtra per stato"
-              className="w-[10.5rem] cursor-pointer truncate rounded-full border border-crema-contorno bg-white py-1.5 px-3 text-xs font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-            >
-              <option value="TUTTE">Tutti gli stati</option>
-              {STATI_ATTIVITA_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </SectionBar>
-        </div>
+        {/* Annuncio per gli spostamenti da tastiera e i rollback. Sempre nel
+            DOM: un'aria-live aggiunta solo al momento dell'annuncio non viene
+            letta dai lettori di schermo. */}
+        <p role="status" aria-live="polite" className="sr-only">
+          {avviso}
+        </p>
 
         {error && (
           <p className="mb-4 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-3 py-2 text-xs font-medium text-stato-urgenza-testo">
@@ -980,14 +2084,76 @@ export default function CalendarioPage() {
           onChiudi={() => setShowGoogle(false)}
         />}
 
+        {showEtichette && (
+          <EtichetteModal
+            etichette={etichette}
+            nuova={nuovaEtichetta}
+            setNuova={setNuovaEtichetta}
+            saving={etichetteSaving}
+            errore={etichetteErrore}
+            esito={etichetteEsito}
+            onCrea={creaEtichetta}
+            onAggiorna={aggiornaEtichetta}
+            onElimina={eliminaEtichetta}
+            onChiudi={() => {
+              setShowEtichette(false);
+              setEtichetteErrore("");
+              setEtichetteEsito("");
+            }}
+          />
+        )}
+
         {showForm && (
-          <form
-            onSubmit={salvaEvento}
-            className="mb-5 overflow-hidden rounded-panel border border-crema-contorno bg-white"
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-inchiostro/40 px-4 py-6"
+            onMouseDown={(e) => {
+              // Solo il click sullo sfondo chiude: uno sul contenuto non deve
+              // propagare fino all'overlay (altrimenti perderebbe il form).
+              if (e.target === e.currentTarget) chiudiForm();
+            }}
           >
-            <SectionBar titolo="Nuovo evento" icona={PlusIcon} />
-            <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="lg:col-span-2">
+            <form
+              onSubmit={salvaEvento}
+              role="dialog"
+              aria-modal="true"
+              aria-label={editingId ? "Modifica evento" : "Nuovo evento"}
+              className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-card border border-crema-contorno bg-white shadow-soft"
+            >
+              {/* Intestazione */}
+              <div className="flex items-start justify-between gap-4 border-b border-crema-bordo px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-crema-scuro">
+                    {editingId ? (
+                      <CalendarIcon className="h-4 w-4 text-inchiostro" />
+                    ) : (
+                      <PlusIcon className="h-4 w-4 text-inchiostro" />
+                    )}
+                  </span>
+                  <div>
+                    <h2 className="text-base font-bold text-inchiostro">
+                      {editingId ? "Modifica evento" : "Nuovo evento"}
+                    </h2>
+                    <p className="mt-0.5 text-xs text-caldo-testo">
+                      {editingId
+                        ? "Aggiorna i dettagli, le etichette o duplica l'evento."
+                        : "Compila la scadenza per farlo comparire in calendario."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={chiudiForm}
+                  aria-label="Chiudi"
+                  className="shrink-0 cursor-pointer rounded p-1 text-caldo-testo transition-colors duration-200 hover:text-inchiostro"
+                >
+                  <XIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Corpo scrollabile */}
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
                 <label className={LABEL_CLASS}>Titolo *</label>
                 <input
                   value={form.titolo}
@@ -998,10 +2164,38 @@ export default function CalendarioPage() {
                 />
               </div>
               <div>
+                <label className={LABEL_CLASS}>Progetto</label>
+                <select
+                  value={form.progetto_id}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      progetto_id: e.target.value,
+                      // Mutua esclusione: il progetto vince, come in payloadDaForm.
+                      cliente_id: e.target.value ? "" : form.cliente_id,
+                    })
+                  }
+                  className={`cursor-pointer ${INPUT_CLASS}`}
+                >
+                  <option value="">Nessun progetto</option>
+                  {progetti.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.codice} · {p.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className={LABEL_CLASS}>Cliente</label>
                 <select
                   value={form.cliente_id}
-                  onChange={(e) => setForm({ ...form, cliente_id: e.target.value })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      cliente_id: e.target.value,
+                      progetto_id: e.target.value ? "" : form.progetto_id,
+                    })
+                  }
                   className={`cursor-pointer ${INPUT_CLASS}`}
                 >
                   <option value="">Nessun cliente</option>
@@ -1070,7 +2264,7 @@ export default function CalendarioPage() {
                   <option value="ALTA">Alta</option>
                 </select>
               </div>
-              <div className="sm:col-span-2 lg:col-span-4">
+              <div className="sm:col-span-2">
                 <label className={LABEL_CLASS}>Descrizione</label>
                 <textarea
                   value={form.descrizione}
@@ -1079,58 +2273,239 @@ export default function CalendarioPage() {
                   className={INPUT_CLASS}
                 />
               </div>
-            </div>
+              <div className="sm:col-span-2">
+                <div className="flex items-center justify-between">
+                  <label className={LABEL_CLASS}>Etichette</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowEtichette(true)}
+                    className="cursor-pointer text-[11px] font-semibold text-caldo-testo underline-offset-2 transition-colors duration-200 hover:text-inchiostro hover:underline"
+                  >
+                    Gestisci etichette
+                  </button>
+                </div>
+                {etichette.length === 0 ? (
+                  <p className="mt-1 text-[11px] text-caldo-testo">
+                    Nessuna etichetta: creane una con «Gestisci etichette».
+                  </p>
+                ) : (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {etichette.map((et) => {
+                      const attiva = form.etichette.includes(et.id);
+                      return (
+                        <button
+                          key={et.id}
+                          type="button"
+                          aria-pressed={attiva}
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              etichette: attiva
+                                ? f.etichette.filter((id) => id !== et.id)
+                                : [...f.etichette, et.id],
+                            }))
+                          }
+                          className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors duration-200 ${
+                            attiva
+                              ? "border-inchiostro bg-inchiostro text-white"
+                              : "border-crema-contorno bg-white text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
+                          }`}
+                        >
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: et.colore }}
+                          />
+                          {et.nome}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+                </div>
 
-            {formError && (
-              <p className="mt-3 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-3 py-2 text-xs font-medium text-stato-urgenza-testo">
-                {formError}
-              </p>
-            )}
+                {formError && (
+                  <p className="mt-3 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-3 py-2 text-xs font-medium text-stato-urgenza-testo">
+                    {formError}
+                  </p>
+                )}
+              </div>
 
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="cursor-pointer rounded-full bg-inchiostro px-3.5 py-1.5 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? "Salvataggio…" : "Crea evento"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setFormError("");
-                }}
-                className="cursor-pointer rounded-full border border-crema-contorno bg-white px-3.5 py-1.5 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
-              >
-                Annulla
-              </button>
-            </div>
-          </form>
-        )}
-
-        {loading && eventi.length === 0 ? (
-          <div className="flex items-center justify-center p-10">
-            <p className="text-sm text-caldo-testo">Caricamento calendario…</p>
+              {/* Piè di pagina: azioni secondarie (duplica/elimina) a sinistra,
+                  annulla e salvataggio a destra. */}
+              <div className="flex flex-wrap items-center gap-2 border-t border-crema-bordo px-5 py-3">
+                {editingId && (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={duplicaEvento}
+                      disabled={saving}
+                      title="Crea una copia di questo evento con le stesse etichette"
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-control border border-crema-contorno bg-white px-3 py-1.5 text-xs font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <LayersIcon className="h-3.5 w-3.5" />
+                      Duplica
+                    </button>
+                    {confirmDeleteId === editingId ? (
+                      <span className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-stato-urgenza-testo">Eliminare l&apos;evento?</span>
+                        <button
+                          type="button"
+                          onClick={() => eliminaEvento(editingId)}
+                          disabled={saving}
+                          className="cursor-pointer rounded-control bg-pericolo px-3 py-1.5 text-xs font-semibold text-white transition-colors duration-200 hover:bg-pericolo-scuro disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {saving ? "Eliminazione…" : "Sì, elimina"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="cursor-pointer rounded-control border border-crema-contorno px-3 py-1.5 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro"
+                        >
+                          No
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(editingId)}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-control border border-transparent bg-pericolo/10 px-3 py-1.5 text-xs font-semibold text-pericolo transition-colors duration-200 hover:bg-pericolo/20"
+                      >
+                        <TrashIcon className="h-3.5 w-3.5" />
+                        Elimina
+                      </button>
+                    )}
+                  </span>
+                )}
+                <span className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={chiudiForm}
+                    className="cursor-pointer rounded-control border border-crema-contorno px-4 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                  >
+                    Annulla
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {saving ? "Salvataggio…" : editingId ? "Salva modifiche" : "Crea evento"}
+                  </button>
+                </span>
+              </div>
+            </form>
           </div>
-        ) : vista === "mese" ? (
-          <VistaMese
-            riferimento={riferimento}
-            perGiorno={perGiorno}
-            oggiChiave={oggiChiave}
-            onNuovo={apriNuovoEvento}
-          />
-        ) : vista === "settimana" ? (
-          <VistaSettimana
-            riferimento={riferimento}
-            perGiorno={perGiorno}
-            oggiChiave={oggiChiave}
-            onNuovo={apriNuovoEvento}
-          />
-        ) : (
-          <VistaAgenda perGiorno={perGiorno} />
         )}
+
+            {loading && eventi.length === 0 ? (
+              <div className="flex items-center justify-center p-10">
+                <p className="text-sm text-caldo-testo">
+                  Caricamento calendario…
+                </p>
+              </div>
+            ) : vista === "mese" ? (
+              <VistaMese
+                riferimento={riferimento}
+                perGiorno={perGiorno}
+                oggiChiave={oggiChiave}
+                onNuovo={apriNuovoEvento}
+                onModifica={apriModificaEvento}
+              />
+            ) : vista === "agenda" ? (
+              <VistaAgenda
+                perGiorno={perGiorno}
+                onModifica={apriModificaEvento}
+              />
+            ) : (
+              // Altezza esplicita: la griglia scorre dentro la card, così
+              // l'header dei giorni resta sticky e la pagina non si allunga
+              // di 1344px. Sotto lg la card cresce fino al minimo leggibile.
+              <div className="h-[calc(100dvh-19rem)] min-h-[440px] overflow-hidden rounded-card border border-crema-contorno bg-white">
+                {vista === "giorno" ? (
+                  <VistaGiorno
+                    giorno={riferimento}
+                    oggiChiave={oggiChiave}
+                    eventi={eventiVisibili}
+                    onSlotClick={apriPopoverNuovo}
+                    onEventoClick={apriPopoverEvento}
+                    onSpostaEvento={spostaEvento}
+                    onRidimensionaEvento={ridimensionaEvento}
+                    onNudge={nudgeEvento}
+                  />
+                ) : (
+                  <VistaSettimanaOraria
+                    giorni={giorniVista}
+                    oggiChiave={oggiChiave}
+                    eventi={eventiVisibili}
+                    onSlotClick={apriPopoverNuovo}
+                    onEventoClick={apriPopoverEvento}
+                    onSpostaEvento={spostaEvento}
+                    onRidimensionaEvento={ridimensionaEvento}
+                    onNudge={nudgeEvento}
+                    onSelezionaGiorno={(k) => {
+                      setRiferimento(daChiaveGiorno(k));
+                      setVista("giorno");
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </main>
+
+      {/* Drawer del pannello (sotto lg). Fuori da <main> perché `main > *`
+          ha un'animazione con transform, che sposterebbe un position: fixed. */}
+      {showPannello && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            aria-label="Chiudi agende e filtri"
+            onClick={chiudiPannello}
+            className="absolute inset-0 h-full w-full cursor-default bg-inchiostro/40"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Agende e filtri"
+            className="absolute inset-y-0 left-0 w-[86vw] max-w-[320px] overflow-y-auto overscroll-contain bg-crema p-3 pb-20 md:left-[84px]"
+          >
+            <div className="mb-2 flex justify-end">
+              <button
+                ref={drawerCloseRef}
+                type="button"
+                onClick={chiudiPannello}
+                aria-label="Chiudi"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white text-caldo-testo shadow-soft transition-colors duration-200 hover:text-inchiostro"
+              >
+                <XIcon className="h-4 w-4" />
+              </button>
+            </div>
+            {pannello}
+          </div>
+        </div>
+      )}
+
+      {popover && (
+        <PopoverEvento
+          evento={popover.evento}
+          dati={popover.dati}
+          ancora={popover.ancora}
+          etichette={etichette}
+          progetti={progetti}
+          clienti={clienti}
+          operatori={team}
+          saving={popoverSaving}
+          errore={popoverErrore}
+          onCambia={cambiaPopover}
+          onSalva={salvaPopover}
+          onChiudi={chiudiPopover}
+          onElimina={eliminaPopover}
+          onDuplica={duplicaPopover}
+          onDettagli={vaiAiDettagli}
+        />
+      )}
     </div>
   );
 }
@@ -1140,11 +2515,13 @@ function VistaMese({
   perGiorno,
   oggiChiave,
   onNuovo,
+  onModifica,
 }: {
   riferimento: Date;
   perGiorno: Map<string, EventoCalendario[]>;
   oggiChiave: string;
   onNuovo: (giorno: Date) => void;
+  onModifica: (e: EventoCalendario) => void;
 }) {
   const celle = grigliaMese(riferimento);
   const meseCorrente = riferimento.getMonth();
@@ -1197,7 +2574,7 @@ function VistaMese({
               </div>
               <div className="flex flex-col gap-0.5">
                 {eventiGiorno.slice(0, 3).map((e) => (
-                  <ChipEvento key={e.id} e={e} />
+                  <ChipEvento key={e.id} e={e} onModifica={onModifica} />
                 ))}
               </div>
             </div>
@@ -1208,111 +2585,13 @@ function VistaMese({
   );
 }
 
-function VistaSettimana({
-  riferimento,
+function VistaAgenda({
   perGiorno,
-  oggiChiave,
-  onNuovo,
+  onModifica,
 }: {
-  riferimento: Date;
   perGiorno: Map<string, EventoCalendario[]>;
-  oggiChiave: string;
-  onNuovo: (giorno: Date) => void;
+  onModifica: (e: EventoCalendario) => void;
 }) {
-  const giorni = giorniSettimana(riferimento);
-
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
-      {giorni.map((giorno) => {
-        const k = chiaveGiorno(giorno);
-        const eventiGiorno = perGiorno.get(k) ?? [];
-        const isOggi = k === oggiChiave;
-        return (
-          <div
-            key={k}
-            className="flex min-h-[200px] flex-col rounded-card border border-crema-contorno bg-white"
-          >
-            <button
-              type="button"
-              onClick={() => onNuovo(giorno)}
-              title="Aggiungi un evento in questo giorno"
-              className={`flex cursor-pointer items-center justify-between border-b border-crema-bordo px-3 py-2 text-left transition-colors duration-200 hover:bg-crema-scuro ${
-                isOggi ? "bg-stato-info-bg" : ""
-              }`}
-            >
-              <span
-                className={`text-[10px] font-semibold uppercase tracking-wider ${
-                  isOggi ? "text-stato-info-testo" : "text-caldo-testo"
-                }`}
-              >
-                {GIORNI_BREVI[(giorno.getDay() + 6) % 7]}
-              </span>
-              <span
-                className={`text-sm font-bold ${
-                  isOggi ? "text-stato-info-testo" : "text-inchiostro"
-                }`}
-              >
-                {giorno.getDate()}
-              </span>
-            </button>
-            <div className="flex flex-1 flex-col gap-1.5 p-2">
-              {eventiGiorno.length === 0 ? (
-                <p className="pt-2 text-center text-[11px] text-caldo-testo/50">—</p>
-              ) : (
-                eventiGiorno.map((e) => {
-                  const origine = origineEvento(e);
-                  const corpo = (
-                    <>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs font-semibold text-inchiostro">
-                          {e.titolo}
-                        </span>
-                        {e.data_scadenza && (
-                          <span className="shrink-0 text-[10px] font-medium text-caldo-testo">
-                            {formatOra(e.data_scadenza)}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 truncate text-[10px] text-caldo-testo">
-                        {etichettaOrigine(e)}
-                      </p>
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <span
-                          className={`rounded-control border px-1.5 py-0.5 text-[9px] font-semibold ${ORIGINE_STYLES[origine]}`}
-                        >
-                          {ORIGINE_LABELS[origine]}
-                        </span>
-                        <PriorityBadge priorita={e.priorita} />
-                      </div>
-                    </>
-                  );
-                  return e.progetto_id ? (
-                    <Link
-                      key={e.id}
-                      href={`/progetti/${e.progetto_id}`}
-                      className="block cursor-pointer rounded-control border border-crema-bordo bg-white p-2 transition-colors duration-200 hover:border-crema-contorno hover:bg-crema-scuro"
-                    >
-                      {corpo}
-                    </Link>
-                  ) : (
-                    <div
-                      key={e.id}
-                      className="rounded-control border border-crema-bordo bg-white p-2"
-                    >
-                      {corpo}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function VistaAgenda({ perGiorno }: { perGiorno: Map<string, EventoCalendario[]> }) {
   const giorni = giorniOrdinati(perGiorno);
 
   if (giorni.length === 0) {
@@ -1365,6 +2644,14 @@ function VistaAgenda({ perGiorno }: { perGiorno: Map<string, EventoCalendario[]>
                         {ORIGINE_LABELS[origine]}
                       </span>
                       <PriorityBadge priorita={e.priorita} />
+                      {(e.etichette ?? []).map((et) => (
+                        <span
+                          key={et.id}
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: et.colore }}
+                          title={et.nome}
+                        />
+                      ))}
                     </div>
                   </>
                 );
@@ -1377,12 +2664,15 @@ function VistaAgenda({ perGiorno }: { perGiorno: Map<string, EventoCalendario[]>
                     {corpo}
                   </Link>
                 ) : (
-                  <div
+                  <button
                     key={e.id}
-                    className="flex items-center justify-between gap-3 border-b border-crema-bordo px-4 py-3"
+                    type="button"
+                    onClick={() => onModifica(e)}
+                    className="flex w-full cursor-pointer items-center justify-between gap-3 border-b border-crema-bordo px-4 py-3 text-left transition-colors duration-200 hover:bg-crema-scuro"
+                    title="Clicca per modificare"
                   >
                     {corpo}
-                  </div>
+                  </button>
                 );
               })}
             </div>
