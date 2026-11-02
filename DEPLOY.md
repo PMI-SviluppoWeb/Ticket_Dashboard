@@ -31,6 +31,12 @@ notepad .env                    # compilare con i valori reali
 ```
 Suggerimento: molti valori sono già in `.env.local` (usato da `npm run dev`), basta unirli.
 
+> ⚠️ `JWT_SECRET` e `WEBHOOK_SECRET` sono **obbligatori in produzione**: senza il
+> primo le sessioni sono forgiabili, senza il secondo la rotta
+> `/api/hooks/email` risponde 503 e nessuna email diventa ticket.
+> `WEBHOOK_SECRET` deve essere lo stesso valore per l'app e per l'IMAP worker
+> (entrambi leggono lo stesso `.env`).
+
 ### 1.4 Validare il compose senza eseguirlo
 ```powershell
 docker compose config           # se non errori, il file è valido
@@ -377,6 +383,8 @@ restano.
 |---|---|
 | `failed to connect to the docker API at npipe` | Docker Desktop non avviato → aprirlo e riprovare |
 | `env file .env not found` | manca `.env` → `Copy-Item .env.docker.example .env` |
+| `/api/hooks/email` risponde 503 | manca `WEBHOOK_SECRET` in `.env` (o il container non è stato riavviato dopo l'aggiunta) |
+| `/api/hooks/email` risponde 401 | `WEBHOOK_SECRET` diverso tra i due lati: deve essere lo stesso valore |
 | Container `unhealthy` | `docker compose logs ticket-dashboard` e controllare `.env` (IMAP/SMTP/Turso) |
 | Watchtower non aggiorna nulla | manca `image: ghcr.io/...` oppure la label `com.centurylinklabs.watchtower.enable=true`; package GHCR privato senza login |
 | Push GHCR fallito con *"must be lowercase"* | rinominare il repository GitHub in minuscolo |

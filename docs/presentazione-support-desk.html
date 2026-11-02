@@ -1,0 +1,1505 @@
+<title>Support Desk</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap">
+
+<style>
+/* ==========================================================================
+   Support Desk — presentazione navigabile.
+   Un solo tema, voluto: il deck riprende il fondo freddo dell'app, le sue
+   superfici bianche, un solo accento lime usato come superficie.
+   ========================================================================== */
+
+:root{
+  color-scheme: light;
+  --crema:#ECEDF0;
+  --crema-scuro:#E3E5E9;
+  --crema-bordo:#E8E9EC;
+  --contorno:#DADCE1;
+  --ink:#151515;
+  --ink-soft:#575A61;
+  --bianco:#FFFFFF;
+  --lime:#C8F25A;
+  --lime-scuro:#B4E03C;
+  --lime-testo:#2B3A00;
+  --urgenza-bg:#F9DEDE; --urgenza-fg:#8E2B22; --urgenza-bd:#EFC7C2;
+  --attesa-bg:#FDE8C4;  --attesa-fg:#7A4A0B;  --attesa-bd:#F0D5A4;
+  --ok-bg:#DCEEE2;      --ok-fg:#1D5C39;      --ok-bd:#BBDCC6;
+  --info-bg:#DDE7EE;    --info-fg:#1C4A66;    --info-bd:#C3D3DF;
+  --malva-bg:#EDE4F0;   --malva-fg:#5B3A6E;   --malva-bd:#DCCCE3;
+  --ora:#D64545;
+  --font-testo:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Outfit","Inter",system-ui,-apple-system,sans-serif;
+  --ombra:0 1px 2px rgba(21,21,21,.04), 0 14px 34px -20px rgba(21,21,21,.30);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--crema);
+  color:var(--ink);
+  font-family:var(--font-testo);
+  font-size:16px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,p,ul,ol{margin:0}
+ul,ol{padding:0;list-style:none}
+.sr{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;
+}
+
+/* ---------- chrome del deck ---------- */
+
+#barra{position:fixed;left:0;right:0;top:0;height:3px;background:rgba(21,21,21,.08);z-index:50}
+#barra span{display:block;height:100%;width:0;background:var(--lime-scuro);transition:width .28s ease}
+
+.controlli{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px max(16px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));
+  background:rgba(236,237,240,.9);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  border-top:1px solid var(--contorno);
+}
+.ctrl-sx{display:flex;gap:6px}
+.ctrl-dx{display:flex;align-items:center;gap:10px}
+.btn{
+  -webkit-appearance:none;appearance:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:36px;height:34px;border:1px solid var(--contorno);border-radius:10px;
+  background:var(--bianco);color:var(--ink);font:inherit;font-size:15px;line-height:1;cursor:pointer;
+  transition:background .18s ease,border-color .18s ease,opacity .18s ease;
+}
+.btn:hover:not(:disabled){background:var(--crema);border-color:#C9CBD2}
+.btn:disabled{opacity:.32;cursor:not-allowed}
+.btn--testo{width:auto;padding:0 10px;font-size:12px;font-weight:600;letter-spacing:.02em}
+.btn:focus-visible,.punto:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.puntini{display:flex;align-items:center;gap:4px;flex-wrap:nowrap}
+.punto{
+  width:7px;height:7px;padding:0;border:0;border-radius:999px;background:#C3C5CC;
+  cursor:pointer;transition:width .2s ease,background .2s ease;
+}
+.punto--on{width:20px;background:var(--ink)}
+.contatore{
+  font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--ink-soft);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+
+/* ---------- struttura delle slide ---------- */
+
+.slide{
+  display:flex;flex-direction:column;justify-content:flex-start;
+  min-height:100svh;padding-block:44px 88px;
+}
+/* L'artifact fornisce già [hidden]{display:none!important}; questa regola
+   serve quando il file si apre direttamente da disco, dove .slide{display:flex}
+   vincerebbe sullo stile del browser e impilerebbe tutte le slide. */
+.slide[hidden]{display:none !important}
+.interno{
+  width:100%;max-width:1160px;margin-inline:auto;margin-block:auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.slide--scuro{background:var(--ink);color:#fff}
+.slide--scuro .lead{color:rgba(255,255,255,.70)}
+.slide--scuro .occhiello{color:var(--lime)}
+
+/* ---------- tipografia ---------- */
+
+.occhiello{
+  font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ink-soft);margin-bottom:13px;
+}
+.t-slide{
+  font-family:var(--font-display);font-size:clamp(1.9rem,3.7vw,3rem);
+  font-weight:600;line-height:1.1;letter-spacing:-.025em;text-wrap:balance;
+  margin-bottom:14px;outline:none;
+}
+/* Il titolo riceve il focus via script a ogni cambio slide, per annunciare
+   la nuova pagina agli screen reader: non è un controllo, quindi non deve
+   disegnare un anello di focus a ogni passaggio. I veri controlli (pulsanti,
+   puntini) hanno il loro :focus-visible. */
+.t-slide:focus,.cover-titolo:focus{outline:none}
+.lead{
+  font-size:clamp(1.05rem,1.3vw,1.22rem);line-height:1.55;
+  color:var(--ink-soft);max-width:66ch;margin-bottom:24px;
+}
+.nota{
+  display:flex;gap:10px;align-items:flex-start;margin-top:16px;
+  padding:11px 14px;border:1px solid var(--contorno);border-radius:14px;
+  background:rgba(255,255,255,.6);
+  font-size:14.5px;line-height:1.5;color:var(--ink-soft);max-width:74ch;
+}
+.nota b{color:var(--ink);font-weight:600}
+.nota .tacca{
+  flex:0 0 auto;width:3px;align-self:stretch;border-radius:2px;background:var(--lime-scuro);
+}
+
+/* ---------- layout ---------- */
+
+.due{display:grid;grid-template-columns:minmax(0,1.02fr) minmax(0,1fr);gap:clamp(20px,3vw,40px);align-items:start}
+.due--larga{grid-template-columns:minmax(0,1fr) minmax(0,1.28fr)}
+.card{background:var(--bianco);border:1px solid var(--contorno);border-radius:20px;padding:18px}
+
+/* ---------- passi ---------- */
+
+.passi{display:flex;flex-direction:column;gap:13px;margin-top:4px}
+.passo{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start}
+.passo .num{
+  width:26px;height:26px;border-radius:50%;background:var(--ink);color:#fff;
+  font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;
+  font-variant-numeric:tabular-nums;margin-top:1px;
+}
+.passo h3{font-size:16.5px;font-weight:650;letter-spacing:-.01em;margin-bottom:2px}
+.passo p{font-size:14.5px;line-height:1.5;color:var(--ink-soft)}
+.passi--chiari .num{background:var(--lime);color:var(--lime-testo)}
+.passi--chiari h3{color:#fff}
+.passi--chiari p{color:rgba(255,255,255,.66)}
+
+/* ---------- copertina ---------- */
+
+.cover{position:relative;overflow:hidden}
+.cover::after{
+  content:"";position:absolute;right:-14%;bottom:-46%;width:64vmax;height:64vmax;border-radius:50%;
+  background:radial-gradient(circle at 50% 50%, rgba(200,242,90,.16), rgba(200,242,90,0) 62%);
+  pointer-events:none;
+}
+.cover-interno{position:relative;z-index:1;padding-block:36px}
+.cover-titolo{
+  font-family:var(--font-display);font-size:clamp(2.9rem,8.5vw,6.2rem);
+  font-weight:600;line-height:1;letter-spacing:-.04em;margin-bottom:4px;
+}
+.cover-punto{color:var(--lime)}
+.cover-sotto{
+  font-family:var(--font-display);font-size:clamp(1.15rem,2.4vw,1.85rem);
+  font-weight:400;letter-spacing:-.01em;color:rgba(255,255,255,.72);margin-bottom:26px;
+}
+.cover-riga{
+  font-size:clamp(1.02rem,1.5vw,1.25rem);color:rgba(255,255,255,.86);
+  max-width:44ch;line-height:1.55;margin-bottom:32px;
+}
+.cover-hint{font-size:12.5px;letter-spacing:.04em;color:rgba(255,255,255,.5);margin-top:26px}
+
+/* striscia della Sintesi in copertina */
+.striscia{
+  display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;
+  max-width:860px;border:1px solid rgba(255,255,255,.16);border-radius:14px;
+  overflow:hidden;background:rgba(255,255,255,.16);
+}
+.striscia > div{background:#1B1B1B;padding:12px 13px 11px;min-width:0}
+.striscia .lab{
+  display:block;font-size:9.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:rgba(255,255,255,.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.striscia .val{
+  display:block;font-family:var(--font-display);font-size:clamp(1.2rem,2.2vw,1.7rem);
+  line-height:1.15;color:#fff;margin-top:3px;font-variant-numeric:tabular-nums;
+}
+.striscia .sub{
+  display:block;font-size:10.5px;color:rgba(255,255,255,.45);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.striscia .ev{background:#26340F}
+.striscia .ev .val{color:var(--lime)}
+.striscia .ev .sub{color:rgba(200,242,90,.62)}
+
+/* ---------- slide 2 ---------- */
+
+.quattro{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:26px}
+.quattro .card{position:relative;padding-top:42px;min-width:0}
+.quattro .k{
+  position:absolute;top:14px;left:17px;
+  font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--ink-soft);
+  font-variant-numeric:tabular-nums;
+}
+.quattro h3{font-size:15.5px;font-weight:650;line-height:1.35;letter-spacing:-.01em;margin-bottom:5px}
+.quattro p{font-size:13.5px;line-height:1.5;color:var(--ink-soft)}
+.tesi{
+  font-family:var(--font-display);font-size:clamp(1.2rem,2.4vw,1.75rem);
+  line-height:1.4;letter-spacing:-.02em;font-weight:500;max-width:40ch;
+  background:var(--lime);color:var(--lime-testo);
+  border-radius:20px;padding:20px 24px;
+}
+
+/* ---------- slide 3 ---------- */
+
+.otto{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}
+.modulo{
+  background:var(--bianco);border:1px solid var(--contorno);border-radius:14px;
+  padding:12px 14px;min-width:0;
+}
+.modulo b{display:block;font-family:var(--font-display);font-size:15.5px;font-weight:600;letter-spacing:-.01em}
+.modulo span{display:block;font-size:13.5px;line-height:1.45;color:var(--ink-soft);margin-top:2px}
+.lessico{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
+.termine{border-top:2px solid var(--ink);padding-top:8px;min-width:0}
+.termine b{display:block;font-size:14px;font-weight:650}
+.termine span{display:block;font-size:13px;color:var(--ink-soft);line-height:1.45;margin-top:2px}
+.ruoli{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ruolo{display:flex;gap:11px;background:var(--bianco);border:1px solid var(--contorno);border-radius:16px;padding:13px 15px;min-width:0}
+.ruolo .targhetta{
+  flex:0 0 auto;align-self:flex-start;font-size:12px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;padding:5px 10px;border-radius:999px;background:var(--ink);color:#fff;
+}
+.ruolo p{font-size:14px;line-height:1.5;color:var(--ink-soft)}
+
+/* ---------- mockup ---------- */
+
+.mk{
+  position:relative;background:var(--bianco);border:1px solid var(--contorno);
+  border-radius:18px;box-shadow:var(--ombra);overflow:hidden;
+  font-family:var(--font-testo);
+}
+.mk-top{display:flex;align-items:center;gap:6px;padding:8px 11px;border-bottom:1px solid var(--crema-bordo);background:#FAFAFB}
+.mk-dot{display:block;width:6px;height:6px;border-radius:50%;background:#D5D7DD}
+.mk-url{flex:1;height:12px;border-radius:6px;background:var(--crema);margin-left:4px}
+
+.mk-app{display:grid;grid-template-columns:96px minmax(0,1fr);min-height:258px}
+.mk-side{background:#FAFAFB;border-right:1px solid var(--crema-bordo);padding:9px 7px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.mk-brand{display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;font-weight:600;color:var(--ink);margin-bottom:5px;white-space:nowrap}
+.mk-brand i{display:block;width:9px;height:9px;border-radius:3px;background:var(--lime);flex:0 0 auto}
+.mk-nav{height:9px;border-radius:5px;background:#E9EAEE}
+.mk-nav--on{background:var(--ink);width:84%}
+.mk-side-foot{margin-top:auto;height:9px;border-radius:5px;background:#E9EAEE;width:60%}
+.mk-main{padding:9px 10px 11px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.mk-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.mk-h1{font-family:var(--font-display);font-size:10px;font-weight:600}
+.mk-pill{
+  display:inline-flex;align-items:center;gap:4px;font-size:8.5px;font-weight:600;
+  background:var(--ink);color:#fff;border-radius:999px;padding:3px 8px;white-space:nowrap;
+}
+.mk-pill i{display:block;width:4px;height:4px;border-radius:50%;background:var(--lime)}
+
+.mk-sintesi{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;
+  background:var(--crema-bordo);border:1px solid var(--crema-bordo);
+  border-radius:9px;overflow:hidden;
+}
+.mk-cella{background:var(--bianco);padding:7px 8px;min-width:0}
+.mk-cella .l{
+  display:block;font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.mk-cella .v{display:block;font-family:var(--font-display);font-size:15px;font-weight:600;line-height:1.2;margin-top:1px}
+.mk-cella .s{display:block;font-size:8px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mk-cella--ev{background:var(--lime)}
+.mk-cella--att{background:var(--attesa-bg)}
+
+.mk-due{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
+.mk-box{border:1px solid var(--crema-bordo);border-radius:8px;padding:6px 7px;background:#fff;min-width:0}
+.mk-lbl{
+  display:flex;align-items:center;gap:4px;font-size:8px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:4px;
+}
+.mk-riga{height:6px;border-radius:3px;background:#EDEEF1;margin-top:3px}
+.mk-riga--70{width:70%}
+.mk-riga--85{width:85%}
+
+.badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:15px;height:15px;border-radius:50%;background:var(--lime);color:var(--lime-testo);
+  font-size:8px;font-weight:700;font-style:normal;flex:0 0 auto;
+}
+.badge--scuro{background:var(--ink);color:#fff}
+
+/* ---------- slide 5 · due ingressi ---------- */
+
+/* Due porte d'ingresso: telefono e email, stesso ticket in uscita. */
+.corsie{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.corsia{
+  background:var(--bianco);border:1px solid var(--contorno);border-radius:16px;
+  padding:14px 16px 16px;min-width:0;
+}
+.corsia--voce{background:var(--lime);border-color:var(--lime-scuro);color:var(--lime-testo)}
+.corsia-testa{margin-bottom:11px}
+.corsia-et{
+  display:block;font-size:12px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-soft);
+}
+.corsia--voce .corsia-et{color:var(--lime-testo);opacity:.75}
+.corsia-testa b{
+  display:block;font-family:var(--font-display);font-size:17px;font-weight:600;
+  letter-spacing:-.01em;margin-top:2px;
+}
+.corsia .passi{gap:10px;margin-top:0}
+.corsia .passo{grid-template-columns:22px minmax(0,1fr);gap:10px}
+.corsia .num{width:22px;height:22px;font-size:11px}
+.corsia .passo h3{font-size:15px}
+.corsia .passo p{font-size:13.5px}
+.corsia--voce .passo p{color:var(--lime-testo);opacity:.86}
+.corsia--voce .num{background:var(--lime-testo);color:var(--lime)}
+
+.punti-lista{display:flex;flex-direction:column;gap:12px}
+.punti-lista li{
+  display:grid;grid-template-columns:8px minmax(0,1fr);gap:10px;
+  font-size:14.5px;line-height:1.5;color:var(--ink-soft);
+}
+.punti-lista li::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--lime-scuro);margin-top:6px}
+.punti-lista b{color:var(--ink);font-weight:650}
+
+/* ---------- slide 6 · ticket ---------- */
+
+.mk-tk-head{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:9px 11px;border-bottom:1px solid var(--crema-bordo);background:#FAFAFB;
+}
+.mk-tk-cod{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.01em}
+.mk-tk-cli{font-size:9px;color:var(--ink-soft);margin-top:1px}
+.mk-chip{
+  display:inline-block;font-size:8px;font-weight:700;padding:2px 6px;
+  border-radius:999px;border:1px solid;white-space:nowrap;
+}
+.mk-chip--attesa{background:var(--attesa-bg);color:var(--attesa-fg);border-color:var(--attesa-bd)}
+.mk-chip--info{background:var(--info-bg);color:var(--info-fg);border-color:var(--info-bd)}
+.mk-chip--ok{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-bd)}
+.mk-sez{display:flex;gap:7px;align-items:flex-start;padding:9px 11px;border-bottom:1px solid var(--crema-bordo)}
+.mk-sez:last-child{border-bottom:0}
+.mk-sez-body{min-width:0;flex:1}
+.mk-tit{display:flex;align-items:center;gap:5px;font-size:9.5px;font-weight:700;margin-bottom:3px}
+.mk-msg{border:1px solid var(--crema-bordo);border-radius:5px;padding:5px 6px;background:#FAFAFB;margin-top:3px}
+.mk-msg .l1,.mk-msg .l2{height:4px;border-radius:2px;background:#E5E7EB;margin-top:2px}
+.mk-msg .l2{width:78%}
+.mk-msg--out{background:var(--info-bg);border-color:var(--info-bd)}
+.mk-msg--out .l1,.mk-msg--out .l2{background:rgba(28,74,102,.20)}
+.mk-file{display:inline-block;width:24px;height:13px;border-radius:3px;background:var(--crema-scuro);margin-right:3px;border:1px solid var(--contorno)}
+.mk-mini-riga{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;font-size:8.5px;color:var(--ink-soft)}
+.mk-btn-mini{font-size:7.5px;font-weight:700;border:1px solid var(--contorno);border-radius:4px;padding:1px 5px;background:#fff;color:var(--ink)}
+
+/* ---------- slide 7 · tempo ---------- */
+
+.mk-main--tempo{gap:8px}
+.mk-timer-big{
+  display:flex;align-items:center;gap:8px;border:1px solid var(--crema-bordo);
+  background:#FAFAFB;border-radius:10px;padding:8px 10px;
+}
+.mk-timer-cod{
+  flex:1;min-width:0;font-size:10.5px;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.mk-timer-val{font-family:var(--font-display);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.mk-timer-btn{font-size:8.5px;font-weight:700;background:var(--ink);color:#fff;border-radius:5px;padding:3px 8px;white-space:nowrap}
+.mk-giorno{border:1px solid var(--crema-bordo);border-radius:10px;padding:7px 8px;background:#fff}
+.mk-ora{display:grid;grid-template-columns:26px minmax(0,1fr);gap:6px;align-items:center;margin-bottom:3px}
+.mk-ora > span{font-size:8px;color:var(--ink-soft);text-align:right;font-variant-numeric:tabular-nums}
+.mk-ora .tr{height:9px;border-radius:4px;background:#F1F2F5;position:relative;overflow:hidden}
+.mk-ora .bl{position:absolute;top:0;bottom:0;border-radius:4px}
+.bl--lime{background:var(--lime);border:1px solid var(--lime-scuro)}
+.bl--info{background:var(--info-bg);border:1px solid var(--info-bd)}
+.bl--malva{background:var(--malva-bg);border:1px solid var(--malva-bd)}
+.mk-tab{width:100%;border-collapse:collapse;font-size:9px}
+.mk-tab th{
+  text-align:left;font-size:8px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-soft);font-weight:700;padding:4px 5px;border-bottom:1px solid var(--crema-bordo);
+}
+.mk-tab td{padding:5px;border-bottom:1px solid #F1F2F5;font-variant-numeric:tabular-nums}
+.mk-tab tr:last-child td{border-bottom:0}
+.mk-tab .num{text-align:right}
+
+/* ---------- slide 8 · calendario ---------- */
+
+.mk-cal{border:1px solid var(--crema-bordo);border-radius:12px;overflow:hidden;background:#fff}
+.mk-cal-top{
+  display:grid;grid-template-columns:34px repeat(5,minmax(0,1fr));
+  border-bottom:1px solid var(--crema-bordo);background:#FAFAFB;
+}
+.mk-cal-top i{
+  display:block;height:18px;line-height:18px;text-align:center;
+  font-size:8px;font-style:normal;color:var(--ink-soft);
+  border-left:1px solid var(--crema-bordo);
+}
+.mk-cal-top i:first-child{border-left:0}
+.mk-cal-body{
+  position:relative;display:grid;grid-template-columns:34px repeat(5,minmax(0,1fr));
+  height:172px;
+  background-image:repeating-linear-gradient(to bottom,#F2F3F5 0 1px,transparent 1px 28.6px);
+}
+.mk-ore{display:flex;flex-direction:column;justify-content:space-between;padding:1px 4px 1px 0;text-align:right}
+.mk-ore span{font-size:7.5px;color:var(--ink-soft)}
+.mk-col{border-left:1px solid var(--crema-bordo);position:relative}
+.mk-evt{
+  position:absolute;left:3px;right:3px;border-radius:5px;padding:3px 5px;
+  font-size:8px;font-weight:600;line-height:1.3;overflow:hidden;
+}
+.mk-evt--a{background:var(--info-bg);border:1px solid var(--info-bd);color:var(--info-fg)}
+.mk-evt--b{background:var(--lime);border:1px solid var(--lime-scuro);color:var(--lime-testo)}
+.mk-evt--ghost{background:rgba(21,21,21,.05);border:1px dashed var(--ink-soft);color:var(--ink-soft)}
+.mk-now{position:absolute;left:0;right:0;height:1.5px;background:var(--ora);z-index:2}
+.mk-now::before{content:"";position:absolute;left:-3px;top:-2px;width:5px;height:5px;border-radius:50%;background:var(--ora)}
+.mk-pop{
+  position:absolute;right:6px;top:32px;width:45%;background:#fff;
+  border:1px solid var(--contorno);border-radius:8px;box-shadow:var(--ombra);
+  padding:6px;z-index:3;
+}
+.mk-pop .r{height:5px;border-radius:2px;background:#EDEEF1;margin-top:3px}
+.mk-pop .r:first-child{background:var(--ink);width:60%}
+
+/* ---------- slide 9 · architettura ---------- */
+
+.arch{display:flex;flex-direction:column;gap:9px}
+.arch-et{
+  font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-soft);margin:4px 0 -3px;
+}
+.arch-riga{display:flex;align-items:stretch;gap:7px;flex-wrap:wrap}
+.pezzo{
+  flex:1 1 140px;min-width:0;background:var(--bianco);
+  border:1px solid var(--contorno);border-radius:14px;padding:11px 12px;
+}
+.pezzo b{display:block;font-size:12.5px;font-weight:650;letter-spacing:-.01em}
+.pezzo span{display:block;font-size:11.5px;line-height:1.45;color:var(--ink-soft);margin-top:2px}
+.pezzo--db{background:var(--ink);border-color:var(--ink);color:#fff}
+.pezzo--db span{color:rgba(255,255,255,.62)}
+.pezzo--lime{background:var(--lime);border-color:var(--lime-scuro);color:var(--lime-testo)}
+.pezzo--lime span{color:var(--lime-testo)}
+.freccia{display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--ink-soft);font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{
+  display:inline-block;font-size:13px;font-weight:600;padding:5px 12px;border-radius:999px;
+  border:1px solid var(--contorno);background:var(--bianco);color:var(--ink-soft);white-space:nowrap;
+}
+.chip--scuro{background:var(--ink);border-color:var(--ink);color:#fff}
+.cifre{display:flex;flex-wrap:wrap;gap:20px 26px;margin-top:16px;padding-top:14px;border-top:1px solid var(--contorno)}
+.cifre div b{display:block;font-family:var(--font-display);font-size:24px;font-weight:600;line-height:1}
+.cifre div span{display:block;font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-soft);margin-top:3px}
+
+/* ---------- slide 10 · flusso verticale ---------- */
+
+.flusso{display:flex;flex-direction:column;border-left:2px solid var(--contorno);margin-left:5px}
+.flusso li{position:relative;padding:0 0 14px 20px}
+.flusso li:last-child{padding-bottom:0}
+.flusso li::before{
+  content:"";position:absolute;left:-7px;top:5px;width:12px;height:12px;
+  border-radius:50%;background:var(--bianco);border:2px solid var(--ink);
+}
+.flusso li:first-child::before{background:var(--lime);border-color:var(--ink)}
+.flusso b{display:block;font-size:15px;font-weight:650;letter-spacing:-.01em}
+.flusso span{display:block;font-size:14px;line-height:1.5;color:var(--ink-soft);margin-top:1px}
+.flusso code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12px;background:var(--crema-scuro);border-radius:4px;padding:2px 6px;
+}
+.regola{
+  margin-top:16px;padding:12px 14px;border-radius:14px;
+  background:var(--ink);color:#fff;font-size:14px;line-height:1.5;
+}
+.regola b{color:var(--lime);font-weight:650}
+
+/* ---------- slide 11 · principi ---------- */
+
+.principi{display:flex;flex-direction:column;border-top:1px solid var(--contorno);margin-top:4px}
+.principio{
+  display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:22px;align-items:center;
+  padding:13px 0;border-bottom:1px solid var(--contorno);
+}
+.principio h3{
+  font-family:var(--font-display);font-size:17.5px;font-weight:600;
+  letter-spacing:-.01em;margin-bottom:3px;
+}
+.principio p{font-size:14.5px;line-height:1.5;color:var(--ink-soft);max-width:58ch}
+.mini{display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:44px}
+.mini-cell{flex:1 1 0;height:30px;border:1px solid var(--crema-bordo);border-radius:5px;background:#fff;display:flex;align-items:center;justify-content:center}
+.mini-cell b{font-family:var(--font-display);font-size:10px;font-weight:600}
+.mini-cell--ev{background:var(--lime);border-color:var(--lime-scuro);color:var(--lime-testo)}
+.mini-chip{font-size:8px;font-weight:700;padding:3px 7px;border-radius:999px;border:1px solid;white-space:nowrap}
+.mini-chip--u{background:var(--urgenza-bg);color:var(--urgenza-fg);border-color:var(--urgenza-bd)}
+.mini-chip--a{background:var(--attesa-bg);color:var(--attesa-fg);border-color:var(--attesa-bd)}
+.mini-chip--o{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-bd)}
+.mini-chip--i{background:var(--info-bg);color:var(--info-fg);border-color:var(--info-bd)}
+.mini-tasto{
+  font-size:8.5px;font-weight:600;border:1px solid var(--contorno);border-bottom-width:2px;
+  border-radius:5px;padding:3px 6px;background:#fff;white-space:nowrap;
+}
+.mini-freccia{font-size:9px;color:var(--ink-soft)}
+.mini-telefono{
+  width:34px;height:56px;border:1.5px solid var(--ink);border-radius:7px;
+  display:flex;flex-direction:column;justify-content:flex-end;padding:4px;gap:2px;background:#fff;
+}
+.mini-telefono i{display:block;height:5px;border-radius:2px;background:var(--crema-scuro)}
+.mini-telefono i:first-child{background:var(--lime)}
+.mini-pannello{flex:1;height:34px;border:1px solid var(--contorno);border-radius:5px;background:#fff}
+
+/* ---------- slide 12 · chiusura ---------- */
+
+.chiusura-riga{
+  font-family:var(--font-display);font-size:clamp(1.05rem,1.9vw,1.4rem);
+  line-height:1.4;letter-spacing:-.01em;color:rgba(255,255,255,.92);
+  max-width:40ch;margin-top:30px;
+}
+.chiusura-riga em{font-style:normal;color:var(--lime)}
+.chiusura-foot{margin-top:26px;font-size:11px;letter-spacing:.05em;color:rgba(255,255,255,.42)}
+.due-chi{
+  display:grid;grid-template-columns:minmax(0,1fr);gap:14px;
+  margin-top:4px;
+}
+.due-chi div{border-top:2px solid var(--lime);padding-top:8px}
+.due-chi b{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.5);margin-bottom:4px}
+.due-chi p{font-size:14.5px;line-height:1.5;color:rgba(255,255,255,.78)}
+
+/* ---------- animazioni ---------- */
+
+@keyframes entra{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+@keyframes comparsa{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes crescere{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes alone{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.07);opacity:1}}
+
+/* Ogni slide rientra dall'alto; i figli partono a cascata.
+   Le animazioni ripartono da sole perché il cambio slide toglie e rimette
+   l'attributo hidden, e con esso il selettore :not([hidden]). */
+.slide:not([hidden]) .interno > *{animation:entra .6s cubic-bezier(.22,1,.36,1) backwards}
+.slide:not([hidden]) .interno > *:nth-child(2){animation-delay:.07s}
+.slide:not([hidden]) .interno > *:nth-child(3){animation-delay:.14s}
+.slide:not([hidden]) .interno > *:nth-child(4){animation-delay:.21s}
+.slide:not([hidden]) .interno > *:nth-child(5){animation-delay:.28s}
+.slide:not([hidden]) .interno > *:nth-child(6){animation-delay:.35s}
+
+.slide:not([hidden]) .mk{animation:comparsa .7s .18s cubic-bezier(.22,1,.36,1) backwards}
+.slide:not([hidden]) .mk-sintesi .mk-cella{animation:comparsa .45s backwards}
+.slide:not([hidden]) .mk-sintesi .mk-cella:nth-child(1){animation-delay:.34s}
+.slide:not([hidden]) .mk-sintesi .mk-cella:nth-child(2){animation-delay:.40s}
+.slide:not([hidden]) .mk-sintesi .mk-cella:nth-child(3){animation-delay:.46s}
+.slide:not([hidden]) .mk-sintesi .mk-cella:nth-child(4){animation-delay:.52s}
+.slide:not([hidden]) .mk-sintesi .mk-cella:nth-child(5){animation-delay:.58s}
+.slide:not([hidden]) .mk-sintesi .mk-cella:nth-child(6){animation-delay:.64s}
+
+.slide:not([hidden]) .mk-ora .bl{transform-origin:left center;animation:crescere .65s .42s cubic-bezier(.22,1,.36,1) backwards}
+.slide:not([hidden]) .mk-evt{animation:comparsa .45s .3s backwards}
+.slide:not([hidden]) .mk-now{animation:entra .4s .55s backwards}
+.cover::after{animation:alone 16s ease-in-out infinite}
+
+/* Micro-movimento al passaggio: solo su elementi non testuali o a blocco,
+   così il testo non scivola sotto il puntatore proprio mentre lo leggi. */
+.card,.modulo,.corsia,.ruolo,.mini-cell,.mini-chip{transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
+.card:hover,.modulo:hover,.corsia:hover,.ruolo:hover{transform:translateY(-2px);box-shadow:var(--ombra);border-color:#C9CBD2}
+
+.tasti-hint{
+  display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:600;
+  color:var(--ink-soft);border:1px solid var(--contorno);border-radius:6px;
+  padding:2px 6px;letter-spacing:.08em;white-space:nowrap;background:var(--bianco);
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width:960px){
+  .due,.due--larga{grid-template-columns:minmax(0,1fr)}
+  .quattro{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .otto{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .lessico{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .corsie{grid-template-columns:minmax(0,1fr)}
+  .principio{grid-template-columns:minmax(0,1fr);gap:10px}
+  .due-chi{grid-template-columns:minmax(0,1fr)}
+  .slide{padding-block:34px 96px}
+}
+@media (max-width:720px){
+  .striscia{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .contatore,.tasti-hint{display:none}
+  .mk-app{grid-template-columns:64px minmax(0,1fr)}
+  .mk-brand span{display:none}
+  .ruoli{grid-template-columns:minmax(0,1fr)}
+  .freccia{display:none}
+}
+@media (max-width:520px){
+  .puntini{display:none}
+  .cover-titolo{font-size:2.55rem}
+  .striscia{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .quattro{grid-template-columns:minmax(0,1fr)}
+  .btn--testo{display:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+
+/* Schermi bassi: si recupera spazio dal respiro, non dal testo. */
+@media (max-height:820px){
+  .slide{padding-block:24px 88px}
+  .lead{margin-bottom:18px}
+  .passi{gap:11px}
+  .principi .principio{padding:10px 0}
+  .quattro{margin-bottom:20px}
+}
+
+@media print{
+  @page{margin:12mm}
+  #barra,.controlli{display:none !important}
+  body{background:#fff}
+  .slide .interno > *, .mk, .mk-cella, .mk-evt, .mk-ora .bl, .mk-now{animation:none !important}
+  .slide{
+    display:flex !important;min-height:auto;padding:0 0 8mm;
+    break-after:page;page-break-after:always;
+  }
+  .slide[hidden]{display:flex !important}
+  .slide--scuro{background:#151515 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .interno{max-width:none;padding-left:0;padding-right:0}
+}
+</style>
+
+<div id="barra" aria-hidden="true"><span></span></div>
+
+<main id="deck" tabindex="-1">
+
+<!-- ===================== 1 · COPERTINA ===================== -->
+<section class="slide slide--scuro cover" id="s1" data-titolo="Copertina">
+  <div class="interno cover-interno">
+    <p class="occhiello">Guida al prodotto</p>
+    <h1 class="cover-titolo" tabindex="-1" data-focus>Support Desk<span class="cover-punto">.</span></h1>
+    <p class="cover-sotto">Gestione Ticket</p>
+    <p class="cover-riga">Le richieste dei clienti, il lavoro del team e le ore spese: un solo workspace.</p>
+
+    <div class="striscia" aria-hidden="true">
+      <div class="ev"><span class="lab">I miei ticket</span><span class="val">4</span><span class="sub">2 nuovi</span></div>
+      <div><span class="lab">Da prendere</span><span class="val">2</span><span class="sub">non assegnati</span></div>
+      <div><span class="lab">Ticket aperti</span><span class="val">17</span><span class="sub">6 in corso</span></div>
+      <div><span class="lab">Task in scadenza</span><span class="val">3</span><span class="sub">prossimi 7 giorni</span></div>
+      <div><span class="lab">Progetti attivi</span><span class="val">5</span><span class="sub">in corso o in pausa</span></div>
+      <div class="ev"><span class="lab">Ore oggi</span><span class="val">6h 20m</span><span class="sub">team 14h 05m</span></div>
+    </div>
+
+    <p class="cover-hint">← → per navigare · 12 slide · circa 10 minuti</p>
+  </div>
+</section>
+
+<!-- ===================== 2 · IL PROBLEMA ===================== -->
+<section hidden class="slide" id="s2" data-titolo="Il problema">
+  <div class="interno">
+    <p class="occhiello">Il problema</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Quattro posti, nessun filo</h2>
+    <p class="lead">Chi lavora su richieste di assistenza conosce questa giornata: ogni informazione esiste, ma sta in un posto diverso.</p>
+
+    <div class="quattro">
+      <div class="card">
+        <span class="k">01</span>
+        <h3>La richiesta arriva al telefono o in una casella condivisa.</h3>
+        <p>Chi risponde alza un foglio; chi legge l'email non sa della chiamata.</p>
+      </div>
+      <div class="card">
+        <span class="k">02</span>
+        <h3>Il ticket viene ricopiato in un foglio.</h3>
+        <p>Il foglio dice una cosa, la casella ne dice un'altra.</p>
+      </div>
+      <div class="card">
+        <span class="k">03</span>
+        <h3>Il progetto vive nella testa di una persona.</h3>
+        <p>Quando quella persona è via, il contesto se ne va con lei.</p>
+      </div>
+      <div class="card">
+        <span class="k">04</span>
+        <h3>Le ore si ricostruiscono a fine mese.</h3>
+        <p>A memoria. O peggio: si rinuncia a misurarle.</p>
+      </div>
+    </div>
+
+    <p class="tesi">Il costo non è il lavoro: è ricostruire ogni giorno dove sta.</p>
+  </div>
+</section>
+
+<!-- ===================== 3 · LA MAPPA ===================== -->
+<section hidden class="slide" id="s3" data-titolo="La mappa">
+  <div class="interno">
+    <p class="occhiello">La mappa</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Un workspace, otto aree</h2>
+    <p class="lead">Ogni area risponde a una domanda sola. Il menu ne mostra nove voci perché «I Miei Ticket» è la vista personale dei ticket; Operatori e Dashboard Admin compaiono solo all'amministratore.</p>
+
+    <div class="otto">
+      <div class="modulo"><b>Dashboard</b><span>Cosa c'è da fare oggi.</span></div>
+      <div class="modulo"><b>Ticket</b><span>Dalla richiesta alla chiusura.</span></div>
+      <div class="modulo"><b>Progetti</b><span>Attività, task, ticket collegati.</span></div>
+      <div class="modulo"><b>Calendario</b><span>Giorno, settimana, mese, agenda.</span></div>
+      <div class="modulo"><b>Tempo</b><span>Cronometro e ore per progetto.</span></div>
+      <div class="modulo"><b>Inbox</b><span>Il registro delle email arrivate.</span></div>
+      <div class="modulo"><b>Knowledge</b><span>PDF e link, in un posto solo.</span></div>
+      <div class="modulo"><b>Report</b><span>Ore per periodo, cliente, operatore.</span></div>
+    </div>
+
+    <div class="lessico">
+      <div class="termine"><b>Ticket</b><span>Una richiesta di un cliente, con stato, priorità e conversazione.</span></div>
+      <div class="termine"><b>Attività</b><span>Una riga di lavoro dentro un progetto. È su questa che si avvia il timer.</span></div>
+      <div class="termine"><b>Progetto</b><span>Il contenitore che somma attività, ticket e ore.</span></div>
+      <div class="termine"><b>Voce tempo</b><span>Un intervallo misurato: attività oppure ticket, con inizio e fine.</span></div>
+    </div>
+
+    <div class="ruoli">
+      <div class="ruolo">
+        <span class="targhetta">Operatore</span>
+        <p>Il proprio lavoro: ticket, progetti, calendario, ore. Non vede Operatori, Dashboard Admin, Report Ore né Inbox.</p>
+      </div>
+      <div class="ruolo">
+        <span class="targhetta">Admin</span>
+        <p>Tutto quanto sopra, più le quattro aree riservate: Operatori, Dashboard Admin, Report Ore, Inbox Email.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 4 · TOUR 1 ===================== -->
+<section hidden class="slide" id="s4" data-titolo="Tour 1 · Entrare e orientarsi">
+  <div class="interno">
+    <p class="occhiello">Tour · 1 di 5</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Entrare e orientarsi</h2>
+    <p class="lead">Si accede con email e password. Il ruolo è letto dall'account e decide cosa compare: non è una scelta a schermo.</p>
+
+    <div class="due due--larga">
+      <div class="passi">
+        <div class="passo">
+          <span class="num">1</span>
+          <div>
+            <h3>Accedi</h3>
+            <p>Email e password, sulla pagina di login. Il ruolo — operatore o admin — arriva dall'account.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">2</span>
+          <div>
+            <h3>La sidebar si costruisce da sé</h3>
+            <p>Le voci del ruolo. All'operatore non compaiono Operatori, Dashboard Admin, Report Ore e Inbox.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">3</span>
+          <div>
+            <h3>La Sintesi dice dove sei</h3>
+            <p>Sei misure in una superficie sola. Due sono personali — I miei ticket e Ore oggi — e quella in ritardo si accende.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">4</span>
+          <div>
+            <h3>Il resto della pagina, in ordine</h3>
+            <p>Agenda del giorno, task in scadenza, tempo di oggi, progetti attivi e ticket recenti.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mk" role="img" aria-label="Mockup della dashboard: sidebar con le voci del ruolo, fascia Sintesi a sei celle, blocchi agenda e task, tabella ticket recenti.">
+        <div class="mk-top" aria-hidden="true"><i class="mk-dot"></i><i class="mk-dot"></i><i class="mk-dot"></i><span class="mk-url"></span></div>
+        <div class="mk-app" aria-hidden="true">
+          <div class="mk-side">
+            <div class="mk-brand"><i></i><span>Support Desk</span></div>
+            <div class="mk-nav mk-nav--on"></div>
+            <div class="mk-nav"></div>
+            <div class="mk-nav"></div>
+            <div class="mk-nav"></div>
+            <div class="mk-nav"></div>
+            <div class="mk-nav"></div>
+            <div class="mk-nav"></div>
+            <div class="mk-side-foot"></div>
+          </div>
+          <div class="mk-main">
+            <div class="mk-head">
+              <span class="mk-h1">Buongiorno, Giulia</span>
+              <span class="mk-pill"><i></i>TICK-1042 · 01:24:07</span>
+            </div>
+
+            <div class="mk-sintesi">
+              <div class="mk-cella mk-cella--ev"><span class="l">I miei ticket</span><span class="v">4</span><span class="s">2 nuovi</span></div>
+              <div class="mk-cella"><span class="l">Da prendere</span><span class="v">2</span><span class="s">non assegnati</span></div>
+              <div class="mk-cella"><span class="l">Ticket aperti</span><span class="v">17</span><span class="s">6 in corso</span></div>
+              <div class="mk-cella mk-cella--att"><span class="l">Task in scadenza</span><span class="v">3</span><span class="s">1 in ritardo</span></div>
+              <div class="mk-cella"><span class="l">Progetti attivi</span><span class="v">5</span><span class="s">in corso o in pausa</span></div>
+              <div class="mk-cella"><span class="l">Ore oggi</span><span class="v">6h 20m</span><span class="s">team 14h 05m</span></div>
+            </div>
+
+            <div class="mk-due">
+              <div class="mk-box">
+                <span class="mk-lbl">Agenda</span>
+                <div class="mk-riga"></div>
+                <div class="mk-riga mk-riga--85"></div>
+                <div class="mk-riga mk-riga--70"></div>
+              </div>
+              <div class="mk-box">
+                <span class="mk-lbl">Task in scadenza</span>
+                <div class="mk-riga"></div>
+                <div class="mk-riga mk-riga--85"></div>
+                <div class="mk-riga"></div>
+              </div>
+            </div>
+
+            <div class="mk-box">
+              <span class="mk-lbl">Ticket recenti</span>
+              <div class="mk-riga"></div>
+              <div class="mk-riga mk-riga--85"></div>
+              <div class="mk-riga mk-riga--70"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nota">
+      <span class="tacca"></span>
+      <p>I numeri della Sintesi arrivano da domini diversi — ticket, task, progetti, tempo — ma si leggono in un colpo d'occhio perché stanno in una fascia sola.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 5 · TOUR 2 ===================== -->
+<section hidden class="slide" id="s5" data-titolo="Dal telefono e dall'email al ticket">
+  <div class="interno">
+    <p class="occhiello">Tour · 2 di 5</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Due porte, un solo ticket</h2>
+    <p class="lead">La richiesta arriva al centralino o nella casella email. In nessuno dei due casi resta lì: diventa un ticket con cliente, contatto e priorità, già dentro l'app.</p>
+
+    <div class="corsie">
+      <div class="corsia corsia--voce">
+        <div class="corsia-testa">
+          <span class="corsia-et">Al telefono</span>
+          <b>Risponde l'agente vocale</b>
+        </div>
+        <div class="passi">
+          <div class="passo">
+            <span class="num">1</span>
+            <div>
+              <h3>Prende la chiamata</h3>
+              <p>Il centralino risponde e la chiamata viene gestita da un agente vocale.</p>
+            </div>
+          </div>
+          <div class="passo">
+            <span class="num">2</span>
+            <div>
+              <h3>Chiede chi è e cosa non va</h3>
+              <p>Nome, ragione sociale, recapito e il problema raccontato dal cliente.</p>
+            </div>
+          </div>
+          <div class="passo">
+            <span class="num">3</span>
+            <div>
+              <h3>Apre il ticket</h3>
+              <p>Cliente, contatto, telefono e descrizione finiscono nel ticket: nessuno lo ricopia.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="corsia">
+        <div class="corsia-testa">
+          <span class="corsia-et">Via email</span>
+          <b>Se ne occupa il worker</b>
+        </div>
+        <div class="passi">
+          <div class="passo">
+            <span class="num">1</span>
+            <div>
+              <h3>Legge la casella</h3>
+              <p>Connessione IMAP, a intervalli regolari.</p>
+            </div>
+          </div>
+          <div class="passo">
+            <span class="num">2</span>
+            <div>
+              <h3>Deduplica e classifica</h3>
+              <p>Scarta i doppioni per Message-ID; ricava priorità, sommario e modulo — o, senza AI, con regole testuali.</p>
+            </div>
+          </div>
+          <div class="passo">
+            <span class="num">3</span>
+            <div>
+              <h3>Nasce il ticket, parte l'auto-reply</h3>
+              <p>Con cliente e oggetto; la risposta esce via SMTP e l'email resta in Inbox.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="due" style="margin-top:20px">
+      <div class="card">
+        <h3 style="font-size:15.5px;font-weight:650;margin-bottom:4px">Stesso ticket, da qualsiasi porta</h3>
+        <p style="font-size:13.5px;line-height:1.5;color:var(--ink-soft)">Numero progressivo, stato «da prendere» e notifica non cambiano: chi lavora non deve sapere da dove è arrivata la richiesta.</p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:15.5px;font-weight:650;margin-bottom:4px">Cosa resta in Inbox</h3>
+        <p style="font-size:13.5px;line-height:1.5;color:var(--ink-soft)">L'email originale e il link al ticket. È un registro: si legge e si apre il ticket, non si risponde da lì.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 6 · TOUR 3 ===================== -->
+<section hidden class="slide" id="s6" data-titolo="Il ticket diventa lavoro">
+  <div class="interno">
+    <p class="occhiello">Tour · 3 di 5</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Il ticket diventa lavoro</h2>
+    <p class="lead">Il ticket conserva tutto quello che serve per non ricominciare da capo: la richiesta, chi se ne occupa, cosa si è provato, cosa si è risposto.</p>
+
+    <div class="due">
+      <div class="passi">
+        <div class="passo">
+          <span class="num">1</span>
+          <div>
+            <h3>Richiesta e conversazione</h3>
+            <p>Il testo arrivato e i messaggi successivi, in ordine. Niente da ricostruire altrove.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">2</span>
+          <div>
+            <h3>Presa in carico</h3>
+            <p>Stato in corso e assegnazione: il ticket passa da «da prendere» a «mio».</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">3</span>
+          <div>
+            <h3>Note tecniche</h3>
+            <p>Problema e soluzione, con gli allegati. Restano sul ticket, non nella posta di qualcuno.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">4</span>
+          <div>
+            <h3>Email al cliente</h3>
+            <p>Risposta rapida o di chiusura, con note e allegati. Parte dall'app, resta tracciata.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">5</span>
+          <div>
+            <h3>Il progetto</h3>
+            <p>Il ticket si collega a un progetto, che somma ticket e ore in un totale solo.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mk" role="img" aria-label="Mockup di un ticket: richiesta e conversazione, presa in carico, note tecniche con allegati, email al cliente, progetto collegato con le ore.">
+        <div class="mk-top" aria-hidden="true"><i class="mk-dot"></i><i class="mk-dot"></i><i class="mk-dot"></i><span class="mk-url"></span></div>
+        <div class="mk-tk-head" aria-hidden="true">
+          <div>
+            <div class="mk-tk-cod">TICK-1042</div>
+            <div class="mk-tk-cli">Studio Marani · assistenza</div>
+          </div>
+          <span class="mk-chip mk-chip--attesa">In corso</span>
+        </div>
+
+        <div class="mk-sez" aria-hidden="true">
+          <i class="badge">1</i>
+          <div class="mk-sez-body">
+            <div class="mk-tit">Richiesta e conversazione</div>
+            <div class="mk-msg"><div class="l1"></div><div class="l2"></div></div>
+            <div class="mk-msg mk-msg--out"><div class="l1"></div><div class="l2"></div></div>
+          </div>
+        </div>
+
+        <div class="mk-sez" aria-hidden="true">
+          <i class="badge">2</i>
+          <div class="mk-sez-body">
+            <div class="mk-tit">Presa in carico</div>
+            <div class="mk-mini-riga"><span>Assegnato a Giulia</span><span class="mk-chip mk-chip--info">In corso</span></div>
+          </div>
+        </div>
+
+        <div class="mk-sez" aria-hidden="true">
+          <i class="badge">3</i>
+          <div class="mk-sez-body">
+            <div class="mk-tit">Note tecniche</div>
+            <div class="mk-msg"><div class="l1"></div><div class="l2"></div></div>
+            <div style="margin-top:4px"><span class="mk-file"></span><span class="mk-file"></span></div>
+          </div>
+        </div>
+
+        <div class="mk-sez" aria-hidden="true">
+          <i class="badge">4</i>
+          <div class="mk-sez-body">
+            <div class="mk-tit">Email al cliente</div>
+            <div class="mk-mini-riga"><span>Risposta di chiusura</span><span class="mk-btn-mini">Invia</span></div>
+          </div>
+        </div>
+
+        <div class="mk-sez" aria-hidden="true">
+          <i class="badge">5</i>
+          <div class="mk-sez-body">
+            <div class="mk-tit">Progetto collegato</div>
+            <div class="mk-mini-riga"><span>PRJ-07 · Rete uffici</span><span class="mk-chip mk-chip--ok">12h 40m</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nota">
+      <span class="tacca"></span>
+      <p><b>I progetti si leggono per tre lenti</b> — in corso, in scadenza, tutti — e lo spostamento tra colonne avviene da un selettore. Non è una board a trascinamento: il drag vive solo nel calendario.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 7 · TOUR 4 ===================== -->
+<section hidden class="slide" id="s7" data-titolo="Il tempo">
+  <div class="interno">
+    <p class="occhiello">Tour · 4 di 5</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Il tempo, senza ricostruirlo</h2>
+    <p class="lead">Il cronometro vive nell'header e continua a scorrere cambiando pagina: non c'è un momento in cui ci si ricorda di registrare.</p>
+
+    <div class="due">
+      <ul class="punti-lista">
+        <li><span><b>Si avvia da dove sei.</b> Da un ticket, da un task, da un progetto o dall'header: sempre lo stesso cronometro.</span></li>
+        <li><span><b>Vive sopra le rotte.</b> Cambi pagina, apri un progetto, torni alla dashboard: il conteggio non si interrompe.</span></li>
+        <li><span><b>Uno per operatore.</b> Il server rifiuta un secondo timer aperto; il timer resta aperto finché non lo fermi.</span></li>
+        <li><span><b>I totali salgono da soli.</b> Alla chiusura, le ore si sommano su task e progetto.</span></li>
+        <li><span><b>Il report le legge.</b> Periodo, cliente, operatore ed export CSV; è riservato all'admin.</span></li>
+      </ul>
+
+      <div class="mk" role="img" aria-label="Mockup del cronometro aperto su un ticket, della giornata con i blocchi di lavoro e della tabella del report ore.">
+        <div class="mk-top" aria-hidden="true"><i class="mk-dot"></i><i class="mk-dot"></i><i class="mk-dot"></i><span class="mk-url"></span></div>
+        <div class="mk-main mk-main--tempo" aria-hidden="true">
+          <div class="mk-timer-big">
+            <span class="mk-timer-cod">TICK-1042 · Studio Marani · Assistenza rete</span>
+            <span class="mk-timer-val">1:24:07</span>
+            <span class="mk-timer-btn">Ferma</span>
+          </div>
+
+          <div class="mk-giorno">
+            <div class="mk-ora"><span>09</span><div class="tr"><div class="bl bl--lime" style="left:0;width:58%"></div></div></div>
+            <div class="mk-ora"><span>10</span><div class="tr"><div class="bl bl--lime" style="left:0;width:34%"></div><div class="bl bl--info" style="left:40%;width:30%"></div></div></div>
+            <div class="mk-ora"><span>11</span><div class="tr"><div class="bl bl--info" style="left:0;width:46%"></div><div class="bl bl--malva" style="left:52%;width:40%"></div></div></div>
+            <div class="mk-ora"><span>12</span><div class="tr"><div class="bl bl--malva" style="left:0;width:28%"></div></div></div>
+            <div class="mk-ora"><span>13</span><div class="tr"><div class="bl bl--lime" style="left:6%;width:52%"></div></div></div>
+            <div class="mk-ora"><span>14</span><div class="tr"><div class="bl bl--lime" style="left:0;width:24%"></div></div></div>
+          </div>
+
+          <table class="mk-tab">
+            <thead>
+              <tr><th>Progetto</th><th>Operatore</th><th class="num">Ore</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>PRJ-07 · Rete uffici</td><td>Giulia</td><td class="num">12h 40m</td></tr>
+              <tr><td>PRJ-04 · Portale</td><td>Marco</td><td class="num">8h 15m</td></tr>
+              <tr><td>PRJ-11 · Fonia</td><td>Giulia</td><td class="num">3h 05m</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="nota">
+      <span class="tacca"></span>
+      <p>Il report non inventa numeri: legge le <b>voci tempo</b> chiuse. Una voce ancora aperta si vede nel cronometro, non nel totale del periodo.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 8 · TOUR 5 ===================== -->
+<section hidden class="slide" id="s8" data-titolo="Il calendario">
+  <div class="interno">
+    <p class="occhiello">Tour · 5 di 5</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Il calendario</h2>
+    <p class="lead">Si pianifica trascinando — ma il trascinamento non è l'unico modo, e non è l'unico posto in cui il tempo si vede.</p>
+
+    <div class="due due--larga">
+      <div class="mk" role="img" aria-label="Mockup di una settimana: griglia oraria con eventi sovrapposti, linea dell'ora, un evento fantasma durante il trascinamento e un popover di modifica.">
+        <div class="mk-top" aria-hidden="true"><i class="mk-dot"></i><i class="mk-dot"></i><i class="mk-dot"></i><span class="mk-url"></span></div>
+        <div class="mk-cal" aria-hidden="true">
+          <div class="mk-cal-top">
+            <i></i><i>lun 26</i><i>mar 27</i><i>mer 28</i><i>gio 29</i><i>ven 30</i>
+          </div>
+          <div class="mk-cal-body">
+            <div class="mk-ore"><span>09</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span></div>
+            <div class="mk-col">
+              <div class="mk-evt mk-evt--a" style="top:29px;height:29px">Studio Marani</div>
+            </div>
+            <div class="mk-col">
+              <div class="mk-evt mk-evt--b" style="top:58px;height:44px">Verifica rete</div>
+            </div>
+            <div class="mk-col">
+              <div class="mk-evt mk-evt--a" style="top:0;height:44px">Kickoff</div>
+            </div>
+            <div class="mk-col">
+              <div class="mk-evt mk-evt--a" style="top:14px;height:29px">Call cliente</div>
+              <div class="mk-evt mk-evt--ghost" style="top:72px;height:29px">Spostando…</div>
+              <div class="mk-now" style="top:100px"></div>
+            </div>
+            <div class="mk-col">
+              <div class="mk-evt mk-evt--b" style="top:144px;height:43px">Sopralluogo</div>
+            </div>
+            <div class="mk-pop">
+              <div class="r"></div>
+              <div class="r"></div>
+              <div class="r" style="width:80%"></div>
+              <div class="r" style="width:60%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="punti-lista">
+        <li><span><b>Quattro viste.</b> Giorno, settimana, mese e agenda: la stessa pianificazione letta da quattro distanze.</span></li>
+        <li><span><b>Griglia oraria.</b> Gli eventi sovrapposti si affiancano; la linea dell'ora dice dove sei adesso.</span></li>
+        <li><span><b>Creazione e modifica.</b> Si crea da uno slot, si modifica nel popover ancorato all'evento.</span></li>
+        <li><span><b>Trascinamento con regole.</b> Snap a 30 minuti, anche tra giorni; ridimensionamento con minimo 15 minuti.</span></li>
+        <li><span><b>Da tastiera.</b> Alt + frecce sposta l'evento: il drag ha un equivalente, non è l'unica strada.</span></li>
+        <li><span><b>Filtri e origine.</b> Origine, etichetta e persona; il mini-mese dice dove sono gli eventi.</span></li>
+      </ul>
+    </div>
+
+    <div class="nota">
+      <span class="tacca"></span>
+      <p>Verso Google Calendar gli eventi vanno in <b>una sola direzione</b>: quello che crei dall'app arriva su Google, non il contrario.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 9 · ARCHITETTURA, LE PARTI ===================== -->
+<section hidden class="slide" id="s9" data-titolo="Architettura · Le parti">
+  <div class="interno">
+    <p class="occhiello">Architettura · 1 di 2</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Le parti</h2>
+    <p class="lead">Un monolite Next.js, un database remoto, un worker email e un centralino vocale che scrive nell'app: non un sistema distribuito, ma nemmeno una pagina sola.</p>
+
+    <div class="arch">
+      <div class="arch-riga">
+        <div class="pezzo"><b>Browser</b><span>Pagine React, tutte client component</span></div>
+        <div class="freccia" aria-hidden="true">→</div>
+        <div class="pezzo"><b>47 file di route</b><span>76 handler HTTP, parametrizzati a mano</span></div>
+        <div class="freccia" aria-hidden="true">→</div>
+        <div class="pezzo"><b>lib/</b><span>Moduli di dominio: ticket, tempi, calendario, email</span></div>
+        <div class="freccia" aria-hidden="true">→</div>
+        <div class="pezzo pezzo--db"><b>Turso · libSQL</b><span>20 tabelle, SQL parametrizzato, nessun ORM</span></div>
+      </div>
+
+      <p class="arch-et">Entrano: producono ticket e anagrafiche</p>
+      <div class="arch-riga">
+        <div class="pezzo pezzo--lime"><b>Agente vocale · centralino</b><span>Esterno all'app: prende la chiamata e apre il ticket</span></div>
+        <div class="pezzo pezzo--lime"><b>Worker IMAP</b><span>Legge la casella e chiama la route dei ticket</span></div>
+        <div class="pezzo"><b>Arca</b><span>Anagrafiche clienti, sync lanciata a mano</span></div>
+      </div>
+
+      <p class="arch-et">Escono verso il cliente</p>
+      <div class="arch-riga">
+        <div class="pezzo"><b>SMTP</b><span>Risposte e auto-reply in uscita</span></div>
+        <div class="pezzo"><b>Google Calendar</b><span>Una sola direzione, con service account</span></div>
+      </div>
+    </div>
+
+    <p style="margin-top:14px;font-size:13px;color:var(--ink-soft)">
+      1 container: app + worker · il centralino vocale resta fuori e scrive nell'app · CI su GitHub Actions → immagine su GHCR · Watchtower riavvia il servizio
+    </p>
+
+    <div class="chips">
+      <span class="chip chip--scuro">Next.js 14</span>
+      <span class="chip">React 18</span>
+      <span class="chip">TypeScript strict</span>
+      <span class="chip">Tailwind</span>
+      <span class="chip">libSQL senza ORM</span>
+    </div>
+
+    <div class="cifre">
+      <div><b>20</b><span>Tabelle</span></div>
+      <div><b>76</b><span>Handler</span></div>
+      <div><b>12</b><span>Schermate</span></div>
+      <div><b>2</b><span>Ruoli</span></div>
+      <div><b>2</b><span>Processi</span></div>
+      <div><b>1</b><span>Container</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 10 · ARCHITETTURA, UN FLUSSO ===================== -->
+<section hidden class="slide" id="s10" data-titolo="Architettura · Un flusso">
+  <div class="interno">
+    <div class="due">
+      <div>
+        <p class="occhiello">Architettura · 2 di 2</p>
+        <h2 class="t-slide" tabindex="-1" data-focus>Un flusso: il timer</h2>
+        <p class="lead">Dal pulsante alla riga in tabella, e ritorno nei totali. È il percorso che tiene insieme lavoro e ore.</p>
+
+        <div class="regola">
+          <b>Regola applicata lato server:</b> un solo timer aperto per operatore. Non è un vincolo dell'interfaccia, è un controllo che resta anche se due schede provano ad avviarlo.
+        </div>
+
+        <div class="nota">
+          <span class="tacca"></span>
+          <p><b>Compromesso dichiarato:</b> niente real-time. Gli aggiornamenti arrivano a polling, ogni 30 secondi, con cache breve. Meno impalcatura, qualche secondo di ritardo.</p>
+        </div>
+      </div>
+
+      <ol class="flusso">
+        <li><b>Avvii il timer</b><span>Da ticket, task, progetto o header.</span></li>
+        <li><b>Lo stato globale lo tiene acceso</b><span>Il cronometro vive sopra le rotte, in un contesto condiviso: cambiare pagina non lo spegne.</span></li>
+        <li><b><code>POST /api/tempi</code></b><span>Apre la voce di tempo.</span></li>
+        <li><b>Una riga in <code>voci_tempo</code></b><span>Collegata a un'attività <em>oppure</em> a un ticket. <code>fine</code> nulla significa timer ancora aperto.</span></li>
+        <li><b><code>PATCH</code> chiude la voce</b><span>Il server verifica che sia davvero l'unica aperta per quell'operatore.</span></li>
+        <li><b>Totali e report</b><span>Le ore salgono su task e progetto; il report le filtra per periodo e le esporta in CSV.</span></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 11 · COME È PENSATO ===================== -->
+<section hidden class="slide" id="s11" data-titolo="Come è pensato">
+  <div class="interno">
+    <p class="occhiello">Come è pensato</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Quattro scelte che si vedono</h2>
+    <p class="lead">Non sono linee guida astratte: ognuna ha un posto preciso nell'interfaccia, e si può indicare col dito.</p>
+
+    <div class="principi">
+      <div class="principio">
+        <div>
+          <h3>Una superficie per i numeri</h3>
+          <p>Sei misure in una fascia sola, divise da filetti — non sei card. I confronti si fanno con l'occhio, non con la memoria.</p>
+        </div>
+        <div class="mini" aria-hidden="true">
+          <div class="mini-cell mini-cell--ev"><b>4</b></div>
+          <div class="mini-cell"><b>2</b></div>
+          <div class="mini-cell"><b>17</b></div>
+          <div class="mini-cell"><b>3</b></div>
+          <div class="mini-cell"><b>5</b></div>
+          <div class="mini-cell"><b>6h</b></div>
+        </div>
+      </div>
+
+      <div class="principio">
+        <div>
+          <h3>Il colore è informazione</h3>
+          <p>Gli stati hanno famiglie semantiche — urgenza, attesa, ok, info — e un solo accento lime, usato come superficie e mai come testo.</p>
+        </div>
+        <div class="mini" aria-hidden="true">
+          <span class="mini-chip mini-chip--u">Urgente</span>
+          <span class="mini-chip mini-chip--a">In attesa</span>
+          <span class="mini-chip mini-chip--o">Chiuso</span>
+          <span class="mini-chip mini-chip--i">Info</span>
+        </div>
+      </div>
+
+      <div class="principio">
+        <div>
+          <h3>La tastiera non è un ripiego</h3>
+          <p>Quello che si fa col mouse si fa anche da tastiera: Alt + frecce sposta l'evento, il popover e il form fanno le stesse cose.</p>
+        </div>
+        <div class="mini" aria-hidden="true">
+          <span class="mini-tasto">Alt</span>
+          <span class="mini-freccia">+</span>
+          <span class="mini-tasto">←</span>
+          <span class="mini-tasto">→</span>
+        </div>
+      </div>
+
+      <div class="principio">
+        <div>
+          <h3>Il telefono è un contesto</h3>
+          <p>Tab bar in basso, pannelli in drawer, dettagli secondari nascosti invece che rimpiccioliti fino a diventare illeggibili.</p>
+        </div>
+        <div class="mini" aria-hidden="true">
+          <div class="mini-pannello"></div>
+          <div class="mini-telefono"><i></i><i></i><i></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 12 · IN PRATICA ===================== -->
+<section hidden class="slide slide--scuro" id="s12" data-titolo="In pratica">
+  <div class="interno">
+    <p class="occhiello">In pratica</p>
+    <h2 class="t-slide" tabindex="-1" data-focus>Tre passi per iniziare</h2>
+
+    <div class="due">
+      <div class="passi passi--chiari">
+        <div class="passo">
+          <span class="num">1</span>
+          <div>
+            <h3>Accedi</h3>
+            <p>Email e password. Il ruolo fa il resto: non c'è niente da configurare.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">2</span>
+          <div>
+            <h3>Guarda la Sintesi e l'agenda</h3>
+            <p>Sai cosa hai davanti prima di aprire un ticket: le tue misure, il giorno, le scadenze.</p>
+          </div>
+        </div>
+        <div class="passo">
+          <span class="num">3</span>
+          <div>
+            <h3>Apri un ticket e avvialo</h3>
+            <p>Prendi in carico, avvia il timer, scrivi la nota. Progetto e ore si aggiornano da soli.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="due-chi">
+        <div>
+          <b>Chi riceve le richieste</b>
+          <p>Non le trascrive: arrivano già dal centralino o dalla casella. Guarda l'elenco dei «da prendere», prende in carico, assegna.</p>
+        </div>
+        <div>
+          <b>Chi lavora</b>
+          <p>Apre «I Miei Ticket», avvia il cronometro, chiude con una nota. Il totale del progetto è già giusto.</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="chiusura-riga">Il resto lo fa il flusso: <em>centralino, ticket, progetto, ore, report</em>.</p>
+    <p class="chiusura-foot">Support Desk · Gestione Ticket — ottobre 2026</p>
+  </div>
+</section>
+
+</main>
+
+<nav class="controlli" aria-label="Navigazione della presentazione">
+  <div class="ctrl-sx">
+    <button type="button" class="btn" id="prec" aria-label="Slide precedente">←</button>
+    <button type="button" class="btn" id="succ" aria-label="Slide successiva">→</button>
+  </div>
+  <div class="puntini" id="puntini" role="group" aria-label="Vai a una slide"></div>
+  <div class="ctrl-dx">
+    <span class="tasti-hint" aria-hidden="true">← →</span>
+    <span class="contatore" id="contatore">1 / 12</span>
+    <button type="button" class="btn btn--testo" id="copia">Copia link</button>
+  </div>
+</nav>
+
+<p id="stato-copia" class="sr" role="status"></p>
+<p id="annuncio" class="sr" aria-live="polite"></p>
+
+<script>
+(function () {
+  "use strict";
+
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var tot = slides.length;
+  var i = 0;
+
+  var barra = document.getElementById("barra").firstElementChild;
+  var contatore = document.getElementById("contatore");
+  var puntini = document.getElementById("puntini");
+  var annuncio = document.getElementById("annuncio");
+  var statoCopia = document.getElementById("stato-copia");
+  var prec = document.getElementById("prec");
+  var succ = document.getElementById("succ");
+
+  var punti = slides.map(function (s, n) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "punto";
+    var t = s.getAttribute("data-titolo") || "Slide " + (n + 1);
+    b.setAttribute("aria-label", "Vai alla slide " + (n + 1) + ": " + t);
+    b.addEventListener("click", function () { vai(n); });
+    puntini.appendChild(b);
+    return b;
+  });
+
+  function vai(n, senzaHash) {
+    n = Math.max(0, Math.min(tot - 1, n));
+    slides[i].hidden = true;
+    i = n;
+    slides[i].hidden = false;
+
+    barra.style.width = ((i + 1) / tot) * 100 + "%";
+    contatore.textContent = (i + 1) + " / " + tot;
+
+    punti.forEach(function (p, k) {
+      p.classList.toggle("punto--on", k === i);
+      if (k === i) p.setAttribute("aria-current", "true");
+      else p.removeAttribute("aria-current");
+    });
+
+    prec.disabled = i === 0;
+    succ.disabled = i === tot - 1;
+
+    var titolo = slides[i].getAttribute("data-titolo") || "";
+    annuncio.textContent = "Slide " + (i + 1) + " di " + tot + (titolo ? ": " + titolo : "");
+
+    window.scrollTo(0, 0);
+    var testa = slides[i].querySelector("[data-focus]") || document.getElementById("deck");
+    try { testa.focus({ preventScroll: true }); } catch (e) { try { testa.focus(); } catch (e2) { /* niente */ } }
+
+    if (!senzaHash) {
+      try { history.replaceState(null, "", "#" + (i + 1)); } catch (e) { /* frame senza history */ }
+    }
+  }
+
+  document.getElementById("prec").addEventListener("click", function () { vai(i - 1); });
+  document.getElementById("succ").addEventListener("click", function () { vai(i + 1); });
+
+  // Tastiera: ascolto in fase di cattura su window, così l'evento arriva
+  // anche se qualcosa dentro la pagina prova a fermarlo. keyCode è il
+  // ripiego per i contesti che non espongono e.key.
+  function sullaTastiera(e) {
+    if (e.defaultPrevented) return;
+    var t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+    var k = e.key || "";
+    var c = e.keyCode || e.which || 0;
+    if (k === " " && t && t.closest && t.closest("button,a")) return;
+
+    var avanti = k === "ArrowRight" || k === "ArrowDown" || k === "PageDown" ||
+                 k === " " || k === "n" || c === 39 || c === 40 || c === 34 || c === 32;
+    var indietro = k === "ArrowLeft" || k === "ArrowUp" || k === "PageUp" ||
+                   k === "p" || c === 37 || c === 38 || c === 33;
+
+    if (avanti) { e.preventDefault(); vai(i + 1); }
+    else if (indietro) { e.preventDefault(); vai(i - 1); }
+    else if (k === "Home" || c === 36) { e.preventDefault(); vai(0); }
+    else if (k === "End" || c === 35) { e.preventDefault(); vai(tot - 1); }
+  }
+  window.addEventListener("keydown", sullaTastiera, true);
+
+  // Un click dentro la pagina le restituisce il focus: senza, in un iframe
+  // le frecce restano al documento che la contiene.
+  document.addEventListener("pointerdown", function () {
+    try { window.focus(); } catch (e) { /* niente da fare */ }
+  }, true);
+
+  var sx = 0, sy = 0;
+  document.addEventListener("touchstart", function (e) {
+    if (e.touches.length !== 1) return;
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    var t = e.changedTouches[0];
+    if (!t) return;
+    var dx = t.clientX - sx;
+    var dy = t.clientY - sy;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      vai(i + (dx < 0 ? 1 : -1));
+    }
+  }, { passive: true });
+
+  document.getElementById("copia").addEventListener("click", function () {
+    var base = location.href.split("#")[0];
+    var url = base + "#" + (i + 1);
+
+    function esito(messaggio) { statoCopia.textContent = messaggio; }
+
+    function ripiego() {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = url;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        esito(ok ? "Link della slide copiato." : "Copia non disponibile. Il link è: " + url);
+      } catch (e) {
+        esito("Copia non disponibile. Il link è: " + url);
+      }
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(
+        function () { esito("Link della slide copiato."); },
+        function () { ripiego(); }
+      );
+    } else {
+      ripiego();
+    }
+  });
+
+  // Apertura: hash #n se presente, altrimenti copertina.
+  var m = /^#(\d{1,2})$/.exec(location.hash || "");
+  var iniziale = m ? parseInt(m[1], 10) - 1 : 0;
+  if (!(iniziale >= 0 && iniziale < tot)) iniziale = 0;
+  slides.forEach(function (s, n) { s.hidden = n !== iniziale; });
+  i = iniziale;
+  slides[i].hidden = false;
+  vai(iniziale, true);
+})();
+</script>
