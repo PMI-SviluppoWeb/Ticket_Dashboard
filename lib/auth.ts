@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "./db";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 const JWT_SECRET_FALLBACK = "dev-secret-change-in-production";
 const SESSION_COOKIE = "session";
@@ -207,9 +207,11 @@ export async function createSession(operator: Operator): Promise<string> {
     ruolo: operator.ruolo,
   });
   const cookieStore = await cookies();
+  const requestHeaders = await headers();
+  const proto = requestHeaders.get("x-forwarded-proto") ?? "http";
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: proto === "https",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 7,
     path: "/",
