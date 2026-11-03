@@ -118,6 +118,13 @@ export async function insertMessage(
     });
 }
 
+export function dataIsoSql(col: string): string {
+  return `(CASE WHEN ${col} LIKE '__/__/____, __:__'
+    THEN substr(${col},7,4)||'-'||substr(${col},4,2)||'-'
+         ||substr(${col},1,2)||'T'||substr(${col},13,5)
+    ELSE ${col} END)`;
+}
+
 export async function listTickets(opts: {
   stato?: StatoTicket | "TUTTI";
   priorita?: Priorita | "TUTTE";
@@ -172,12 +179,13 @@ export async function listTickets(opts: {
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
 
+  const dataOrd = dataIsoSql("data_creazione");
   const order =
     opts.ordina === "data_asc"
-      ? "data_creazione ASC"
+      ? `${dataOrd} ASC, rowid ASC`
       : opts.ordina === "priorita"
-        ? `CASE priorita WHEN 'ALTA' THEN 0 WHEN 'MEDIA' THEN 1 ELSE 2 END, data_creazione DESC`
-        : "data_creazione DESC";
+        ? `CASE priorita WHEN 'ALTA' THEN 0 WHEN 'MEDIA' THEN 1 ELSE 2 END, ${dataOrd} DESC, rowid DESC`
+        : `${dataOrd} DESC, rowid DESC`;
 
   // Conteggio e pagina nella STESSA richiesta al DB: con un DB remoto due
   // `Promise.all` sono ancora due viaggi di rete, solo sovrapposti.
@@ -204,19 +212,19 @@ export async function getTicket(id: string): Promise<Ticket | null> {
     { sql: `SELECT ${ROW_FIELDS} FROM tickets WHERE id = ?`, params: [id] },
     {
       sql: `SELECT id, ruolo, contenuto, data_creazione FROM messages
-         WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`,
+       WHERE ticket_id = ? ORDER BY ${dataIsoSql("data_creazione")} ASC, rowid ASC`,
       params: [id],
     },
     {
       sql: `SELECT id, ticket_id, titolo, problema, soluzione, operatore, data_creazione
-         FROM technical_notes WHERE ticket_id = ? ORDER BY data_creazione ASC, rowid ASC`,
+       FROM technical_notes WHERE ticket_id = ? ORDER BY ${dataIsoSql("data_creazione")} ASC, rowid ASC`,
       params: [id],
     },
     {
       sql: `SELECT id, note_tecnica_id, ticket_id, nome_file, nome_originale, dimensione, tipo_mime, data_creazione
-         FROM allegati
-         WHERE note_tecnica_id IN (SELECT id FROM technical_notes WHERE ticket_id = ?)
-         ORDER BY data_creazione ASC`,
+       FROM allegati
+       WHERE note_tecnica_id IN (SELECT id FROM technical_notes WHERE ticket_id = ?)
+       ORDER BY ${dataIsoSql("data_creazione")} ASC, rowid ASC`,
       params: [id],
     },
   ]);

@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { dataIsoSql } from "./tickets";
 import { parsePersone, serializzaPersone } from "./persone";
 import { deleteAttivita, eliminaAttivitaProgetto, listAttivitaProgetto } from "./attivita";
 import { SOGLIA_SYNC_INLINE } from "./google-sync";
@@ -261,7 +262,7 @@ export async function listTicketsProgetto(progettoId: string): Promise<TicketLis
        FROM tickets t
        JOIN progetti_tickets pt ON pt.ticket_id = t.id
        WHERE pt.progetto_id = @progetto_id
-       ORDER BY t.data_creazione DESC`
+       ORDER BY ${dataIsoSql("t.data_creazione")} DESC, t.rowid DESC`
     )
     .all({ progetto_id: progettoId });
   return rows as unknown as TicketListRow[];
