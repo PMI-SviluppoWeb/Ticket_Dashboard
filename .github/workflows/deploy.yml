@@ -8,17 +8,24 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: cmd
+        working-directory: C:\Users\Mirko Pandolfi\Desktop\Ticket_Dashboard
     steps:
       # 1. Scarica il codice aggiornato da GitHub
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Esegue i comandi direttamente nella cartella del progetto sul server
-      - name: Install, Build and Restart
-        run: |
-          cd C:\Users\Mirko Pandolfi\Desktop\Ticket_Dashboard
-          git pull origin main
-          npm install
-          npm run build
-          pm2 restart Ticket_Dashboard
-        shell: cmd
+      # 2. Ogni comando e' uno step separato: se fallisce, il job va in errore
+      - name: Git pull
+        run: git pull origin main
+
+      - name: Install dipendenze
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Riavvia app
+        run: pm2 restart Ticket_Dashboard
