@@ -3,6 +3,7 @@ import { getTicket } from "@/lib/tickets";
 import { sendEmail } from "@/lib/email";
 import { emailManuale } from "@/lib/email-templates";
 import { logEmail, getEmailLog } from "@/lib/email-log";
+import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
 
 export async function GET(
   _request: Request,
@@ -32,9 +33,12 @@ export async function POST(
       return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
     }
 
-    if (!ticket.email) {
+    if (!ticket.email || ticket.email === EMAIL_PLACEHOLDER) {
       return NextResponse.json(
-        { error: "Il ticket non ha un indirizzo email associato." },
+        {
+          error:
+            "Il ticket non ha un indirizzo email valido: aggiungilo nei Dettagli Cliente e riprova.",
+        },
         { status: 400 }
       );
     }

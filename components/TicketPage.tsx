@@ -41,6 +41,14 @@ import {
 import TimerBersaglio from "@/components/TimerBersaglio";
 import { useOperatore } from "@/lib/operatore-client";
 import { caricaApi } from "@/lib/api-cache";
+import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
+
+// Il placeholder dei ticket creati senza email (telefono o agente vocale che
+// non ha colto il recapito) non e' un recapito: non si puo' scrivere al
+// cliente e non va mostrato come se fosse un indirizzo.
+function emailInvocabile(email: string | null | undefined): email is string {
+  return !!email && email !== EMAIL_PLACEHOLDER;
+}
 
 // Base del chip.
 //
@@ -265,7 +273,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     setCliente(ticket.cliente ?? "");
     setContatto(ticket.contatto ?? "");
     setTelefono(ticket.telefono ?? "");
-    setEmail(ticket.email ?? "");
+    setEmail(emailInvocabile(ticket.email) ? ticket.email : "");
     setSelectedStato(ticket.stato);
     setSelectedPriorita(ticket.priorita);
     setError("");
@@ -333,6 +341,20 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     });
   }, [run, updateTicket, selectedStato, selectedPriorita, note, selectedOperatore, cliente, contatto, telefono, email]);
 
+  // Solo i recapiti: si salva anche su un ticket chiuso, perche' un'email
+  // mancante va corretta anche a lavoro finito.
+  const handleSalvaContatti = useCallback(() => {
+    void run(async () => {
+      await updateTicket({
+        contatto: contatto.trim(),
+        telefono: telefono.trim() || null,
+        email: email.trim() || null,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    });
+  }, [run, updateTicket, contatto, telefono, email]);
+
   const handleCancel = useCallback(() => {
     if (!ticket) return;
     setNote(ticket.note ?? "");
@@ -340,7 +362,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     setCliente(ticket.cliente ?? "");
     setContatto(ticket.contatto ?? "");
     setTelefono(ticket.telefono ?? "");
-    setEmail(ticket.email ?? "");
+    setEmail(emailInvocabile(ticket.email) ? ticket.email : "");
     setSelectedStato(ticket.stato);
     setSelectedPriorita(ticket.priorita);
     setError("");
@@ -431,7 +453,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
         }
         setPendingFiles([]);
       }
-      if (noteId && !editingNote && ticket?.email) {
+      if (noteId && !editingNote && emailInvocabile(ticket?.email)) {
         // Nessun invio automatica: si apre la dialog di conferma con un testo
         // cliente-friendly (mai problema/soluzione interni). Senza email sul
         // ticket non c'e' nessuno a cui scrivere, quindi si salta.
@@ -690,7 +712,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 </button>
               )}
 
-              {ticket.email && (
+              {emailInvocabile(ticket.email) && (
                 <button
                   type="button"
                   onClick={() => setShowEmailForm(!showEmailForm)}
@@ -881,7 +903,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                         <h3 className="text-sm font-bold text-inchiostro">{ticket.contatto || "Non specificato"}</h3>
                         <span className="rounded bg-stato-neutro-bg px-2 py-0.5 text-[11px] font-medium text-stato-neutro-testo">{ticket.cliente}</span>
                       </div>
-                      <p className="mt-0.5 font-mono text-xs text-caldo-testo">{ticket.email || "Nessuna email"}</p>
+                      <p className="mt-0.5 font-mono text-xs text-caldo-testo">{emailInvocabile(ticket.email) ? ticket.email : "Nessuna email"}</p>
                     </div>
                   </div>
                 </div>
@@ -1286,13 +1308,51 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 </div>
                 <div className="space-y-2 pt-1">
                   <div>
-                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Email</span>
-                    <p className="mt-0.5 break-all text-xs font-medium text-inchiostro">{ticket.email || "Non fornita"}</p>
+                    <label
+                      htmlFor="dettagli-email"
+                      className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo"
+                    >
+                      Email
+                    </label>
+                    <input
+                      id="dettagli-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="nome@cliente.it"
+                      className="mt-1 w-full rounded-control border border-crema-contorno bg-white px-3 py-2 text-xs font-medium text-inchiostro placeholder-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                    />
                   </div>
                   <div>
-                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo">Telefono</span>
-                    <p className="tabular mt-0.5 text-xs font-medium text-caldo-testo">{ticket.telefono || "Non fornito"}</p>
+                    <label
+                      htmlFor="dettagli-telefono"
+                      className="block text-[11px] font-semibold uppercase tracking-wider text-caldo-testo"
+                    >
+                      Telefono
+                    </label>
+                    <input
+                      id="dettagli-telefono"
+                      type="tel"
+                      value={telefono}
+                      onChange={(e) => setTelefono(e.target.value)}
+                      placeholder="+39 000 0000000"
+                      className="tabular mt-1 w-full rounded-control border border-crema-contorno bg-white px-3 py-2 text-xs font-medium text-inchiostro placeholder-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                    />
                   </div>
+                  {!emailInvocabile(email) && (
+                    <p className="text-[11px] leading-relaxed text-stato-attesa-testo">
+                      Nessun indirizzo email: aggiungilo per poter rispondere al cliente dalla
+                      pagina ticket.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSalvaContatti}
+                    disabled={saving}
+                    className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-full border border-crema-contorno bg-white px-4 py-2 text-xs font-semibold text-inchiostro transition-colors duration-200 hover:bg-crema-scuro disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving ? "Salvataggio..." : saved ? "Salvato!" : "Salva contatti"}
+                  </button>
                 </div>
               </div>
             </section>

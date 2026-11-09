@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { invalidaMemo } from "./cache";
+import { EMAIL_PLACEHOLDER } from "./contatti";
 import type {
   Allegato,
   Message,
@@ -271,7 +272,10 @@ export async function updateTicket(
   if (patch.note !== undefined) next.note = patch.note || null;
   if (patch.operatore !== undefined) next.operatore = patch.operatore || null;
   if (patch.telefono !== undefined) next.telefono = patch.telefono || null;
-  if (patch.email !== undefined) next.email = patch.email || null;
+  // Email vuota -> placeholder, non NULL: la colonna e' NOT NULL su alcune
+  // installazioni e il placeholder viene comunque trattato come "nessun
+  // recapito" dall'interfaccia e dalle rotte di invio.
+  if (patch.email !== undefined) next.email = patch.email || EMAIL_PLACEHOLDER;
 
   const ts = now();
   const fields: string[] = ["data_aggiornamento = @data_aggiornamento"];

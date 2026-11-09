@@ -5,6 +5,7 @@ import { createNotification } from "@/lib/notifications";
 import { sendEmail } from "@/lib/email";
 import { emailNuovoTicket } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
+import { completaContatti, emailValida } from "@/lib/contatti";
 import type { Priorita, StatoTicket, TicketInput } from "@/lib/types";
 
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
@@ -72,8 +73,15 @@ export async function POST(request: Request) {
 
     // Email OPZIONALE: un ticket preso al telefono non ha sempre un indirizzo.
     // Se presente deve pero' essere valida, perche' e' la destinazione delle
-    // risposte e dell'autorisposta.
-    if (body.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+    // risposte e dell'autorisposta. Email e telefono arrivano anche nascosti
+    // dentro il testo libero del contatto: in quel caso li si estrae.
+    const contatti = completaContatti(
+      { contatto: body.contatto, email: body.email, telefono: body.telefono },
+      body.contatto,
+      body.descrizione_dettagliata
+    );
+
+    if (contatti.email && !emailValida(contatti.email)) {
       return NextResponse.json(
         { error: "L'email del cliente, se presente, deve essere valida." },
         { status: 400 }
@@ -95,11 +103,11 @@ export async function POST(request: Request) {
       id: body.id,
       numero: body.numero,
       cliente: body.cliente,
-      contatto: body.contatto ?? "Non fornito",
-      telefono: body.telefono,
+      contatto: contatti.contatto,
+      telefono: contatti.telefono,
       // La colonna email e' NOT NULL in DB: senza email (ticket da telefono)
       // si riprende lo stesso placeholder usato dalla migrazione storica.
-      email: body.email ?? "sconosciuto@placeholder.it",
+      email: contatti.email ?? "sconosciuto@placeholder.it",
       modulo_software: body.modulo_software || "Generico",
       sommario_problema: body.sommario_problema,
       descrizione_dettagliata: body.descrizione_dettagliata,
@@ -117,7 +125,7 @@ export async function POST(request: Request) {
 
     // Autorisposta al cliente: di default si, ma chi crea il ticket da UI
     // (telefono, senza email, o senza voler scrivere) puo' sceglierlo.
-    const email = body.email;
+    const email = contatti.email;
     if (body.invia_conferma !== false && email) {
       const html = emailNuovoTicket({
         numero: ticket.numero,

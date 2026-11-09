@@ -452,7 +452,10 @@ async function initSchema(): Promise<void> {
 
       updatesContatti.push({
         sql: `UPDATE tickets SET contatto = :contatto, telefono = :telefono, email = :email WHERE id = :id`,
-        args: [nomeContatto, telefono, email || null, row.id as string],
+        // Nessun recapito trovato -> placeholder, non NULL: la colonna puo'
+        // essere NOT NULL su qualche installazione e un UPDATE fallito
+        // bloccherebbe l'intera migrazione dei contatti.
+        args: [nomeContatto, telefono, email || 'sconosciuto@placeholder.it', row.id as string],
       });
     }
   } catch {
@@ -514,7 +517,10 @@ async function initSchema(): Promise<void> {
 }
 
 // Incrementare quando si aggiunge una migrazione dati da eseguire una volta.
-const SCHEMA_VERSION = 1;
+// v2: i ticket arrivati dal centralino/agent MCP hanno i recapiti dentro il
+// testo libero del contatto (email e telefono non avevano colonna scritta):
+// si riestrae tutto.
+const SCHEMA_VERSION = 2;
 
 async function leggiVersioneSchema(client: Client): Promise<number> {
   try {

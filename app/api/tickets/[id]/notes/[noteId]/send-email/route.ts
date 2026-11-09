@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { emailAggiornamentoCliente } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
+import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
 import type { TechnicalNote, Allegato } from "@/lib/types";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -25,8 +26,11 @@ export async function POST(
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
 
-  if (!ticket.email) {
-    return NextResponse.json({ error: "Ticket senza email." }, { status: 400 });
+  if (!ticket.email || ticket.email === EMAIL_PLACEHOLDER) {
+    return NextResponse.json(
+      { error: "Il ticket non ha un indirizzo email valido: aggiungilo nei Dettagli Cliente." },
+      { status: 400 }
+    );
   }
 
   // Fetch the technical note

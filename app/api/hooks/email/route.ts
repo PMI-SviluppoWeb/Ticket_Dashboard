@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emailAutoReply } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
 import { classifyEmail } from "@/lib/email-classifier";
+import { completaContatti } from "@/lib/contatti";
 import type { TicketInput } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -122,12 +123,20 @@ export async function POST(request: Request) {
     const clienteNome = cliente?.nome ?? email.fromName ?? email.from.split("@")[0];
     const contatto = email.fromName || email.from;
 
+    // L'indirizzo mitte lo si ha sempre; il telefono no: se sta nella firma o
+    // nel corpo del messaggio lo si ricava da li'.
+    const contatti = completaContatti(
+      { contatto, email: email.from, telefono: null },
+      contatto,
+      email.body
+    );
+
     // 4. Crea ticket
     const ticket = await createTicket({
       cliente: clienteNome,
-      contatto,
-      telefono: null,
-      email: email.from,
+      contatto: contatti.contatto,
+      telefono: contatti.telefono,
+      email: contatti.email ?? email.from,
       modulo_software: classification.modulo_suggerito,
       sommario_problema: classification.sommario,
       descrizione_dettagliata: email.body || email.subject,
