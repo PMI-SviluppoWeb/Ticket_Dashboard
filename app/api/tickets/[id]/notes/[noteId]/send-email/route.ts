@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { join } from "path";
 import { readFile } from "fs/promises";
-import { getTicket } from "@/lib/tickets";
+import { getTicket, sanificaContatti } from "@/lib/tickets";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { emailAggiornamentoCliente } from "@/lib/email-templates";
@@ -21,10 +21,13 @@ export async function POST(
     return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
   }
 
-  const ticket = await getTicket(params.id);
-  if (!ticket) {
+  const found = await getTicket(params.id);
+  if (!found) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
+  // Contatti estratti dal testo prima di controllare: senza questo il
+  // messaggio al cliente viene rifiutato su un ticket creato dal centralino.
+  const ticket = await sanificaContatti(found);
 
   if (!ticket.email || ticket.email === EMAIL_PLACEHOLDER) {
     return NextResponse.json(

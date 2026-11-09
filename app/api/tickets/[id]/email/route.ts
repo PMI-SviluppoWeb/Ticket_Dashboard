@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTicket } from "@/lib/tickets";
+import { getTicket, sanificaContatti } from "@/lib/tickets";
 import { sendEmail } from "@/lib/email";
 import { emailManuale } from "@/lib/email-templates";
 import { logEmail, getEmailLog } from "@/lib/email-log";
@@ -28,10 +28,13 @@ export async function POST(
   }
 
   try {
-    const ticket = await getTicket(params.id);
-    if (!ticket) {
+    const found = await getTicket(params.id);
+    if (!found) {
       return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
     }
+    // Anche qui si estraggono i recapiti dal testo, cosi' l'invio funziona
+    // senza dover prima passare dalla pagina del ticket.
+    const ticket = await sanificaContatti(found);
 
     if (!ticket.email || ticket.email === EMAIL_PLACEHOLDER) {
       return NextResponse.json(

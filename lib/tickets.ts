@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { invalidaMemo } from "./cache";
-import { EMAIL_PLACEHOLDER } from "./contatti";
+import { completaContatti, EMAIL_PLACEHOLDER } from "./contatti";
 import type {
   Allegato,
   Message,
@@ -378,6 +378,42 @@ export async function updateTicket(
     tempo_stimato_minuti: tempoStimato,
     tempo_effettivo_minuti: tempoEffettivo,
   } as Ticket;
+}
+
+// I recapiti possono arrivare tutti dentro il testo libero di `contatto`
+// (e' il comportamento del server MCP del centralino, soprattutto quando non
+// e' aggiornato): qui si estraggono, si mettono nelle colonne giuste e si
+// salvano. Serve alla pagina del ticket per mostrare email e telefono e per
+// abilitare l'invio della risposta al cliente.
+export async function sanificaContatti(ticket: Ticket): Promise<Ticket> {
+  const contatti = completaContatti(
+    {
+      contatto: ticket.contatto,
+      email: ticket.email,
+      telefono: ticket.telefono,
+    },
+    ticket.contatto,
+    ticket.descrizione_dettagliata
+  );
+
+  // Il placeholder e' "nessuna email": confrontato con null non deve
+  // sembrare un cambiamento, altrimenti si riscrive a ogni lettura.
+  const emailCorrente =
+    ticket.email && ticket.email !== EMAIL_PLACEHOLDER ? ticket.email : null;
+
+  const invariato =
+    contatti.contatto === ticket.contatto &&
+    (contatti.email ?? null) === emailCorrente &&
+    (contatti.telefono ?? null) === (ticket.telefono ?? null);
+  if (invariato) return ticket;
+
+  try {
+    const aggiornato = await updateTicket(ticket.id, contatti, ticket);
+    return aggiornato ?? ticket;
+  } catch (err) {
+    console.error("Sanifica contatti non riuscita:", ticket.id, err);
+    return ticket;
+  }
 }
 
 // Accetta ENTRAMBI i formati: "14/09/2026, 17:30" (quello scritto da `now()`) e

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { join } from "path";
 import { readFile } from "fs/promises";
-import { deleteTicket, getTicket, updateTicket } from "@/lib/tickets";
+import { deleteTicket, getTicket, updateTicket, sanificaContatti } from "@/lib/tickets";
 import { getOperatorById } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
@@ -27,7 +27,10 @@ export async function GET(
   if (!ticket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
-  return NextResponse.json(ticket);
+  // Prima di mostrarlo si estraggono i recapiti nascosti nel testo: il
+  // centralino puo' non essere aggiornato e continua a scriverli dentro
+  // `contatto`, e senza questo passaggio email/telefono restano vuoti.
+  return NextResponse.json(await sanificaContatti(ticket));
 }
 
 export async function PATCH(
