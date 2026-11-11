@@ -4,6 +4,7 @@ import { sendEmail } from "@/lib/email";
 import { emailManuale } from "@/lib/email-templates";
 import { logEmail, getEmailLog } from "@/lib/email-log";
 import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
+import { casellaPerTicket } from "@/lib/caselle";
 
 export async function GET(
   _request: Request,
@@ -72,6 +73,8 @@ export async function POST(
       to: ticket.email,
       subject: `[Support Desk] ${oggetto} - ${ticket.numero}`,
       html,
+      // Risponde dalla casella che ha ricevuto la mail del ticket.
+      casellaId: (await casellaPerTicket(ticket.id)) ?? undefined,
     });
 
     await logEmail({

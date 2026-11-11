@@ -266,7 +266,29 @@ docker image prune -a -f
 
 ---
 
-## 7. Integrazione Google Calendar
+## 7. Caselle email multiple (configurate dall'app)
+
+Oltre alla casella singola in `.env` (che resta valida come fallback), si
+possono collegare più caselle direttamente dall'applicazione: **Admin →
+Caselle Email** (`/admin/email`).
+
+- Ogni casella ha IMAP + SMTP dello stesso account: i ticket nascono dalle
+  mail in entrata e le risposte (autorisposta, notifiche, aggiornamenti)
+  partono dallo stesso indirizzo che ha ricevuto il messaggio.
+- La casella **predefinita** invia le email dei ticket creati manualmente.
+- Le password sono cifrate nel database con `ENCRYPTION_KEY` (in `.env`):
+  senza quella variabile il form resta disabilitato. **Non cambiarla** una
+  volta salvate le caselle, altrimenti le password diventano illeggibili.
+- Il worker rilegge l'elenco caselle a ogni ciclo di polling
+  (`IMAP_POLL_INTERVAL_MS`, 5 minuti in produzione): le modifiche sono
+  attive senza riavviare il container. Una casella nuova parte col
+  high-water mark all'UID più alto esistente (non processa le mail vecchie).
+- La verifica di connessione (IMAP + SMTP) è disponibile nel form e nella
+  tabella, utile subito dopo il salvataggio.
+
+---
+
+## 8. Integrazione Google Calendar
 
 Il calendario condiviso dell'app può essere pubblicato su un calendario Google,
 così il team lo vede da telefono e desktop senza aprire la dashboard.
@@ -377,7 +399,7 @@ restano.
 
 ---
 
-## 8. Risoluzione problemi
+## 9. Risoluzione problemi
 
 | Sintomo | Causa / Fix |
 |---|---|

@@ -21,6 +21,9 @@ interface IncomingEmail {
   body: string;
   bodyHtml?: string;
   date?: string;
+  // Casella che ha ricevuto il messaggio (opzionale: un worker vecchio non
+  // la invia). Usata per registrare la provenienza e per l'autorisposta.
+  casellaId?: string;
 }
 
 async function isDuplicate(messageId: string): Promise<boolean> {
@@ -38,13 +41,14 @@ async function logIncomingEmail(data: {
   bodyPreview: string;
   bodyHtml: string | null;
   ticketId: string | null;
+  casellaId: string | null;
   stato: "processata" | "errore" | "ignorata";
 }): Promise<void> {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO email_inbox (id, message_id, from_email, from_nome, subject, body_preview, body_html, ticket_id, stato, data_creazione)
-       VALUES (@id, @message_id, @from_email, @from_nome, @subject, @body_preview, @body_html, @ticket_id, @stato, @data_creazione)`
+      `INSERT INTO email_inbox (id, message_id, from_email, from_nome, subject, body_preview, body_html, ticket_id, casella_id, stato, data_creazione)
+       VALUES (@id, @message_id, @from_email, @from_nome, @subject, @body_preview, @body_html, @ticket_id, @casella_id, @stato, @data_creazione)`
     )
     .run({
       id,
@@ -55,6 +59,7 @@ async function logIncomingEmail(data: {
       body_preview: data.bodyPreview,
       body_html: data.bodyHtml,
       ticket_id: data.ticketId,
+      casella_id: data.casellaId,
       stato: data.stato,
       data_creazione: new Date().toISOString(),
     });
@@ -154,7 +159,7 @@ export async function POST(request: Request) {
       ],
     });
 
-    // 5. Logga email in entrata
+    // 5. Logga email in entrata (con la casella di provenienza)
     await logIncomingEmail({
       messageId: email.messageId,
       fromEmail: email.from,
@@ -163,6 +168,7 @@ export async function POST(request: Request) {
       bodyPreview: (email.body || email.subject).slice(0, 500),
       bodyHtml: email.bodyHtml ?? null,
       ticketId: ticket.id,
+      casellaId: typeof email.casellaId === "string" && email.casellaId ? email.casellaId : null,
       stato: "processata",
     });
 
@@ -185,6 +191,8 @@ export async function POST(request: Request) {
       to: email.from,
       subject: `[Support Desk] ${ticket.numero} - Ricevuto la tua richiesta`,
       html: autoReplyHtml,
+      // Risponde dalla casella che ha ricevuto la mail (stesso account).
+      casellaId: typeof email.casellaId === "string" && email.casellaId ? email.casellaId : undefined,
     });
     await logEmail({
       ticket_id: ticket.id,

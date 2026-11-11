@@ -47,6 +47,14 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { href: "/report", label: "Report Ore", icon: ClockIcon, exact: false, adminOnly: true, calda: [] },
   { href: "/inbox", label: "Inbox Email", icon: MailIcon, exact: false, adminOnly: true, calda: [] },
+  {
+    href: "/admin/email",
+    label: "Caselle Email",
+    icon: MailIcon,
+    exact: false,
+    adminOnly: true,
+    calda: ["/api/caselle"],
+  },
   { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false, calda: [] },
 ];
 

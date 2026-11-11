@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { emailAssegnazione, emailChiusura } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
 import { completaContatti, emailValida, EMAIL_PLACEHOLDER } from "@/lib/contatti";
+import { casellaPerTicket } from "@/lib/caselle";
 import type { Priorita, StatoTicket, Ticket, TicketUpdate, TechnicalNote } from "@/lib/types";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -152,6 +153,10 @@ async function inviaNotifica(
   operatore: string,
   ticketEmail: string
 ): Promise<void> {
+  // La casella che ha ricevuto la mail del ticket: le notifiche partono dallo
+  // stesso account. Null se il ticket non nasce da email -> mittente default.
+  const casellaId = (await casellaPerTicket(ticket.id)) ?? undefined;
+
   if (nuovoStato === "IN_CORSO" && precedente.stato === "NUOVO") {
     const html = emailAssegnazione({
       numero: ticket.numero,
@@ -162,6 +167,7 @@ async function inviaNotifica(
       to: ticketEmail,
       subject: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
       html,
+      casellaId,
     });
     await logEmail({
       ticket_id: ticket.id,
@@ -225,6 +231,7 @@ async function inviaNotifica(
     subject: `[Support Desk] Ticket ${ticket.numero} chiuso`,
     html,
     attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
+    casellaId,
   });
   await logEmail({
     ticket_id: ticket.id,

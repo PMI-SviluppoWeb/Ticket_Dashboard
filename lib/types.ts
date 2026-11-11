@@ -614,8 +614,47 @@ export interface EmailInbox {
   body_preview: string | null;
   body_html: string | null;
   ticket_id: string | null;
+  casella_id: string | null;
   stato: "processata" | "errore" | "ignorata";
   data_creazione: string;
+}
+
+// Casella email collegata all'app (IMAP + SMTP dello stesso account).
+// La password NON compare MAI in questo tipo: resta sul server cifrata
+// (lib/cifratura.ts) e le API ritornano solo `ha_password`.
+export interface CasellaEmail {
+  id: string;
+  etichetta: string;
+  indirizzo: string;
+  imap_host: string;
+  imap_port: number;
+  imap_secure: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_secure: boolean;
+  utente: string;
+  abilitata: boolean;
+  predefinita: boolean;
+  ha_password: boolean;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+// Input per creazione/aggiornamento. `password` e' opzionale in aggiornamento:
+// assente o vuota = la password salvata resta invariata.
+export interface CasellaEmailInput {
+  etichetta: string;
+  indirizzo: string;
+  imap_host: string;
+  imap_port: number;
+  imap_secure: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_secure: boolean;
+  utente: string;
+  password?: string;
+  abilitata: boolean;
+  predefinita: boolean;
 }
 
 export type EmailIntent =

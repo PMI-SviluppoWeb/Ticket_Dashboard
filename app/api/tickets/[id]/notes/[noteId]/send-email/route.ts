@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emailAggiornamentoCliente } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
 import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
+import { casellaPerTicket } from "@/lib/caselle";
 import type { TechnicalNote, Allegato } from "@/lib/types";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -99,6 +100,8 @@ export async function POST(
     subject: `[Support Desk] Aggiornamento ticket ${ticket.numero}`,
     html,
     attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
+    // Stesso account che ha ricevuto la mail del ticket.
+    casellaId: (await casellaPerTicket(ticket.id)) ?? undefined,
   });
 
   await logEmail({

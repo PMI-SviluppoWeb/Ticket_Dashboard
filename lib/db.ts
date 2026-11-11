@@ -1,34 +1,11 @@
-import { createClient, type InArgs, type Client } from "@libsql/client";
+import { type InArgs, type Client } from "@libsql/client";
 import "server-only";
+import { getTursoClient } from "./turso-client";
 
-// Lettura lazy delle env: durante `next build` (Docker) le variabili d'ambiente
-// non esistono, quindi il client va creato solo al primo accesso reale,
-// mai a livello di modulo (altrimenti il build fallisce).
-let cachedClient: Client | undefined;
-
+// Client condiviso con l'IMAP worker: la creazione vive in lib/turso-client.ts
+// (senza "server-only"), qui resta solo l'inoltro.
 function getClient(): Client {
-  if (!cachedClient) {
-    const url = process.env.TURSO_DATABASE_URL ?? "";
-    if (!url) {
-      throw new Error(
-        "Variabile TURSO_DATABASE_URL mancante. Configura il file .env con l'URL del database Turso."
-      );
-    }
-    cachedClient = createClient({
-      url,
-      authToken: process.env.TURSO_AUTH_TOKEN || undefined,
-      // Next.js patcha il fetch globale e, per impostazione predefinita,
-      // ne mette in cache le risposte SU DISCO (.next/cache/fetch-cache).
-      // @libsql/client usa proprio il fetch globale, quindi senza questo
-      // override le risposte SQL di Turso vengono congelate: la prima
-      // risposta a una data query viene riusata per sempre, anche dopo un
-      // riavvio, e le letture non vedono piu' le scritture successive.
-      // Un database va letto sempre fresco: cache disattivata esplicitamente.
-      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-        fetch(input, { ...init, cache: "no-store" }),
-    });
-  }
-  return cachedClient;
+  return getTursoClient();
 }
 
 const SCHEMA = `
@@ -204,6 +181,10 @@ CREATE TABLE IF NOT EXISTS email_inbox (
   body_preview   TEXT,
   body_html      TEXT,
   ticket_id      TEXT,
+  -- Casella che ha ricevuto il messaggio (FK soft: la casella può essere
+  -- eliminata, la colonna resta come storico). Serve a rispondere con lo
+  -- stesso account che ha ricevuto la mail.
+  casella_id     TEXT,
   stato          TEXT NOT NULL DEFAULT 'processata'
                  CHECK (stato IN ('processata','errore','ignorata')),
   data_creazione TEXT NOT NULL
@@ -212,6 +193,33 @@ CREATE TABLE IF NOT EXISTS email_inbox (
 CREATE INDEX IF NOT EXISTS idx_email_inbox_message_id ON email_inbox (message_id);
 CREATE INDEX IF NOT EXISTS idx_email_inbox_ticket     ON email_inbox (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_inbox_stato      ON email_inbox (stato);
+CREATE INDEX IF NOT EXISTS idx_email_inbox_casella    ON email_inbox (casella_id);
+
+-- Caselle email collegate all'app: ogni riga e' un account IMAP+SMTP che
+-- l'IMAP worker polla per creare ticket. Le password sono CIFRATE con
+-- ENCRYPTION_KEY (lib/cifratura.ts), mai in chiaro in un DB remoto.
+-- predefinita = account mittente per le uscite non collegate a una mail
+-- in entrata (ticket creati manualmente). Gli admin garantiscono che sia
+-- al massimo una riga predefinita=1.
+CREATE TABLE IF NOT EXISTS caselle_email (
+  id                TEXT PRIMARY KEY,
+  etichetta         TEXT NOT NULL,
+  indirizzo         TEXT NOT NULL UNIQUE,
+  imap_host         TEXT NOT NULL,
+  imap_port         INTEGER NOT NULL DEFAULT 993,
+  imap_secure       INTEGER NOT NULL DEFAULT 1 CHECK (imap_secure IN (0,1)),
+  smtp_host         TEXT NOT NULL,
+  smtp_port         INTEGER NOT NULL DEFAULT 587,
+  smtp_secure       INTEGER NOT NULL DEFAULT 0 CHECK (smtp_secure IN (0,1)),
+  utente            TEXT NOT NULL,
+  password_cifrata  TEXT NOT NULL,
+  abilitata         INTEGER NOT NULL DEFAULT 1 CHECK (abilitata IN (0,1)),
+  predefinita       INTEGER NOT NULL DEFAULT 0 CHECK (predefinita IN (0,1)),
+  data_creazione    TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_caselle_email_abilitata ON caselle_email (abilitata);
 
 CREATE TABLE IF NOT EXISTS progetti (
   id                 TEXT PRIMARY KEY,
@@ -391,6 +399,17 @@ async function initSchema(): Promise<void> {
   try {
     await getClient().execute("ALTER TABLE attivita ADD COLUMN persone TEXT NOT NULL DEFAULT '[]'");
   } catch { /* Column already exists */ }
+  // Casella di provenienza di ogni email in entrata (multi-casella): su un
+  // DB creato prima di questa feature la colonna manca, quindi va aggiunta
+  // a ogni avvio come le due sopra.
+  try {
+    await getClient().execute("ALTER TABLE email_inbox ADD COLUMN casella_id TEXT");
+  } catch { /* Column already exists */ }
+  try {
+    await getClient().execute(
+      "CREATE INDEX IF NOT EXISTS idx_email_inbox_casella ON email_inbox (casella_id)"
+    );
+  } catch { /* Index already exists */ }
 
   // Le migrazioni sotto restano idempotenti, ma la pulizia dei contatti legge
   // tutta la tabella `tickets`: gira una volta per database, non a ogni avvio.
