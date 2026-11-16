@@ -7,6 +7,7 @@ import {
   FolderIcon,
   GridIcon,
   MailIcon,
+  SparklesIcon,
   UserCircleIcon,
   UserPlusIcon,
 } from "@/components/icons";
@@ -56,6 +57,14 @@ export const NAV_ITEMS: NavItem[] = [
     calda: ["/api/caselle"],
   },
   { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false, calda: [] },
+  {
+    href: "/admin/agenti",
+    label: "Agenti AI",
+    icon: SparklesIcon,
+    exact: false,
+    adminOnly: true,
+    calda: ["/api/agenti"],
+  },
 ];
 
 export function navVisibile(isAdmin: boolean): NavItem[] {

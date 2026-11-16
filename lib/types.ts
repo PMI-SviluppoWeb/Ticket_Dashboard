@@ -660,6 +660,63 @@ export interface CasellaEmailInput {
   predefinita: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Agenti AI
+// ---------------------------------------------------------------------------
+
+// Ruolo funzionale dell'agente: determina il contesto d'uso in UI e il
+// prompt predefinito suggerito. 'custom' = libero.
+export type RuoloAgente = "assistente" | "contenuti" | "clienti" | "custom";
+
+export interface Agente {
+  id: string;
+  nome: string;
+  descrizione: string | null;
+  ruolo: RuoloAgente;
+  modello: string;
+  system_prompt: string;
+  // JSON array di nomi strumenti (riservato all'evoluzione con tool-calling).
+  strumenti: string[];
+  attivo: boolean;
+  creato_da: string | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+export interface AgenteInput {
+  nome: string;
+  descrizione?: string;
+  ruolo?: RuoloAgente;
+  modello?: string;
+  system_prompt: string;
+  strumenti?: string[];
+  attivo?: boolean;
+}
+
+export type StatoEsecuzioneAgente = "in_corso" | "completata" | "errore";
+
+export interface AgenteEsecuzione {
+  id: string;
+  agente_id: string;
+  input_utente: string;
+  output: string | null;
+  stato: StatoEsecuzioneAgente;
+  errore: string | null;
+  modello: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  durata_ms: number | null;
+  operatore_id: string | null;
+  // JSON di contesto opzionale: ticket_id, cliente_id, ...
+  contesto: Record<string, unknown> | null;
+  data_creazione: string;
+}
+
+export interface EsecuzioneAgenteInput {
+  input: string;
+  contesto?: Record<string, unknown>;
+}
+
 export type EmailIntent =
   | "technical_issue"
   | "billing_issue"

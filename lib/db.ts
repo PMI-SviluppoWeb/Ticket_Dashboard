@@ -368,6 +368,54 @@ CREATE INDEX IF NOT EXISTS idx_voci_tempo_operatore ON voci_tempo (operatore_id,
 CREATE INDEX IF NOT EXISTS idx_voci_tempo_attivita ON voci_tempo (attivita_id);
 CREATE INDEX IF NOT EXISTS idx_voci_tempo_ticket   ON voci_tempo (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_voci_tempo_inizio   ON voci_tempo (inizio);
+
+-- Agenti AI: definizione (prompt di sistema, modello, ruolo) e storico
+-- delle esecuzioni. La definizione e' volutamente generica: ogni agente
+-- e' un system prompt + un modello, i "strumenti" sono un JSON riservato
+-- all'evoluzione futura (tool-calling). Le esecuzioni sono il log di
+-- visualizzazione in UI (input, output, stato, durata, eventuale ticket
+-- o cliente di contesto).
+CREATE TABLE IF NOT EXISTS agenti (
+  id               TEXT PRIMARY KEY,
+  nome             TEXT NOT NULL,
+  descrizione      TEXT,
+  -- Cosa fa l'agente: assistente (ticket), contenuti (social), clienti (CRM)
+  ruolo            TEXT NOT NULL DEFAULT 'assistente'
+                   CHECK (ruolo IN ('assistente','contenuti','clienti','custom')),
+  modello          TEXT NOT NULL DEFAULT 'deepseek/deepseek-v4.1-flash-1017',
+  system_prompt    TEXT NOT NULL,
+  -- JSON array di nomi strumenti (riservato, oggi sempre []).
+  strumenti        TEXT NOT NULL DEFAULT '[]',
+  attivo           INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
+  creato_da        TEXT,
+  data_creazione   TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agenti_ruolo ON agenti (ruolo);
+CREATE INDEX IF NOT EXISTS idx_agenti_attivo ON agenti (attivo);
+
+CREATE TABLE IF NOT EXISTS agenti_esecuzioni (
+  id             TEXT PRIMARY KEY,
+  agente_id      TEXT NOT NULL,
+  input_utente   TEXT NOT NULL,
+  output         TEXT,
+  stato          TEXT NOT NULL DEFAULT 'in_corso'
+                 CHECK (stato IN ('in_corso','completata','errore')),
+  errore         TEXT,
+  modello        TEXT,
+  prompt_tokens  INTEGER,
+  completion_tokens INTEGER,
+  durata_ms      INTEGER,
+  operatore_id   TEXT,
+  -- Contesto opzionale in JSON (ticket_id, cliente_id, ...): collega
+  -- l'esecuzione alla risorsa di business da cui e' nata.
+  contesto       TEXT,
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_agente ON agenti_esecuzioni (agente_id, data_creazione);
+CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_stato  ON agenti_esecuzioni (stato);
 `;
 
 // NOTA sui due vincoli dello SCHEMA (che viene splittato su ";"):
