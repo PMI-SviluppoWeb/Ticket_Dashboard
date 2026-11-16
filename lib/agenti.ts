@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { invocaModello, providerAttivo } from "./ai-provider";
 import "server-only";
 
 // Accesso dati e invocazione degli agenti AI.
@@ -19,7 +20,6 @@ import type {
 } from "./types";
 
 const MODELLO_DEFAULT = "deepseek/deepseek-v4.1-flash-1017";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 interface AgenteRow {
   id: string;
@@ -249,7 +249,8 @@ export type EsitoEsecuzione =
   | { ok: true; esecuzione: AgenteEsecuzione }
   | { ok: false; error: string };
 
-// Invoca l'agente su OpenRouter e logga l'esecuzione completa.
+// Invoca l'agente attraverso il provider attivo (Hermes se configurato,
+// altrimenti OpenRouter) e logga l'esecuzione completa.
 // Sincrona per scelta (la struttura prevede un ritmo umano: la UI attende
 // e mostra l'output; l'eventuale coda asincrona arriverà con i tool lunghi).
 export async function eseguiAgente(opts: {
@@ -265,8 +266,13 @@ export async function eseguiAgente(opts: {
   const input = opts.input.trim();
   if (!input) return { ok: false, error: "Input vuoto." };
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return { ok: false, error: "OPENROUTER_API_KEY non configurata." };
+  if (providerAttivo() === "hermes") {
+    if (!process.env.HERMES_API_KEY) {
+      return { ok: false, error: "HERMES_BASE_URL presente ma HERMES_API_KEY mancante." };
+    }
+  } else if (!process.env.OPENROUTER_API_KEY) {
+    return { ok: false, error: "OPENROUTER_API_KEY non configurata." };
+  }
 
   const id = crypto.randomUUID();
   const inizio = Date.now();
@@ -318,48 +324,24 @@ export async function eseguiAgente(opts: {
   };
 
   try {
-    const res = await fetch(OPENROUTER_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": "https://support-desk.local",
-        "X-Title": "Ticket Dashboard Agents",
-      },
-      body: JSON.stringify({
-        model: agente.modello,
-        temperature: 0.3,
-        messages: [
-          { role: "system", content: agente.system_prompt },
-          { role: "user", content: input },
-        ],
-      }),
+    // Provider parametrico: se HERMES_BASE_URL e' configurato la chiamata
+    // passa dall'agent di Hermes (memoria persistente + skills + tool),
+    // altrimenti va direttamente a OpenRouter come prima.
+    const esito = await invocaModello({
+      systemPrompt: agente.system_prompt,
+      input,
+      modello: agente.modello,
+      // Sessione stabile per agente: continuita' della conversazione e
+      // scope della memoria a lungo termine dedicate a questo agente.
+      sessionId: `ticket-${agente.id}`,
+      sessionKey: `ticket-dashboard:${agente.id}`,
     });
-
-    if (!res.ok) {
-      const testo = await res.text().catch(() => "");
-      await registra({
-        stato: "errore",
-        errore: `OpenRouter HTTP ${res.status}: ${testo.slice(0, 500)}`,
-      });
-      return { ok: false, error: `Errore del modello (HTTP ${res.status}).` };
-    }
-
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-    const output = data.choices?.[0]?.message?.content;
-    if (!output) {
-      await registra({ stato: "errore", errore: "Risposta del modello vuota." });
-      return { ok: false, error: "Risposta del modello vuota." };
-    }
 
     await registra({
       stato: "completata",
-      output,
-      prompt_tokens: data.usage?.prompt_tokens ?? null,
-      completion_tokens: data.usage?.completion_tokens ?? null,
+      output: esito.output,
+      prompt_tokens: esito.promptTokens,
+      completion_tokens: esito.completionTokens,
     });
 
     const esecuzioni = await listaEsecuzioni(agente.id, 1);

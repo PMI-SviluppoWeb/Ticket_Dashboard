@@ -476,7 +476,79 @@ GMAIL_POLL_INTERVAL_MS=300000
 
 ---
 
-## 10. Risoluzione problemi
+## 10. Hermes Agent (provider AI con memoria per gli agenti)
+
+Gli agenti di `/admin/agenti` possono girare su **Hermes Agent** (Nous
+Research) invece di andare diretti a OpenRouter: le richieste passano
+dall'agent di Hermes, che aggiunge **memoria persistente** (ogni agente ha il
+suo scope di memoria, continua tra le esecuzioni), **skills** e **tool**
+al nostro prompt di sistema. Senza le variabili di questa sezione tutto
+funziona come prima su OpenRouter — l'integrazione è **opzionale**.
+
+### 10.1 Configurare Hermes (una tantum)
+
+1. Installa Hermes se manca: <https://hermes-agent.nousresearch.com>
+2. Crea/verifica `~/.hermes/.env` (sul PC dove gira Hermes):
+   ```env
+   API_SERVER_ENABLED=true
+   API_SERVER_KEY=<segreto lungo: openssl rand -hex 32>
+   API_SERVER_HOST=127.0.0.1
+   API_SERVER_PORT=8642
+   # Provider di modelli usato dall'agent (es. la stessa chiave OpenRouter)
+   OPENROUTER_API_KEY=sk-or-...
+   ```
+   ⚠️ La key deve essere lunga almeno16 caratteri: Hermes la rifiuta se è
+   un placeholder (l'API server dà accesso ai tool dell'agent, terminal
+   compreso: una key indovinabile = esecuzione remota di comandi).
+3. Avvia il gateway con API server attivo:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\start-hermes-gateway.ps1
+   ```
+   (Lo script serve perché il file `.env` non viene sempre ereditato dal
+   processo gateway: lo carica lui direttamente nell'env.)
+4. Verifica: `curl http://127.0.0.1:8642/health` → `{"status":"ok"}`
+
+### 10.2 Collegare la app
+
+Aggiungi al `.env` **della app**:
+
+```env
+HERMES_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_API_KEY=<stesso API_SERVER_KEY>
+```
+
+Riavvia app e worker. In `/admin/agenti` il footer mostra **"Provider
+attivo: Hermes"** — le esecuzioni passano dall'agent di Hermes con la sua
+memoria.
+
+### 10.3 Produzione
+
+- Hermes deve essere **sempre acceso** sul server (stessa macchina della
+  app o host raggiungibile): in Docker usa
+  `HERMES_BASE_URL=http://host.docker.internal:8642/v1` (il compose ha già
+  `extra_hosts: host.docker.internal:host-gateway`).
+- Se gira su altra macchina/rete: `API_SERVER_HOST` sulla rete giusta +
+  firewall ristretto, idealmente dietro reverse proxy con TLS.
+- **Sicurezza**: `API_SERVER_KEY` = segreto critico (l'API server esegue
+  i tool dell'agent, terminal incluso). Mai esporla al browser, mai
+  commitarla, ruotala se compromessa.
+- In produzione il gateway va fatto partire come servizio/scheduled task
+  (in locale per lo sviluppo basta lo script sopra).
+
+### 10.4 Diagnostica
+
+| Sintomo | Causa / Fix |
+|---|---|
+| Footer dice "OpenRouter" | manca `HERMES_BASE_URL` nel `.env` della app o app non riavviata |
+| `Hermes non raggiungibile` | gateway non in esecuzione o porta errata → avvia lo script e ricontrolla `/health` |
+| `HERMES_API_KEY presente ma...` mancante | aggiungi anche `HERMES_API_KEY` |
+| `Invalid gateway API key` | `HERMES_API_KEY` diversa da `API_SERVER_KEY` di Hermes |
+| Porta8642 non in ascolto | API server disattivo: `API_SERVER_ENABLED=true` + key lunga ≥16 char, poi riavvia il gateway |
+| Esecuzioni molto costose in token | Hermes carica il suo system prompt (~15k token): normale, è il prezzo di memoria/tools |
+
+---
+
+## 11. Risoluzione problemi
 
 | Sintomo | Causa / Fix |
 |---|---|

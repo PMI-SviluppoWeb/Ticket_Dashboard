@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { creaAgente, listaAgenti } from "@/lib/agenti";
+import { providerAttivo } from "@/lib/ai-provider";
 import type { AgenteInput } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -23,7 +24,9 @@ export async function GET(request: Request) {
 
   try {
     const agenti = await listaAgenti();
-    return NextResponse.json({ agenti });
+    // Quale backend servirà le esecuzioni (letto da env lato server):
+    // la UI lo mostra nel footer per non far indovinare dove gira l'AI.
+    return NextResponse.json({ agenti, provider: providerAttivo() });
   } catch (err) {
     console.error("GET /api/agenti", err);
     return NextResponse.json({ error: "Errore interno del server." }, { status: 500 });

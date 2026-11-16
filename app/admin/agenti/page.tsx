@@ -80,6 +80,9 @@ export default function AgentiPage() {
   const seqRef = useRef(0);
 
   const [agenti, setAgenti] = useState<Agente[]>([]);
+  // Backend che servirà le esecuzioni: "hermes" (memoria persistente) o
+  // "openrouter". Letto dal server, mostrato nel footer.
+  const [provider, setProvider] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -107,7 +110,10 @@ export default function AgentiPage() {
       const res = await fetch("/api/agenti");
       if (!res.ok) throw new Error("Errore nel caricamento");
       const data = await res.json();
-      if (seq === seqRef.current) setAgenti(data.agenti ?? []);
+      if (seq === seqRef.current) {
+        setAgenti(data.agenti ?? []);
+        setProvider(typeof data.provider === "string" ? data.provider : null);
+      }
     } catch {
       if (seq === seqRef.current) setError("Impossibile caricare gli agenti.");
     } finally {
@@ -654,9 +660,27 @@ export default function AgentiPage() {
         )}
 
         <p className="mt-4 text-xs text-caldo-testo">
-          Ogni esecuzione viene registrata con input, output, modello e durata. Le invocazioni
-          usano la chiave <code className="rounded border border-crema-contorno bg-white px-1">OPENROUTER_API_KEY</code>{" "}
-          già configurata per la classificazione email.
+          Ogni esecuzione viene registrata con input, output, modello e durata.{" "}
+          {provider === "hermes" ? (
+            <>
+              Provider attivo: <strong className="text-inchiostro">Hermes</strong> — gli agenti
+              girano con memoria persistente, skills e tool di Hermes (memoria per-agente,
+              continua tra le esecuzioni).
+            </>
+          ) : provider === "openrouter" ? (
+            <>
+              Provider attivo: <strong className="text-inchiostro">OpenRouter</strong> —
+              invocazioni dirette, senza memoria di sessione. Per attivare la memoria persistente
+              configura <code className="rounded border border-crema-contorno bg-white px-1">HERMES_BASE_URL</code>{" "}
+              e <code className="rounded border border-crema-contorno bg-white px-1">HERMES_API_KEY</code>.
+            </>
+          ) : (
+            <>
+              Le invocazioni usano la chiave{" "}
+              <code className="rounded border border-crema-contorno bg-white px-1">OPENROUTER_API_KEY</code>{" "}
+              già configurata per la classificazione email.
+            </>
+          )}
         </p>
       </div>
     </div>
