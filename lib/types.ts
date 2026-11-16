@@ -626,6 +626,9 @@ export interface CasellaEmail {
   id: string;
   etichetta: string;
   indirizzo: string;
+  // 'imap' = account classico pollato via IMAP; 'gmail' = account collegato
+  // via OAuth 2.0 + Gmail API (nessuna password, solo refresh token cifrato).
+  tipo: "imap" | "gmail";
   imap_host: string;
   imap_port: number;
   imap_secure: boolean;

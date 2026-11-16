@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
-import { getCasella, credenzialiCasella } from "@/lib/caselle";
+import { getCasella, credenzialiCasella, credenzialiGmail } from "@/lib/caselle";
+import { ErroreGmail, ottieniAccessToken, profiloGmail } from "@/lib/gmail-oauth";
 
 export const dynamic = "force-dynamic";
 
 // Verifica che le credenziali di una casella funzionino davvero: apre una
 // sessione IMAP e fa un `verify()` SMTP. Utile subito dopo il salvataggio,
 // prima che il worker provi a collegarsi da solo.
+// Per le caselle Gmail (OAuth) verifica invece il refresh token con una
+// richiesta di access token + getProfile.
 //
 // Accetta un body opzionale con `password` per provare una password NUOVA
 // non ancora salvata (la form la invia solo quando e' stata modificata).
@@ -22,6 +25,37 @@ function richiediAdmin(request: Request): NextResponse | null {
   return null;
 }
 
+// Test per una casella Gmail: refresh grant + getProfile. Se Google accetta
+// il refresh token, il collegamento funziona.
+async function testGmail(id: string): Promise<NextResponse> {
+  const cred = await credenzialiGmail(id);
+  if (!cred) {
+    return NextResponse.json(
+      { error: "Refresh token non disponibile (collega di nuovo l'account Gmail)." },
+      { status: 400 }
+    );
+  }
+  try {
+    const accessToken = await ottieniAccessToken(cred.refreshToken);
+    const profilo = await profiloGmail(accessToken);
+    return NextResponse.json({
+      ok: true,
+      gmail: { ok: true, indirizzo: profilo.emailAddress },
+    });
+  } catch (err) {
+    const messaggio =
+      err instanceof ErroreGmail
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : "Errore sconosciuto.";
+    return NextResponse.json({
+      ok: false,
+      gmail: { ok: false, errore: messaggio },
+    });
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -33,6 +67,11 @@ export async function POST(
     const casella = await getCasella(params.id);
     if (!casella) {
       return NextResponse.json({ error: "Casella non trovata." }, { status: 404 });
+    }
+
+    // Casella collegata via OAuth: nessun IMAP/SMTP da provare.
+    if (casella.tipo === "gmail") {
+      return testGmail(params.id);
     }
 
     const body = (await request.json().catch(() => ({}))) as { password?: string };

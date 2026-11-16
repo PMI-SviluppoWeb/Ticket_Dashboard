@@ -71,7 +71,7 @@ export async function classifyEmail(opts: {
         "X-Title": "Support Desk Email Classifier",
       },
       body: JSON.stringify({
-        model: "google/gemma-4-31b-it:free",
+        model: "deepseek/deepseek-v4.1-flash-1017",
         temperature: 0.1,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },

@@ -399,7 +399,84 @@ restano.
 
 ---
 
-## 9. Risoluzione problemi
+## 9. Collegamento account Gmail OAuth (senza password)
+
+Le caselle Gmail si collegano con il **flusso OAuth 2.0 ufficiale di Google**
++ **Gmail API** (niente IMAP, niente password, niente porte): l'utente clicca
+**"Collega il tuo account Gmail"** in `/admin/email`, accetta su Google, e
+l'app memorizza il **Refresh Token cifrato** nel database. Un worker in
+background (stesso processo dell'IMAP worker) controlla le caselle Gmail ogni
+`GMAIL_POLL_INTERVAL_MS` (default 5 minuti) con
+`users.messages.list?q=is:unread`, crea i ticket tramite il webhook esistente
+e segna le email come lette. Le caselle IMAP non-Gmail continuano a
+funzionare come prima.
+
+### 9.1 Configurare Google Cloud Console
+
+1. Su [console.cloud.google.com](https://console.cloud.google.com) crea un
+   progetto (va bene anche quello del Calendar, §7.1).
+2. **API e servizi → Libreria → Gmail API → Abilita**.
+3. **API e servizi → Schermata di consenso OAuth**:
+   - Utenti esterni → compila nome app e email di supporto.
+   - In **Testing** aggiungi gli indirizzi Gmail degli admin come *utenti
+     test*. ⚠️ In Testing i refresh token scadono dopo **7 giorni**: l'admin
+     dovrà ricollegare l'account (stesso pulsante). Per token illimitati
+     l'app va messa **In produzione** — lo scope `gmail.modify` è
+     *restricted* e per utenti fuori dalla propria organizzazione Google
+     richiede la verifica dell'app (per un team interno basta la lista
+     utenti test).
+   - Scope richiesto: `https://www.googleapis.com/auth/gmail.modify`
+     (lettura, marcatura come letta e invio: un solo scope per tutto).
+4. **Credenziali → Crea credenziali → ID client OAuth → Applicazione Web**:
+   - **URI di reindirizzamento autorizzati** (uno per ambiente):
+     - `http://localhost:3001/api/gmail/callback` (sviluppo)
+     - `https://<dominio-produzione>/api/gmail/callback` (produzione)
+5. Annota **Client ID** e **Client Secret**.
+
+### 9.2 Configurare l'applicazione
+
+Aggiungi al file `.env` (poi `docker compose up -d --build` per riavviare):
+
+```env
+GOOGLE_GMAIL_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_GMAIL_CLIENT_SECRET=GOCSPX-xxxxx
+# Base pubblica dell'app: deve coincidere con l'URI registrato su Google
+APP_BASE_URL=https://<dominio-produzione>
+# Opzionale: intervallo di polling delle caselle Gmail (default 300000ms)
+GMAIL_POLL_INTERVAL_MS=300000
+```
+
+- Il **Refresh Token** viene cifrato con `ENCRYPTION_KEY` (stessa cifratura
+  delle password IMAP): senza quella chiave le caselle Gmail non sono
+  decifrabili e vengono saltate dal worker con un errore in log.
+- Non confondere con le variabili del Calendar (`GOOGLE_SERVICE_ACCOUNT_*`):
+  sono flussi Google diversi, possono anche stare nello stesso progetto.
+
+### 9.3 Collegare un account
+
+1. `/admin/email` (solo admin) → **"Collega il tuo account Gmail"**.
+2. Redirect alla schermata ufficiale di Google → accetta.
+3. Ritorno su `/admin/email` con messaggio di successo: la casella compare
+   con il badge **Gmail OAuth**, colonna IMAP/SMTP = "Gmail API".
+4. Il worker la collegherà entro un ciclo di polling: le email non lette
+   **arrivate dopo il collegamento** diventano ticket (quelle preesistenti
+   non importano, il collegamento fa da high-water mark).
+
+### 9.4 Diagnostica
+
+| Sintomo | Causa / Fix |
+|---|---|
+| Il pulsante riporta errore di configurazione | manca `GOOGLE_GMAIL_CLIENT_ID`/`SECRET` in `.env` |
+| `redirect_uri_mismatch` | l'URI registrato su Google non coincide con `<APP_BASE_URL>/api/gmail/callback` |
+| `state_non_valido` al ritorno | cookie OAuth perso (diverso dominio/Secure): controlla `APP_BASE_URL` e che il sito sia su HTTPS |
+| Nessuna email processata | `GMAIL_POLL_INTERVAL_MS` non ancora scaduto, oppure la casella è `Disabilitata`, oppure le email sono già state lette |
+| `Accesso negato` in log | token revocato dall'utente: ricollega l'account dalla pagina caselle |
+| Il pulsante non funziona in Testing dopo 7 giorni | limite Google delle app in Testing → mettere l'app "In produzione" o ricollegare |
+| Invio risposte in errore | le caselle Gmail usano la Gmail API (scope `gmail.modify`): verifica il collegamento con "Verifica connessione" |
+
+---
+
+## 10. Risoluzione problemi
 
 | Sintomo | Causa / Fix |
 |---|---|

@@ -193,11 +193,16 @@ CREATE TABLE IF NOT EXISTS email_inbox (
 CREATE INDEX IF NOT EXISTS idx_email_inbox_message_id ON email_inbox (message_id);
 CREATE INDEX IF NOT EXISTS idx_email_inbox_ticket     ON email_inbox (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_inbox_stato      ON email_inbox (stato);
-CREATE INDEX IF NOT EXISTS idx_email_inbox_casella    ON email_inbox (casella_id);
+-- NOTA: l'indice su casella_id NON sta qui: su un DB esistente la colonna
+-- casella_id non esiste ancora a questo punto (CREATE TABLE IF NOT EXISTS e'
+-- un no-op) e l'indice fallirebbe, bloccando executeMultiple prima della
+-- creazione di caselle_email. Viene creato DOPO l'ALTER, nel blocco
+-- incondizionato di initSchema().
 
 -- Caselle email collegate all'app: ogni riga e' un account IMAP+SMTP che
--- l'IMAP worker polla per creare ticket. Le password sono CIFRATE con
--- ENCRYPTION_KEY (lib/cifratura.ts), mai in chiaro in un DB remoto.
+-- l'IMAP worker polla per creare ticket, oppure un account Gmail collegato
+-- via OAuth 2.0 (tipo='gmail', nessuna password: refresh token CIFRATO con
+-- ENCRYPTION_KEY in oauth_refresh_token_cifrata, lib/cifratura.ts).
 -- predefinita = account mittente per le uscite non collegate a una mail
 -- in entrata (ticket creati manualmente). Gli admin garantiscono che sia
 -- al massimo una riga predefinita=1.
@@ -205,6 +210,7 @@ CREATE TABLE IF NOT EXISTS caselle_email (
   id                TEXT PRIMARY KEY,
   etichetta         TEXT NOT NULL,
   indirizzo         TEXT NOT NULL UNIQUE,
+  tipo              TEXT NOT NULL DEFAULT 'imap' CHECK (tipo IN ('imap','gmail')),
   imap_host         TEXT NOT NULL,
   imap_port         INTEGER NOT NULL DEFAULT 993,
   imap_secure       INTEGER NOT NULL DEFAULT 1 CHECK (imap_secure IN (0,1)),
@@ -213,6 +219,12 @@ CREATE TABLE IF NOT EXISTS caselle_email (
   smtp_secure       INTEGER NOT NULL DEFAULT 0 CHECK (smtp_secure IN (0,1)),
   utente            TEXT NOT NULL,
   password_cifrata  TEXT NOT NULL,
+  -- Solo per tipo='gmail': refresh token OAuth cifrato (mai in chiaro).
+  oauth_refresh_token_cifrata TEXT,
+  -- Solo per tipo='gmail': epoch secondi del collegamento. Funge da high
+  -- water mark: la query di polling usa "is:unread after:<questo valore>"
+  -- per non importare le email gia' presenti nella casella.
+  gmail_da_epoch    INTEGER,
   abilitata         INTEGER NOT NULL DEFAULT 1 CHECK (abilitata IN (0,1)),
   predefinita       INTEGER NOT NULL DEFAULT 0 CHECK (predefinita IN (0,1)),
   data_creazione    TEXT NOT NULL,
@@ -410,6 +422,24 @@ async function initSchema(): Promise<void> {
       "CREATE INDEX IF NOT EXISTS idx_email_inbox_casella ON email_inbox (casella_id)"
     );
   } catch { /* Index already exists */ }
+  // Caselle Gmail via OAuth: colonne aggiunte dopo la creazione originale
+  // della tabella, quindi su un DB esistente vanno messe qui (idempotenti,
+  // fuori dal gate di versione, come le ALTER sopra).
+  try {
+    await getClient().execute(
+      "ALTER TABLE caselle_email ADD COLUMN tipo TEXT NOT NULL DEFAULT 'imap'"
+    );
+  } catch { /* Column already exists */ }
+  try {
+    await getClient().execute(
+      "ALTER TABLE caselle_email ADD COLUMN oauth_refresh_token_cifrata TEXT"
+    );
+  } catch { /* Column already exists */ }
+  try {
+    await getClient().execute(
+      "ALTER TABLE caselle_email ADD COLUMN gmail_da_epoch INTEGER"
+    );
+  } catch { /* Column already exists */ }
 
   // Le migrazioni sotto restano idempotenti, ma la pulizia dei contatti legge
   // tutta la tabella `tickets`: gira una volta per database, non a ogni avvio.

@@ -16,7 +16,16 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/api/auth/") || pathname.startsWith("/api/hooks/");
+  // /api/gmail/callback e' pubblico: il ritorno da Google non puo' passare
+  // dalla verifica di sessione (una sessione scaduta durante il consenso
+  // sprecerebbe il codice monouso). La protezione di quella rotta e' il
+  // confronto state + PKCE col cookie HttpOnly di /api/gmail/connect.
+  return (
+    PUBLIC_PATHS.has(pathname) ||
+    pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/hooks/") ||
+    pathname === "/api/gmail/callback"
+  );
 }
 
 export async function middleware(request: NextRequest) {

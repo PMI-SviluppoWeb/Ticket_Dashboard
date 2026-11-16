@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { cifraSecret, decifraSecret } from "./cifratura";
+import { cifraSecret, decifraSecret, encryptionKeyConfigurata } from "./cifratura";
 import "server-only";
 
 // Accesso dati per le caselle email multi-account.
@@ -15,6 +15,7 @@ interface CasellaRow {
   id: string;
   etichetta: string;
   indirizzo: string;
+  tipo: string;
   imap_host: string;
   imap_port: number;
   imap_secure: number;
@@ -23,14 +24,17 @@ interface CasellaRow {
   smtp_secure: number;
   utente: string;
   password_cifrata: string;
+  oauth_refresh_token_cifrata: string | null;
+  gmail_da_epoch: number | null;
   abilitata: number;
   predefinita: number;
   data_creazione: string;
   data_aggiornamento: string;
 }
 
-const SELECT_CASELLE = `SELECT id, etichetta, indirizzo, imap_host, imap_port, imap_secure,
-  smtp_host, smtp_port, smtp_secure, utente, password_cifrata, abilitata, predefinita,
+const SELECT_CASELLE = `SELECT id, etichetta, indirizzo, tipo, imap_host, imap_port, imap_secure,
+  smtp_host, smtp_port, smtp_secure, utente, password_cifrata, oauth_refresh_token_cifrata,
+  gmail_da_epoch, abilitata, predefinita,
   data_creazione, data_aggiornamento FROM caselle_email`;
 
 function aTipo(r: CasellaRow): CasellaEmail {
@@ -38,6 +42,7 @@ function aTipo(r: CasellaRow): CasellaEmail {
     id: r.id,
     etichetta: r.etichetta,
     indirizzo: r.indirizzo,
+    tipo: r.tipo === "gmail" ? "gmail" : "imap",
     imap_host: r.imap_host,
     imap_port: Number(r.imap_port),
     imap_secure: Number(r.imap_secure) === 1,
@@ -116,6 +121,109 @@ export async function casellaPerTicket(ticketId: string): Promise<string | null>
     .get(ticketId);
   const id = row?.casella_id;
   return typeof id === "string" && id ? id : null;
+}
+
+// ---------------------------------------------------------------------------
+// Caselle Gmail (OAuth 2.0)
+// ---------------------------------------------------------------------------
+
+// Credenziali OAuth di una casella Gmail: serve a lib/email.ts (invio via
+// Gmail API al posto di SMTP) e alla route di test. Mai esposte alle API.
+export async function credenzialiGmail(id: string): Promise<{
+  id: string;
+  indirizzo: string;
+  etichetta: string;
+  refreshToken: string;
+  gmailDaEpoch: number | null;
+} | null> {
+  const row = (await db.prepare(`${SELECT_CASELLE} WHERE id = ?`).get(id)) as
+    | unknown as CasellaRow
+    | undefined;
+  if (!row || row.tipo !== "gmail" || !row.oauth_refresh_token_cifrata) return null;
+  try {
+    return {
+      id: row.id,
+      indirizzo: row.indirizzo,
+      etichetta: row.etichetta,
+      refreshToken: decifraSecret(row.oauth_refresh_token_cifrata),
+      gmailDaEpoch: row.gmail_da_epoch != null ? Number(row.gmail_da_epoch) : null,
+    };
+  } catch (err) {
+    console.error(`[caselle] Refresh token non decifrato per ${row.indirizzo}:`, err);
+    return null;
+  }
+}
+
+// Collega (o ricollega) un account Gmail dopo il consenso OAuth.
+// UPSERT su indirizzo: ricollegare lo stesso account aggiorna il refresh
+// token senza creare una seconda riga. Se l'indirizzo esisteva come casella
+// IMAP, viene convertita in Gmail (stessa casella, stesso id: i ticket e
+// l'email_inbox.casella_id storici restano validi).
+export async function collegaGmail(input: {
+  indirizzo: string;
+  etichetta?: string;
+  refreshToken: string;
+}): Promise<{ ok: boolean; error?: string; id?: string }> {
+  if (!encryptionKeyConfigurata()) {
+    return { ok: false, error: "ENCRYPTION_KEY non configurata." };
+  }
+  const indirizzo = input.indirizzo.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(indirizzo)) {
+    return { ok: false, error: "Indirizzo email non valido." };
+  }
+
+  const tokenCifrato = cifraSecret(input.refreshToken);
+  const now = new Date().toISOString();
+  // High water mark: al primo poll non importano le email non lette gia'
+  // presenti. -5s di margine per non perdere messaggi arrivati durante il
+  // consenso.
+  const daEpoch = Math.floor(Date.now() / 1000) - 5;
+
+  const esistente = (await db
+    .prepare("SELECT id, tipo FROM caselle_email WHERE indirizzo = ?")
+    .get(indirizzo)) as { id: string; tipo: string } | undefined;
+
+  if (esistente) {
+    await db
+      .prepare(
+        `UPDATE caselle_email
+         SET tipo = 'gmail',
+             oauth_refresh_token_cifrata = @token,
+             gmail_da_epoch = @epoch,
+             -- Password IMAP non piu' usata: si azzera per non lasciare
+             -- credenziali obsolete accanto al refresh token.
+             password_cifrata = '',
+             utente = @utente,
+             abilitata = 1,
+             data_aggiornamento = @now
+         WHERE id = @id`
+      )
+      .run({ token: tokenCifrato, epoch: daEpoch, utente: indirizzo, now, id: esistente.id });
+    return { ok: true, id: esistente.id };
+  }
+
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO caselle_email (id, etichetta, indirizzo, tipo, imap_host, imap_port, imap_secure,
+        smtp_host, smtp_port, smtp_secure, utente, password_cifrata,
+        oauth_refresh_token_cifrata, gmail_da_epoch, abilitata, predefinita,
+        data_creazione, data_aggiornamento)
+       VALUES (@id, @etichetta, @indirizzo, 'gmail', 'imap.gmail.com', 993, 1,
+        'smtp.gmail.com', 587, 0, @utente, '',
+        @token, @epoch, 1, 0,
+        @now, @now)`
+    )
+    .run({
+      id,
+      etichetta: (input.etichetta ?? indirizzo).trim(),
+      indirizzo,
+      utente: indirizzo,
+      token: tokenCifrato,
+      epoch: daEpoch,
+      now,
+    });
+  return { ok: true, id };
 }
 
 export type EsitoSalvataggio = { ok: true; casella: CasellaEmail } | { ok: false; error: string };
@@ -239,7 +347,10 @@ export async function aggiornaCasella(
     predefinita: input.predefinita ?? corrente.predefinita,
   };
 
-  const errore = validaInput(merged, !corrente.ha_password);
+  // Le caselle Gmail non hanno password (solo refresh token): la richiesta
+  // di password di validazione salta, altrimenti i toggle abilitata/
+  // predefinita dalla UI fallirebbero con "Password obbligatoria".
+  const errore = validaInput(merged, !corrente.ha_password && corrente.tipo !== "gmail");
   if (errore) return { ok: false, error: errore };
 
   if (input.indirizzo && input.indirizzo.trim().toLowerCase() !== corrente.indirizzo) {

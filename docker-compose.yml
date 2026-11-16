@@ -15,6 +15,9 @@ services:
       - PORT=3001
       - HOSTNAME=0.0.0.0
       - IMAP_POLL_INTERVAL_MS=300000
+      # Polling caselle Gmail (OAuth). APP_BASE_URL (Redirect URI pubblico)
+      # e GOOGLE_GMAIL_CLIENT_* arrivano da env_file .env — vedi DEPLOY.md §9.
+      - GMAIL_POLL_INTERVAL_MS=300000
       - WEBHOOK_URL=http://127.0.0.1:3001/api/hooks/email
     extra_hosts:
       - "host.docker.internal:host-gateway"

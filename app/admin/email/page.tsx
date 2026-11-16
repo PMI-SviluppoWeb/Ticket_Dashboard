@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircleIcon,
   CheckCircleIcon,
@@ -34,8 +35,25 @@ const EMPTY_FORM: FormData = {
   predefinita: false,
 };
 
-export default function CaselleEmailPage() {
+// Esito del rilevamento automatico delle impostazioni di posta.
+type ScopertaStato =
+  | { fase: "idle" }
+  | { fase: "checking" }
+  | { fase: "rilevato"; fonte: string; avvertimento?: string }
+  | { fase: "gmail"; fonte?: string }
+  | { fase: "manuale"; avvertimento?: string };
+
+const FONTE_LABEL: Record<string, string> = {
+  nota: "provider noto",
+  ispdb: "configurazione pubblica (Thunderbird)",
+  mx: "record MX",
+  srv: "record DNS SRV",
+  guess: "stimata",
+};
+
+function CaselleEmailPageContent() {
   const seqRef = useRef(0);
+  const searchParams = useSearchParams();
 
   const [caselle, setCaselle] = useState<CasellaEmail[]>([]);
   const [encryptionOk, setEncryptionOk] = useState(true);
@@ -51,6 +69,20 @@ export default function CaselleEmailPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [esitoTest, setEsitoTest] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  // Auto-scoperta IMAP/SMTP (stile Outlook): l'utente inserisce solo email
+  // e password, i server li trova /api/caselle/scopri. Stati:
+  //  - idle:      email non ancora processata (nuova casella: solo suggerimento)
+  //  - checking:  richiesta in corso
+  //  - rilevato:  server trovati → campi IMAP/SMTP NASCOSTI dal form
+  //  - gmail:     provider Gmail → invito a collegare via OAuth (no password)
+  //  - manuale:   fallito/stimato → sezione "Impostazioni avanzata" visibile
+  const [scoperta, setScoperta] = useState<ScopertaStato>({ fase: "idle" });
+  // Email per la quale l'ultima scoperta è stata eseguita: evita richieste
+  // duplicate a blur ripetuti e permette di riconoscere email modificate.
+  const emailScopertaRef = useRef<string | null>(null);
+  // Email iniziale della casella in modifica: se invariata, non si riscatta.
+  const emailInizialeRef = useRef<string | null>(null);
 
   const { operatore: sessione, caricamento: caricamentoSessione } = useOperatore();
   const isAdmin = sessione?.ruolo === "admin";
@@ -83,14 +115,145 @@ export default function CaselleEmailPage() {
     }
   }, [success]);
 
+  // Esito del ritorno da Google (callback OAuth): la query viene consumata
+  // una volta, poi rimosse dall'URL per non rimostrare il messaggio al
+  // refresh della pagina.
+  useEffect(() => {
+    const esito = searchParams.get("gmail");
+    if (!esito) return;
+    const params = new URLSearchParams(window.location.search);
+    if (esito === "ok") {
+      const indirizzo = searchParams.get("indirizzo");
+      setSuccess(
+        indirizzo
+          ? `Account Gmail ${indirizzo} collegato. Il worker inizierà a controllarlo entro un ciclo di polling.`
+          : "Account Gmail collegato."
+      );
+    } else {
+      const motivo = searchParams.get("motivo");
+      const messaggi: Record<string, string> = {
+        consenso_rifiutato: "Consenso di Google rifiutato: nessun account collegato.",
+        state_non_valido: "Sessione di collegamento non valida (ricerca di nuovo).",
+        refresh_token_mancante: "Google non ha restituito il refresh token: riprova.",
+        salvataggio_fallito: "Salvataggio della casella fallito (ENCRYPTION_KEY?).",
+        parametri_mancanti: "Risposta di Google incompleta: riprova.",
+        errore_interno: "Errore interno durante il collegamento.",
+      };
+      setError(messaggi[motivo ?? ""] ?? `Collegamento Gmail non riuscito (${motivo ?? "errore"}).`);
+    }
+    params.delete("gmail");
+    params.delete("indirizzo");
+    params.delete("motivo");
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+  }, [searchParams]);
+
   const resetForm = () => {
     setForm(EMPTY_FORM);
     setEditingId(null);
     setShowForm(false);
     setEsitoTest(null);
+    setScoperta({ fase: "idle" });
+    emailScopertaRef.current = null;
+    emailInizialeRef.current = null;
+  };
+
+  // Auto-scoperta IMAP/SMTP da un indirizzo email. Ritorna lo stato
+  // risultante (e aggiorna form/scoperta per la UI) così handleSubmit può
+  // decidere se procedere, mostrare le avanzate o fermarsi su Gmail.
+  const eseguiScoperta = useCallback(async (indirizzo: string): Promise<ScopertaStato> => {
+    setScoperta({ fase: "checking" });
+    const applicaServer = (data: {
+      imap: { host: string; port: number; secure: boolean };
+      smtp: { host: string; port: number; secure: boolean };
+    }) => {
+      setForm((f) => ({
+        ...f,
+        imap_host: data.imap.host,
+        imap_port: Number(data.imap.port),
+        imap_secure: Boolean(data.imap.secure),
+        smtp_host: data.smtp.host,
+        smtp_port: Number(data.smtp.port),
+        smtp_secure: Boolean(data.smtp.secure),
+        // Quasi tutti i provider usano l'indirizzo completo come utente
+        // (%EMAILADDRESS% nell'ISPDB): lo si imposta e lo si nasconde.
+        utente: f.utente || indirizzo,
+      }));
+    };
+
+    try {
+      const res = await fetch(`/api/caselle/scopri?indirizzo=${encodeURIComponent(indirizzo)}`);
+      const data = (await res.json().catch(() => ({}))) as {
+        trovato?: boolean;
+        gmail?: boolean;
+        imap?: { host: string; port: number; secure: boolean };
+        smtp?: { host: string; port: number; secure: boolean };
+        fonte?: string;
+        avvertimento?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || "rilevamento fallito");
+
+      if (data.gmail) {
+        const stato: ScopertaStato = { fase: "gmail", fonte: data.fonte };
+        setScoperta(stato);
+        return stato;
+      }
+      if (data.trovato && data.imap && data.smtp) {
+        applicaServer({ imap: data.imap, smtp: data.smtp });
+        if (data.fonte === "guess") {
+          // Stimato: meglio far vedere i campi con i valori trovati così
+          // l'utente può verificarli prima di salvare.
+          const stato: ScopertaStato = { fase: "manuale", avvertimento: data.avvertimento };
+          setScoperta(stato);
+          return stato;
+        }
+        const stato: ScopertaStato = {
+          fase: "rilevato",
+          fonte: data.fonte ?? "nota",
+          avvertimento: data.avvertimento,
+        };
+        setScoperta(stato);
+        return stato;
+      }
+      const stato: ScopertaStato = {
+        fase: "manuale",
+        avvertimento: "Impostazioni non rilevate per questo dominio: inseriscile manualmente.",
+      };
+      setScoperta(stato);
+      return stato;
+    } catch {
+      const stato: ScopertaStato = {
+        fase: "manuale",
+        avvertimento: "Rilevamento non riuscito (rete?): inserisci i server manualmente.",
+      };
+      setScoperta(stato);
+      return stato;
+    }
+  }, []);
+
+  // Scatta quando l'utente finisce di scrivere l'email (blur): se l'email
+  // è nuova rispetto all'ultima scoperta, avvia il rilevamento.
+  const handleBlurIndirizzo = () => {
+    const email = form.indirizzo.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+    // In modifica, se l'email è quella salvata, i campi attuali sono già
+    // corretti: non si riscatta (evita di sovrascrivere con un indovinello).
+    if (editingId && email === emailInizialeRef.current) return;
+    if (emailScopertaRef.current === email) return;
+    emailScopertaRef.current = email;
+    void eseguiScoperta(email);
   };
 
   const handleEdit = (c: CasellaEmail) => {
+    // Le caselle Gmail non hanno parametri IMAP/SMTP da modificare: il
+    // collegamento si gestisce solo da (ri)collega/disconnetti.
+    if (c.tipo === "gmail") {
+      setError(
+        "Le caselle Gmail si gestiscono con «Collega account Gmail» / «Elimina»: non hanno server o password da modificare."
+      );
+      return;
+    }
     setForm({
       etichetta: c.etichetta,
       indirizzo: c.indirizzo,
@@ -108,6 +271,11 @@ export default function CaselleEmailPage() {
     setEditingId(c.id);
     setShowForm(true);
     setEsitoTest(null);
+    // In modifica i campi avanzati restano visibili (valori già salvati);
+    // se l'utente cambia email, il blur riscatta la scoperta.
+    setScoperta({ fase: "manuale" });
+    emailScopertaRef.current = c.indirizzo;
+    emailInizialeRef.current = c.indirizzo;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -115,6 +283,21 @@ export default function CaselleEmailPage() {
     setSaving(true);
     setError(null);
     try {
+      const email = form.indirizzo.trim();
+
+      // Nuova casella (o email modificata): assicura che la scoperta sia
+      // stata eseguita per QUESTA email, anche senza blur (Tab+Invio).
+      if (emailScopertaRef.current !== email) {
+        emailScopertaRef.current = email;
+        const stato = await eseguiScoperta(email);
+        if (stato.fase === "gmail") return; // banner OAuth in mostra, niente POST
+        if (stato.fase === "checking") return;
+      } else if (scoperta.fase === "gmail") {
+        return;
+      } else if (scoperta.fase === "checking") {
+        return;
+      }
+
       const body: Partial<FormData> = { ...form };
       // In modifica una password vuota significa "non cambiarla": si omette
       // dal payload per non sovrascrivere quella salvata.
@@ -157,7 +340,11 @@ export default function CaselleEmailPage() {
       if (!res.ok) throw new Error(data.error || "Errore durante la verifica.");
 
       if (data.ok) {
-        setEsitoTest("Connessione IMAP e SMTP riuscita.");
+        setEsitoTest(
+          data.gmail ? "Collegamento Gmail verificato." : "Connessione IMAP e SMTP riuscita."
+        );
+      } else if (data.gmail) {
+        setEsitoTest(`Verifica Gmail fallita — ${data.gmail.errore ?? "errore"}`);
       } else {
         const parti: string[] = [];
         if (!data.imap?.ok) parti.push(`IMAP: ${data.imap?.errore ?? "errore"}`);
@@ -268,16 +455,30 @@ export default function CaselleEmailPage() {
           titolo="Caselle Email"
           sottotitolo="Collega una o più caselle: ogni messaggio ricevuto diventa un ticket, con risposte dallo stesso account."
           azioni={
-            <button
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-              className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Nuova Casella
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => {
+                  // Reindirizza alla schermata ufficiale di consenso Google:
+                  // nessun server, porta o password da inserire (OAuth 2.0).
+                  window.location.href = "/api/gmail/connect";
+                }}
+                className="flex cursor-pointer items-center gap-2 rounded-control border border-stato-info-bordo bg-stato-info-bg px-4 py-2 text-sm font-semibold text-stato-info-testo transition-colors duration-200 hover:bg-white"
+                title="Collega un account Gmail con OAuth 2.0 (senza password)"
+              >
+                <MailIcon className="h-4 w-4" />
+                Collega il tuo account Gmail
+              </button>
+              <button
+                onClick={() => {
+                  resetForm();
+                  setShowForm(true);
+                }}
+                className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Nuova Casella
+              </button>
+            </div>
           }
         />
 
@@ -360,13 +561,91 @@ export default function CaselleEmailPage() {
                     required
                     value={form.indirizzo}
                     onChange={(e) => setForm({ ...form, indirizzo: e.target.value })}
+                    onBlur={handleBlurIndirizzo}
                     className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                     placeholder="supporto@azienda.it"
                   />
                 </div>
 
-                <div className="sm:col-span-2 border-t border-crema-bordo pt-4">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-caldo-testo">Server in ricezione (IMAP)</p>
+                {/* --- Esito dell'auto-scoperta IMAP/SMTP ------------------ */}
+                {!editingId && scoperta.fase === "idle" && (
+                  <p className="sm:col-span-2 text-xs text-caldo-testo">
+                    Inserisci l&apos;email: i server IMAP e SMTP vengono rilevati automaticamente,
+                    senza doverli scrivere. Ti basteranno email e password.
+                  </p>
+                )}
+                {scoperta.fase === "checking" && (
+                  <p className="sm:col-span-2 flex items-center gap-2 text-sm text-caldo-testo">
+                    <LoaderIcon className="h-4 w-4 animate-spin" />
+                    Rilevamento delle impostazioni di posta in corso…
+                  </p>
+                )}
+                {scoperta.fase === "rilevato" && (
+                  <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-control border border-stato-ok-bordo bg-stato-ok-bg p-3 text-sm text-stato-ok-testo">
+                    <CheckCircleIcon className="h-4 w-4 shrink-0" />
+                    <span>
+                      Server rilevati automaticamente (fonte: {FONTE_LABEL[scoperta.fonte] ?? scoperta.fonte}).
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setScoperta({ fase: "manuale" })}
+                      className="cursor-pointer underline opacity-80 transition-opacity hover:opacity-100"
+                    >
+                      Correggi manualmente
+                    </button>
+                  </div>
+                )}
+                {scoperta.fase === "gmail" && (
+                  <div className="sm:col-span-2 rounded-control border border-stato-info-bordo bg-stato-info-bg p-4 text-sm text-stato-info-testo">
+                    <p className="font-semibold">Questo è un account Gmail.</p>
+                    <p className="mt-1">
+                      Collegalo con Google (OAuth): nessuna password, nessun server da inserire.
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <a
+                        href="/api/gmail/connect"
+                        className="inline-flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
+                      >
+                        <MailIcon className="h-4 w-4" />
+                        Collega con Google
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm((f) => ({
+                            ...f,
+                            imap_host: "imap.gmail.com",
+                            imap_port: 993,
+                            imap_secure: true,
+                            smtp_host: "smtp.gmail.com",
+                            smtp_port: 587,
+                            smtp_secure: false,
+                            utente: f.indirizzo,
+                          }));
+                          setScoperta({
+                            fase: "manuale",
+                            avvertimento:
+                              "IMAP di Gmail richiede una password app di Google (myaccount.google.com/apppasswords): la password normale viene rifiutata.",
+                          });
+                        }}
+                        className="cursor-pointer text-sm underline opacity-80 transition-opacity hover:opacity-100"
+                      >
+                        Continua comunque con IMAP
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {scoperta.fase === "manuale" && scoperta.avvertimento && (
+                  <p className="sm:col-span-2 rounded-control border border-stato-attesa-bordo bg-stato-attesa-bg p-3 text-xs text-stato-attesa-testo">
+                    {scoperta.avvertimento}
+                  </p>
+                )}
+
+                {/* --- Campi server: visibili SOLO quando servono ---------- */}
+                {scoperta.fase === "manuale" && (
+                  <>
+                    <div className="sm:col-span-2 border-t border-crema-bordo pt-4">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-caldo-testo">Server in ricezione (IMAP)</p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div className="sm:col-span-2">
                       <label className="mb-1 block text-sm font-medium text-caldo-testo">Host IMAP *</label>
@@ -452,52 +731,61 @@ export default function CaselleEmailPage() {
                     placeholder="supporto@azienda.it"
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-caldo-testo">
-                    Password {editingId ? "(lascia vuoto per non cambiare)" : "*"}
-                  </label>
-                  <input
-                    type="password"
-                    required={!editingId}
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-                    placeholder={editingId ? "••••••••" : "Password dell'account (app password per Gmail)"}
-                    autoComplete="new-password"
-                  />
-                </div>
+                  </>
+                )}
 
-                <div className="sm:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-crema-bordo pt-4">
-                  <label className="flex items-center gap-2 text-sm text-caldo-testo">
+                {scoperta.fase !== "gmail" && (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-caldo-testo">
+                      Password {editingId ? "(lascia vuoto per non cambiare)" : "*"}
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={form.abilitata}
-                      onChange={(e) => setForm({ ...form, abilitata: e.target.checked })}
-                      className="h-4 w-4 cursor-pointer accent-inchiostro"
+                      type="password"
+                      required={!editingId}
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                      placeholder={editingId ? "••••••••" : "Password dell'account"}
+                      autoComplete="new-password"
                     />
-                    Abilitata (il worker la polla)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-caldo-testo">
-                    <input
-                      type="checkbox"
-                      checked={form.predefinita}
-                      onChange={(e) => setForm({ ...form, predefinita: e.target.checked })}
-                      className="h-4 w-4 cursor-pointer accent-inchiostro"
-                    />
-                    Predefinita (mittente per ticket manuali e notifiche)
-                  </label>
-                </div>
+                  </div>
+                )}
+
+                {scoperta.fase !== "gmail" && (
+                  <div className="sm:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-crema-bordo pt-4">
+                    <label className="flex items-center gap-2 text-sm text-caldo-testo">
+                      <input
+                        type="checkbox"
+                        checked={form.abilitata}
+                        onChange={(e) => setForm({ ...form, abilitata: e.target.checked })}
+                        className="h-4 w-4 cursor-pointer accent-inchiostro"
+                      />
+                      Abilitata (il worker la polla)
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-caldo-testo">
+                      <input
+                        type="checkbox"
+                        checked={form.predefinita}
+                        onChange={(e) => setForm({ ...form, predefinita: e.target.checked })}
+                        className="h-4 w-4 cursor-pointer accent-inchiostro"
+                      />
+                      Predefinita (mittente per ticket manuali e notifiche)
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={saving || !encryptionOk}
-                  className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? <LoaderIcon className="h-4 w-4 animate-spin" /> : <CheckCircleIcon className="h-4 w-4" />}
-                  {editingId ? "Salva Modifiche" : "Crea Casella"}
-                </button>
+                {scoperta.fase !== "gmail" && (
+                  <button
+                    type="submit"
+                    disabled={saving || !encryptionOk}
+                    className="flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving ? <LoaderIcon className="h-4 w-4 animate-spin" /> : <CheckCircleIcon className="h-4 w-4" />}
+                    {editingId ? "Salva Modifiche" : "Crea Casella"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={resetForm}
@@ -557,6 +845,11 @@ export default function CaselleEmailPage() {
                       <td className="px-5 py-3">
                         <span className="flex items-center gap-2 font-medium text-inchiostro">
                           {c.etichetta}
+                          {c.tipo === "gmail" && (
+                            <span className="inline-flex items-center rounded-full border border-stato-info-bordo bg-stato-info-bg px-2 py-0.5 text-[11px] font-medium text-stato-info-testo">
+                              Gmail OAuth
+                            </span>
+                          )}
                           {c.predefinita && (
                             <span className="inline-flex items-center rounded-full border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 text-[11px] font-medium text-stato-ok-testo">
                               Predefinita
@@ -566,10 +859,10 @@ export default function CaselleEmailPage() {
                       </td>
                       <td className="px-5 py-3 text-caldo-testo">{c.indirizzo}</td>
                       <td className="px-5 py-3 text-caldo-testo">
-                        {c.imap_host}:{c.imap_port}
+                        {c.tipo === "gmail" ? "Gmail API" : `${c.imap_host}:${c.imap_port}`}
                       </td>
                       <td className="px-5 py-3 text-caldo-testo">
-                        {c.smtp_host}:{c.smtp_port}
+                        {c.tipo === "gmail" ? "Gmail API" : `${c.smtp_host}:${c.smtp_port}`}
                       </td>
                       <td className="px-5 py-3">
                         <span
@@ -613,14 +906,16 @@ export default function CaselleEmailPage() {
                               Default
                             </button>
                           )}
-                          <button
-                            onClick={() => handleEdit(c)}
-                            className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
-                            title="Modifica"
-                            aria-label={`Modifica ${c.indirizzo}`}
-                          >
-                            <EditIcon className="h-4 w-4" />
-                          </button>
+                          {c.tipo !== "gmail" && (
+                            <button
+                              onClick={() => handleEdit(c)}
+                              className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
+                              title="Modifica"
+                              aria-label={`Modifica ${c.indirizzo}`}
+                            >
+                              <EditIcon className="h-4 w-4" />
+                            </button>
+                          )}
                           {confirmDelete === c.id ? (
                             <button
                               onClick={() => handleDelete(c.id)}
@@ -656,5 +951,21 @@ export default function CaselleEmailPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// useSearchParams richiede un boundary Suspense in Next 14 (stesso pattern
+// di app/login/page.tsx): senza, il prerender fallisce.
+export default function CaselleEmailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center p-6">
+          <LoaderIcon className="h-6 w-6 animate-spin text-inchiostro" />
+        </div>
+      }
+    >
+      <CaselleEmailPageContent />
+    </Suspense>
   );
 }

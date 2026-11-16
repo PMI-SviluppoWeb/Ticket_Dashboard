@@ -19,6 +19,7 @@ uploads/
 screen/
 .design-shots/
 dev.log
+temp/
 
 # Chiavi degli account di servizio Google: contengono una private_key e non
 # vanno MAI versionate. Le credenziali reali stanno in GOOGLE_PRIVATE_KEY.

@@ -20,13 +20,32 @@ export interface CasellaWorker {
 
 export async function caselleAbilitatePerWorker(): Promise<CasellaWorker[]> {
   const client = getTursoClient();
-  const result = await client.execute(
-    `SELECT id, indirizzo, imap_host, imap_port, imap_secure,
-            smtp_host, smtp_port, smtp_secure, utente, password_cifrata
-     FROM caselle_email
-     WHERE abilitata = 1
-     ORDER BY indirizzo`
-  );
+  // Solo caselle IMAP: quelle Gmail (tipo='gmail') non hanno credenziali
+  // IMAP/SMTP valide e vengono pollate dal worker Gmail (lib/gmail-worker.ts).
+  // Fallback: se la colonna tipo non esiste ancora (il worker e' partito
+  // PRIMA che l'app crei lo schema lazy), si riprova senza il filtro — la
+  // riga Gmail verrebbe poi scartata in fase di decrittografia della
+  // password vuota, senza bloccare le IMAP.
+  let result;
+  try {
+    result = await client.execute(
+      `SELECT id, indirizzo, imap_host, imap_port, imap_secure,
+              smtp_host, smtp_port, smtp_secure, utente, password_cifrata
+       FROM caselle_email
+       WHERE abilitata = 1 AND tipo = 'imap'
+       ORDER BY indirizzo`
+    );
+  } catch (err) {
+    const messaggio = err instanceof Error ? err.message : String(err);
+    if (!messaggio.includes("tipo")) throw err;
+    result = await client.execute(
+      `SELECT id, indirizzo, imap_host, imap_port, imap_secure,
+              smtp_host, smtp_port, smtp_secure, utente, password_cifrata
+       FROM caselle_email
+       WHERE abilitata = 1
+       ORDER BY indirizzo`
+    );
+  }
 
   const out: CasellaWorker[] = [];
   for (const row of result.rows) {
@@ -66,6 +85,58 @@ export async function caselleAbilitatePerWorker(): Promise<CasellaWorker[]> {
       // ENCRYPTION_KEY cambiata o dato corrotto: salta questa casella ma
       // non bloccare le altre.
       console.error(`[caselle] Password non decifrata per ${r.indirizzo}:`, err);
+    }
+  }
+  return out;
+}
+
+export interface CasellaGmailWorker {
+  id: string;
+  indirizzo: string;
+  etichetta: string;
+  // Refresh token DECIFRATO: resta in memoria del worker, mai loggato.
+  refreshToken: string;
+  // High water mark (epoch sec) del collegamento: la query di polling usa
+  // "is:unread after:<epoch>" per non importare le email preesistenti.
+  gmailDaEpoch: number | null;
+}
+
+// Caselle Gmail abilitate per il worker OAuth (lib/gmail-worker.ts).
+// Stesse regole di caselleAbilitatePerWorker(): solo Turso client, nessun
+// import di lib/db.ts (server-only) — il worker gira fuori da Next.
+export async function caselleGmailPerWorker(): Promise<CasellaGmailWorker[]> {
+  const client = getTursoClient();
+  const result = await client.execute(
+    `SELECT id, indirizzo, etichetta, oauth_refresh_token_cifrata, gmail_da_epoch
+     FROM caselle_email
+     WHERE abilitata = 1 AND tipo = 'gmail'
+     ORDER BY indirizzo`
+  );
+
+  const out: CasellaGmailWorker[] = [];
+  for (const row of result.rows) {
+    const r = row as unknown as {
+      id: string;
+      indirizzo: string;
+      etichetta: string;
+      oauth_refresh_token_cifrata: string | null;
+      gmail_da_epoch: number | null;
+    };
+    if (!r.oauth_refresh_token_cifrata) {
+      console.error(`[gmail] Casella ${r.indirizzo} senza refresh token: collega di nuovo l'account.`);
+      continue;
+    }
+    try {
+      out.push({
+        id: r.id,
+        indirizzo: r.indirizzo,
+        etichetta: r.etichetta,
+        refreshToken: decifraSecret(r.oauth_refresh_token_cifrata),
+        gmailDaEpoch: r.gmail_da_epoch != null ? Number(r.gmail_da_epoch) : null,
+      });
+    } catch (err) {
+      // ENCRYPTION_KEY cambiata o dato corrotto: salta questa casella.
+      console.error(`[gmail] Refresh token non decifrato per ${r.indirizzo}:`, err);
     }
   }
   return out;

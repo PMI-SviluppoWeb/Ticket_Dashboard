@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
-import { credenzialiCasella, getCasellaDefault } from "./caselle";
+import { credenzialiCasella, credenzialiGmail, getCasellaDefault } from "./caselle";
+import { inviaEmailGmail, ottieniAccessToken } from "./gmail-oauth";
 
 interface TransporterConfig {
   host: string;
@@ -132,6 +133,29 @@ export async function sendEmail(opts: {
   casellaId?: string;
 }): Promise<EmailResult> {
   try {
+    // Caselle Gmail (OAuth): invio via Gmail API con il refresh token, nessun
+    // SMTP e nessuna password. Vale sia per la risposta a una mail ricevuta
+    // (casellaId esplicito) sia per il mittente predefinito.
+    const idMittente =
+      opts.casellaId ?? (await getCasellaDefault())?.id ?? null;
+    if (idMittente && idMittente !== CASELLA_ENV_ID) {
+      const gmail = await credenzialiGmail(idMittente);
+      if (gmail) {
+        const accessToken = await ottieniAccessToken(gmail.refreshToken);
+        await inviaEmailGmail(accessToken, {
+          to: opts.to,
+          subject: opts.subject,
+          html: opts.html,
+          attachments: opts.attachments,
+          from: gmail.etichetta && gmail.etichetta !== gmail.indirizzo
+            ? `${gmail.etichetta} <${gmail.indirizzo}>`
+            : gmail.indirizzo,
+        });
+        return { ok: true };
+      }
+      // Non e' una casella Gmail: si procede con la risoluzione SMTP sotto.
+    }
+
     const mittente = await risolviMittente(opts.casellaId);
     if (!mittente) {
       return {

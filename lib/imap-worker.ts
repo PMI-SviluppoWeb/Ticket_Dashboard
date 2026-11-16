@@ -3,7 +3,16 @@ import PostalMime from "postal-mime";
 import { caselleAbilitatePerWorker, type CasellaWorker } from "./caselle-worker";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL ?? "http://localhost:3001/api/hooks/email";
-const POLL_INTERVAL_MS = parseInt(process.env.IMAP_POLL_INTERVAL_MS ?? "120000", 10);
+// Poll interval: letto LAZY dentro startImapWorker(), per lo stesso motivo di
+// webhookHeaders() sotto — in start-worker.ts le import girano PRIMA di
+// dotenv.config(), quindi una variabile catturata a livello di modulo
+// resterebbe al default e il valore in .env verrebbe ignorato.
+function pollIntervalMs(): number {
+  const n = parseInt(process.env.IMAP_POLL_INTERVAL_MS ?? "120000", 10);
+  // Minimo difensivo: sotto i 5s si rischia di martellare Turso e il server
+  // IMAP (una query DB + una search ad ogni ciclo).
+  return Number.isFinite(n) && n >= 5000 ? n : 120000;
+}
 // Segreto condiviso con l'app: senza questo header la rotta /api/hooks/email
 // rifiuta le richieste. Deve essere IDENTICO alla variabile WEBHOOK_SECRET in .env.
 // Lettura lazy: in start-worker.ts le import girano PRIMA di dotenv.config(),
@@ -32,6 +41,23 @@ interface Connessione {
 // PER CASELLA (prima era uno solo, con piu' caselle si sovrapporrebbero).
 const connessioni = new Map<string, Connessione>();
 let isPolling = false;
+
+// High water mark persistente per casella: sopravvive alla riconnessione.
+// Senza, un ciclo di errore + riconnessione azzererebbe il mark e il poll
+// successivo lo rimetterebbe all'UID corrente, SKIPPANDO le email arrivate
+// mentre la connessione era caduta.
+const highWaterMarkPerCasella = new Map<string, number>();
+
+// Backoff per i tentativi di connessione falliti: senza, una casella con
+// password sbagliata riprova ad ogni ciclo (15s) riempiendo i log e
+// martellando il server IMAP. Delay = min(15s * 2^n, 5 min), azzerato
+// alla prima riuscita o quando le credenziali cambiano.
+const tentativiFalliti = new Map<string, number>();
+const prossimoTentativo = new Map<string, number>();
+
+function backoffMs(tentativi: number): number {
+  return Math.min(15_000 * 2 ** tentativi, 300_000);
+}
 
 function fingerprintDi(c: CasellaWorker): string {
   return [c.imap.host, c.imap.port, c.imap.secure, c.imap.user, c.imap.pass].join("\u0000");
@@ -80,7 +106,7 @@ async function caricaCaselle(): Promise<CasellaWorker[]> {
 }
 
 function creaClient(c: CasellaWorker): ImapFlow {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: c.imap.host,
     port: c.imap.port,
     secure: c.imap.secure,
@@ -88,6 +114,13 @@ function creaClient(c: CasellaWorker): ImapFlow {
     logger: false,
     tls: { rejectUnauthorized: false },
   });
+  // ImapFlow emette 'error' come evento (socket timeout, connessione rotta a
+  // metà, ecc.): SENZA questo handler Node termina l'intero processo worker.
+  // L'errore viene loggato e la casella viene riallineata al prossimo ciclo.
+  client.on("error", (err) => {
+    console.error(`[IMAP] Errore connessione per ${c.indirizzo}:`, err);
+  });
+  return client;
 }
 
 // Allinea le connessioni attive alle caselle desiderate: collega le nuove,
@@ -99,6 +132,10 @@ async function allineaConnessioni(desiderate: CasellaWorker[]): Promise<void> {
     if (!desiderateIds.has(id)) {
       console.log(`[IMAP] Casella ${id} disabilitata/rimossa: chiudo la connessione.`);
       connessioni.delete(id);
+      // Backoff e contatori non servono piu'; il high water mark resta
+      // (se la casella viene riabilitata, non si riprocessano le email vecchie).
+      tentativiFalliti.delete(id);
+      prossimoTentativo.delete(id);
       try {
         await conn.client.logout();
       } catch {
@@ -115,20 +152,43 @@ async function allineaConnessioni(desiderate: CasellaWorker[]): Promise<void> {
       // Credenziali cambiate: riconnettere con la nuova config.
       console.log(`[IMAP] Configurazione di ${c.indirizzo} cambiata: riconnessione.`);
       connessioni.delete(c.id);
+      // Credenziali nuove = il backoff precedente non e' piu' valido.
+      tentativiFalliti.delete(c.id);
+      prossimoTentativo.delete(c.id);
       try {
         await esistente.client.logout();
       } catch {
         // Ignora
       }
     }
+
+    // Backoff: una casella che fallisce riprova a intervalli crescenti.
+    const atteso = prossimoTentativo.get(c.id);
+    if (atteso !== undefined && Date.now() < atteso) continue;
+
     try {
       console.log(`[IMAP] Connessione a ${c.imap.host}:${c.imap.port} (${c.indirizzo})...`);
       const client = creaClient(c);
       await client.connect();
-      connessioni.set(c.id, { client, highWaterMark: 0, fingerprint: fp });
+      connessioni.set(c.id, {
+        client,
+        // Mark persistente: se la connessione era caduta, le email arrivate
+        // nel frattempo hanno UID > mark e verranno processate.
+        highWaterMark: highWaterMarkPerCasella.get(c.id) ?? 0,
+        fingerprint: fp,
+      });
+      tentativiFalliti.delete(c.id);
+      prossimoTentativo.delete(c.id);
       console.log(`[IMAP] Connesso: ${c.indirizzo}`);
     } catch (err) {
-      console.error(`[IMAP] Connessione fallita per ${c.indirizzo}:`, err);
+      const n = (tentativiFalliti.get(c.id) ?? 0) + 1;
+      tentativiFalliti.set(c.id, n);
+      const delay = backoffMs(n);
+      prossimoTentativo.set(c.id, Date.now() + delay);
+      console.error(
+        `[IMAP] Connessione fallita per ${c.indirizzo} (tentativo ${n}, riprovo tra ${Math.round(delay / 1000)}s):`,
+        err
+      );
     }
   }
 }
@@ -192,6 +252,7 @@ async function pollCasella(id: string, conn: Connessione): Promise<void> {
       const allMessages = await client.search({ all: true });
       if (allMessages !== false && allMessages.length > 0) {
         conn.highWaterMark = Math.max(...allMessages);
+        highWaterMarkPerCasella.set(id, conn.highWaterMark);
         console.log(`[IMAP] High water mark impostato a UID ${conn.highWaterMark}. Solo le email successive verranno processate.`);
       }
       return;
@@ -219,6 +280,7 @@ async function pollCasella(id: string, conn: Connessione): Promise<void> {
         // Aggiorna high water mark
         if (uid > conn.highWaterMark) {
           conn.highWaterMark = uid;
+          highWaterMarkPerCasella.set(id, uid);
         }
       } catch (err) {
         console.error(`[IMAP] Errore elaborazione UID ${uid} in ${id}:`, err);
@@ -258,7 +320,9 @@ async function pollOnce(): Promise<void> {
             await client.connect();
             connessioni.set(id, {
               client,
-              highWaterMark: 0,
+              // Mark persistente: non si perdono le email arrivate durante
+              // il buco di connessione.
+              highWaterMark: highWaterMarkPerCasella.get(id) ?? 0,
               fingerprint: fingerprintDi(casella),
             });
             console.log(`[IMAP] Riconnesso: ${casella.indirizzo}`);
@@ -301,12 +365,13 @@ export async function startImapWorker(): Promise<void> {
   // Primo allineamento subito, poi poll periodico: le caselle aggiunte
   // dall'applicazione vengono colte entro un ciclo (IMAP_POLL_INTERVAL_MS)
   // senza riavviare il worker.
+  const intervalMs = pollIntervalMs();
   await pollOnce();
-  console.log("[IMAP] Inizio polling ogni", POLL_INTERVAL_MS / 1000, "secondi.");
+  console.log("[IMAP] Inizio polling ogni", intervalMs / 1000, "secondi.");
 
   const interval = setInterval(() => {
     void pollOnce();
-  }, POLL_INTERVAL_MS);
+  }, intervalMs);
 
   // Gestione graceful shutdown
   process.on("SIGINT", async () => {
