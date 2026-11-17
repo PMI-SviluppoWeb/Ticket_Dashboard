@@ -27,10 +27,11 @@ RUN apk add --no-cache tini
 # Dipendenze runtime complete (il worker IMAP ha bisogno di imapflow/postal-mime,
 # che Next NON traccia nel suo standalone in quanto non importati dal server Next)
 COPY --from=prod-deps /app/node_modules ./node_modules
-# Output standalone di Next (server.js + .next + node_modules tracciato, in merge)
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# Output completo di Next (next start richiede .next intero, non solo static)
+COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/scripts ./scripts
 # Il worker (scripts/start-worker-docker.ts) importa ../lib/imap-worker
 COPY --from=builder /app/lib ./lib

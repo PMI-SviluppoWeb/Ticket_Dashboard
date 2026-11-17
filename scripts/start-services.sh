@@ -9,9 +9,9 @@ echo "[Docker] Avvio IMAP worker..."
 tsx scripts/start-worker-docker.ts &
 WORKER_PID=$!
 
-# Avvia Next.js in foreground
+# Avvia Next.js in background (next start, come da next.config senza output standalone)
 echo "[Docker] Avvio Next.js server sulla porta 3001..."
-node server.js &
+./node_modules/.bin/next start -p 3001 -H 0.0.0.0 &
 NEXT_PID=$!
 
 # Gestione segnali per shutdown pulito
