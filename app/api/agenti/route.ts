@@ -49,6 +49,7 @@ export async function POST(request: Request) {
         strumenti: Array.isArray(body.strumenti)
           ? body.strumenti.filter((s): s is string => typeof s === "string")
           : undefined,
+        provider: body.provider,
         attivo: body.attivo,
       },
       request.headers.get("x-operator-id") ?? undefined

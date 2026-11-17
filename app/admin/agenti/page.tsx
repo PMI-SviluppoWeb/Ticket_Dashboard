@@ -16,10 +16,16 @@ import {
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
 import { useOperatore } from "@/lib/operatore-client";
+import {
+  GRUPPI_STRUMENTI,
+  gruppiDaStrumenti,
+  strumentiDaGruppi,
+} from "@/lib/agenti-tools-def";
 import type {
   Agente,
   AgenteEsecuzione,
   AgenteInput,
+  ProviderAgente,
   RuoloAgente,
 } from "@/lib/types";
 
@@ -31,6 +37,8 @@ const EMPTY_FORM: FormData = {
   ruolo: "assistente",
   modello: "deepseek/deepseek-v4.1-flash-1017",
   system_prompt: "",
+  strumenti: [],
+  provider: "auto",
   attivo: true,
 };
 
@@ -90,6 +98,9 @@ export default function AgentiPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
+  // Gruppi di strumenti "dati dell'app" selezionati nel form (da cui si
+  // derivano i nomi tool salvati in form.strumenti al submit).
+  const [gruppiSel, setGruppiSel] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -149,6 +160,7 @@ export default function AgentiPage() {
 
   const resetForm = () => {
     setForm(EMPTY_FORM);
+    setGruppiSel([]);
     setEditingId(null);
     setShowForm(false);
   };
@@ -160,8 +172,11 @@ export default function AgentiPage() {
       ruolo: a.ruolo,
       modello: a.modello,
       system_prompt: a.system_prompt,
+      strumenti: a.strumenti,
+      provider: a.provider,
       attivo: a.attivo,
     });
+    setGruppiSel(gruppiDaStrumenti(a.strumenti));
     setEditingId(a.id);
     setShowForm(true);
   };
@@ -171,10 +186,19 @@ export default function AgentiPage() {
     setSaving(true);
     setError(null);
     try {
+      // Strumenti dai gruppi selezionati; se ci sono strumenti il provider
+      // è FORZATO a openrouter (regola: il loop con dati dell'app vive
+      // nell'app, non su Hermes).
+      const strumenti = strumentiDaGruppi(gruppiSel);
+      const body: FormData = {
+        ...form,
+        strumenti,
+        provider: strumenti.length > 0 ? "openrouter" : form.provider ?? "auto",
+      };
       const res = await fetch(editingId ? `/api/agenti/${editingId}` : "/api/agenti", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Errore nel salvataggio.");
@@ -375,6 +399,68 @@ export default function AgentiPage() {
                   </p>
                 </div>
 
+                <div className="sm:col-span-2 border-t border-crema-bordo pt-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-caldo-testo">
+                    Dati dell&apos;app (strumenti, sola lettura)
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-x-8">
+                    {GRUPPI_STRUMENTI.map((g) => (
+                      <label key={g.id} className="flex items-start gap-2 text-sm text-caldo-testo">
+                        <input
+                          type="checkbox"
+                          checked={gruppiSel.includes(g.id)}
+                          onChange={(e) =>
+                            setGruppiSel((prev) =>
+                              e.target.checked ? [...prev, g.id] : prev.filter((x) => x !== g.id)
+                            )
+                          }
+                          className="mt-0.5 h-4 w-4 cursor-pointer accent-inchiostro"
+                        />
+                        <span>
+                          <span className="font-medium text-inchiostro">{g.label}</span>
+                          <span className="block text-xs">{g.descrizione}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-caldo-testo">
+                    {gruppiSel.length > 0 ? (
+                      <>
+                        Con gli strumenti attivi l&apos;agente <strong className="text-inchiostro">interroga
+                        direttamente i dati dell&apos;app</strong> (ticket, clienti, statistiche): le query
+                        le esegue l&apos;applicazione, senza MCP. In questo modo gira su{" "}
+                        <strong className="text-inchiostro">OpenRouter</strong>.
+                      </>
+                    ) : (
+                      "Nessuno strumento: l'agente è solo conversazionale (eventualmente con la memoria di Hermes)."
+                    )}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-caldo-testo">
+                    Backend per l&apos;esecuzione
+                  </label>
+                  <select
+                    value={form.provider ?? "auto"}
+                    onChange={(e) =>
+                      setForm({ ...form, provider: e.target.value as ProviderAgente })
+                    }
+                    disabled={gruppiSel.length > 0}
+                    className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="auto">Automatico (default di sistema)</option>
+                    <option value="hermes">Hermes (memoria persistente)</option>
+                    <option value="openrouter">OpenRouter</option>
+                  </select>
+                  <p className="mt-1 text-xs text-caldo-testo">
+                    {gruppiSel.length > 0
+                      ? "Con strumenti attivi il backend è forzato a OpenRouter."
+                      : form.provider === "hermes"
+                        ? "Hermes ricorda il contesto tra un'esecuzione e l'altra."
+                        : "Automatico = Hermes se configurato, altrimenti OpenRouter."}
+                  </p>
+                </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-caldo-testo">Modello</label>
                   <input
@@ -430,7 +516,7 @@ export default function AgentiPage() {
             </div>
           ) : agenti.length === 0 ? (
             <div className="py-12 text-center text-sm text-caldo-testo">
-              Nessun agente ancora. Crialene uno per iniziare a usare l&apos;AI nella tua attività.
+              Nessun agente ancora. Creane uno per iniziare a usare l&apos;AI nella tua attività.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -453,6 +539,11 @@ export default function AgentiPage() {
                       <td className="px-5 py-3">
                         <span className="flex items-center gap-2 font-medium text-inchiostro">
                           {a.nome}
+                          {a.strumenti.length > 0 && (
+                            <span className="inline-flex items-center rounded-full border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 text-[11px] font-medium text-stato-ok-testo">
+                              dati app
+                            </span>
+                          )}
                           {prova?.id === a.id && (
                             <span className="inline-flex items-center rounded-full border border-stato-info-bordo bg-stato-info-bg px-2 py-0.5 text-[11px] font-medium text-stato-info-testo">
                               In prova
@@ -597,6 +688,24 @@ export default function AgentiPage() {
                       ? ultimaEsecuzione.output
                       : ultimaEsecuzione.errore}
                   </div>
+                  {ultimaEsecuzione.traccia && ultimaEsecuzione.traccia.length > 0 && (
+                    <div className="mt-3 rounded-control bg-white p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-caldo-testo">
+                        Cosa ha fatto l&apos;agente (dati letti dall&apos;app)
+                      </p>
+                      <ul className="space-y-1.5">
+                        {ultimaEsecuzione.traccia.map((v, i) => (
+                          <li key={i} className="text-xs text-caldo-testo">
+                            <span className="font-mono font-medium text-inchiostro">
+                              turno {v.turno}: {v.tool}
+                            </span>
+                            <span className="font-mono">({v.argomenti})</span>
+                            <span className="line-clamp-1"> → {v.esito}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -641,6 +750,11 @@ export default function AgentiPage() {
                           {es.durata_ms != null && (
                             <span className="text-caldo-testo">{es.durata_ms} ms</span>
                           )}
+                          {es.traccia && es.traccia.length > 0 && (
+                            <span className="inline-flex items-center rounded-full border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 font-medium text-stato-ok-testo">
+                              {es.traccia.length} azioni
+                            </span>
+                          )}
                         </div>
                         <p className="mt-1 line-clamp-1 text-sm text-inchiostro">
                           <span className="text-caldo-testo">In: </span>
@@ -660,18 +774,19 @@ export default function AgentiPage() {
         )}
 
         <p className="mt-4 text-xs text-caldo-testo">
-          Ogni esecuzione viene registrata con input, output, modello e durata.{" "}
+          Ogni esecuzione viene registrata con input, output, modello, durata e trace delle azioni.{" "}
           {provider === "hermes" ? (
             <>
-              Provider attivo: <strong className="text-inchiostro">Hermes</strong> — gli agenti
-              girano con memoria persistente, skills e tool di Hermes (memoria per-agente,
-              continua tra le esecuzioni).
+              Default di sistema: <strong className="text-inchiostro">Hermes</strong> — gli agenti
+              senza strumenti girano con memoria persistente (memoria per-agente, continua tra le
+              esecuzioni). Gli agenti <strong className="text-inchiostro">con strumenti</strong>{" "}
+              ("dati app") girano sempre su OpenRouter: le query sui dati le esegue l&apos;app.
             </>
           ) : provider === "openrouter" ? (
             <>
-              Provider attivo: <strong className="text-inchiostro">OpenRouter</strong> —
-              invocazioni dirette, senza memoria di sessione. Per attivare la memoria persistente
-              configura <code className="rounded border border-crema-contorno bg-white px-1">HERMES_BASE_URL</code>{" "}
+              Default di sistema: <strong className="text-inchiostro">OpenRouter</strong> —
+              invocazioni dirette. Per la memoria persistente configura{" "}
+              <code className="rounded border border-crema-contorno bg-white px-1">HERMES_BASE_URL</code>{" "}
               e <code className="rounded border border-crema-contorno bg-white px-1">HERMES_API_KEY</code>.
             </>
           ) : (

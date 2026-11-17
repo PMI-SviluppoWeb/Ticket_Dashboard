@@ -384,8 +384,14 @@ CREATE TABLE IF NOT EXISTS agenti (
                    CHECK (ruolo IN ('assistente','contenuti','clienti','custom')),
   modello          TEXT NOT NULL DEFAULT 'deepseek/deepseek-v4.1-flash-1017',
   system_prompt    TEXT NOT NULL,
-  -- JSON array di nomi strumenti (riservato, oggi sempre []).
+  -- JSON array di nomi strumenti (lib/agenti-tools.ts). Se vuoto l'agente e'
+  -- solo conversazionale; se non vuoto l'esecuzione usa il loop strumenti
+  -- IN-APP (query eseguite dalla nostra app sul nostro DB) e forza OpenRouter.
   strumenti        TEXT NOT NULL DEFAULT '[]',
+  -- Backend per l'esecuzione: 'auto' = default globale (Hermes se configurato,
+  -- altrimenti OpenRouter), oppure override esplicito per questo agente.
+  provider         TEXT NOT NULL DEFAULT 'auto'
+                   CHECK (provider IN ('auto','openrouter','hermes')),
   attivo           INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
   creato_da        TEXT,
   data_creazione   TEXT NOT NULL,
@@ -411,6 +417,10 @@ CREATE TABLE IF NOT EXISTS agenti_esecuzioni (
   -- Contesto opzionale in JSON (ticket_id, cliente_id, ...): collega
   -- l'esecuzione alla risorsa di business da cui e' nata.
   contesto       TEXT,
+  -- Trace JSON del loop strumenti: quali tool ha chiamato l'agente, con
+  -- quali argomenti e sintesi dei risultati. NULL per le esecuzioni
+  -- conversazionali senza strumenti.
+  traccia        TEXT,
   data_creazione TEXT NOT NULL
 );
 
@@ -486,6 +496,17 @@ async function initSchema(): Promise<void> {
   try {
     await getClient().execute(
       "ALTER TABLE caselle_email ADD COLUMN gmail_da_epoch INTEGER"
+    );
+  } catch { /* Column already exists */ }
+  // Agenti AI: provider per agente + trace delle esecuzioni con strumenti.
+  try {
+    await getClient().execute(
+      "ALTER TABLE agenti ADD COLUMN provider TEXT NOT NULL DEFAULT 'auto'"
+    );
+  } catch { /* Column already exists */ }
+  try {
+    await getClient().execute(
+      "ALTER TABLE agenti_esecuzioni ADD COLUMN traccia TEXT"
     );
   } catch { /* Column already exists */ }
 

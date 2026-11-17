@@ -1,4 +1,5 @@
 import "server-only";
+import type { DefinizioneStrumento } from "./agenti-tools";
 
 // ===========================================================================
 // Provider AI parametrico per l'esecuzione degli agenti.
@@ -9,6 +10,9 @@ import "server-only";
 //                   persistente, skills e tool al nostro system prompt.
 //                   Si attiva impostando HERMES_BASE_URL.
 //   - "openrouter" → chiamata diretta a OpenRouter (comportamento storico).
+//                   Unico backend che supporta qui il loop strumenti
+//                   (tools/tool_calls): le chiamate le esegue la NOSTRA
+//                   app (lib/agenti-tools.ts), non il provider.
 //
 // Se HERMES_BASE_URL non e' presente, si usa OpenRouter: nessun cambio di
 // comportamento per le installazioni esistenti.
@@ -16,8 +20,30 @@ import "server-only";
 
 export type ProviderAI = "hermes" | "openrouter";
 
+// Messaggio del formato Chat Completions (storico del loop strumenti).
+export interface MessaggioChat {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
+}
+
+export interface ChiamataStrumento {
+  id: string;
+  name: string;
+  // Argomenti come stringa JSON grezza (formato OpenAI): serve per
+  // ricostruire l' messaggio assistant nello storico del loop.
+  arguments: string;
+}
+
 export interface EsitoInvocazione {
-  output: string;
+  // null quando la risposta è composta solo da tool_calls (turno di loop).
+  output: string | null;
+  toolCalls: ChiamataStrumento[];
   promptTokens: number | null;
   completionTokens: number | null;
   provider: ProviderAI;
@@ -43,25 +69,33 @@ function baseUrlHermes(): string {
   return (process.env.HERMES_BASE_URL ?? "").replace(/\/+$/, "");
 }
 
-// Invoca il modello con il system prompt dato.
+// Invoca il modello.
 //
-// `sessionId`/`sessionKey` sono usati SOLO da Hermes:
-//  - X-Hermes-Session-Id  → continuita' della conversazione (le esecuzioni
-//    successive dello stesso agente continuano lo stesso thread);
-//  - X-Hermes-Session-Key → scope stabile della memoria a lungo termine
-//    (memoria dedicata per agente, indipendente dal singolo thread).
+// - `messaggi`: storico completo (se assente si costruisce [system, input]).
+//   Usato dal loop strumenti per rimandare avanti tool_calls/tool results.
+// - `tools`: definizioni function-calling — SOLO OpenRouter (il loop con
+//   esecuzione in-app vive lì; Hermes non le riceve mai).
+// - `sessionId`/`sessionKey`: SOLO Hermes (continuità thread + scope
+//   memoria a lungo termine per agente).
 export async function invocaModello(opts: {
   systemPrompt: string;
   input: string;
   modello?: string;
+  // Override del provider globale (da colonna agenti.provider).
+  provider?: ProviderAI;
   sessionId?: string;
   sessionKey?: string;
+  messaggi?: MessaggioChat[];
+  tools?: DefinizioneStrumento[];
 }): Promise<EsitoInvocazione> {
-  const provider = providerAttivo();
-  const messages = [
-    { role: "system", content: opts.systemPrompt },
-    { role: "user", content: opts.input },
-  ];
+  const provider = opts.provider ?? providerAttivo();
+  const messages: MessaggioChat[] =
+    opts.messaggi && opts.messaggi.length > 0
+      ? opts.messaggi
+      : [
+          { role: "system", content: opts.systemPrompt },
+          { role: "user", content: opts.input },
+        ];
 
   let url: string;
   let headers: Record<string, string>;
@@ -82,6 +116,8 @@ export async function invocaModello(opts: {
       messages,
       stream: false,
     };
+    // NB: opts.tools NON viene mandato a Hermes — il loop strumenti con
+    // esecuzione in-app gira solo su OpenRouter (vedi eseguiAgente).
   } else {
     url = "https://openrouter.ai/api/v1/chat/completions";
     headers = {
@@ -95,6 +131,12 @@ export async function invocaModello(opts: {
       temperature: 0.3,
       messages,
     };
+    if (opts.tools && opts.tools.length > 0) {
+      body.tools = opts.tools;
+      // Senza choice il modello potrebbe rispondere solo con tool_calls
+      // ignorando la richiesta: "auto" lascia decidere a lui.
+      body.tool_choice = "auto";
+    }
   }
 
   let res: Response;
@@ -125,16 +167,33 @@ export async function invocaModello(opts: {
   }
 
   const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: Array<{
+          id: string;
+          type?: string;
+          function: { name: string; arguments: string };
+        }>;
+      };
+    }>;
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
-  const output = data.choices?.[0]?.message?.content;
-  if (!output) {
+  const message = data.choices?.[0]?.message;
+  const toolCalls: ChiamataStrumento[] = (message?.tool_calls ?? []).map((tc) => ({
+    id: tc.id,
+    name: tc.function.name,
+    arguments: typeof tc.function.arguments === "string" ? tc.function.arguments : "{}",
+  }));
+  const output = message?.content ?? null;
+
+  if (!output && toolCalls.length === 0) {
     throw new ErroreProviderAI(502, "Risposta del modello vuota.");
   }
 
   return {
     output,
+    toolCalls,
     promptTokens: data.usage?.prompt_tokens ?? null,
     completionTokens: data.usage?.completion_tokens ?? null,
     provider,

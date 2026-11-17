@@ -1,25 +1,37 @@
 import { db } from "./db";
-import { invocaModello, providerAttivo } from "./ai-provider";
+import { invocaModello, providerAttivo, type MessaggioChat, type ProviderAI } from "./ai-provider";
+import { eseguiStrumento, strumentiPerAgente } from "./agenti-tools";
+import { TUTTI_STRUMENTI } from "./agenti-tools-def";
 import "server-only";
 
 // Accesso dati e invocazione degli agenti AI.
 //
-// Un agente = system prompt + modello (OpenRouter, stessa chiave della
-// classificazione email). L'esecuzione è sincrona: la route POST chiama
-// eseguiAgente(), che logga tutto in agenti_esecuzioni (input, output,
-// stato, durata, token) — quel log è ciò che la UI visualizza.
+// Un agente = system prompt + modello + (opzionale) strumenti "dati
+// dell'app". L'esecuzione è sincrona e viene loggata integralmente in
+// agenti_esecuzioni (input, output, stato, durata, token, trace) — quel
+// log è ciò che la UI visualizza.
 //
-// I "strumenti" sono un JSON riservato: oggi sempre [], l'architettura è
-// pronta per aggiungere tool-calling senza cambiare schema.
+// Provider per esecuzione (risolto in eseguiAgente):
+//  - agente CON strumenti  → SEMPRE OpenRouter + loop strumenti IN-APP
+//    (le query sul DB le esegue la nostra app: lib/agenti-tools.ts).
+//    Hermes non riceve mai i tools: non ha accesso al nostro DB.
+//  - agente SENZA strumenti → colonna agenti.provider ('auto' = globale:
+//    Hermes se configurato, altrimenti OpenRouter) con memoria di sessione.
 
 import type {
   Agente,
   AgenteEsecuzione,
   AgenteInput,
+  ProviderAgente,
   RuoloAgente,
+  VoceTraccia,
 } from "./types";
 
 const MODELLO_DEFAULT = "deepseek/deepseek-v4.1-flash-1017";
+
+// Limite di turni del loop strumenti (1 turno = 1 chiamata modello).
+// Oltre: un'ultima chiamata FORZATA senza tools per produrre la risposta.
+const MAX_TURNI_STRUMENTI = 6;
 
 interface AgenteRow {
   id: string;
@@ -29,6 +41,7 @@ interface AgenteRow {
   modello: string;
   system_prompt: string;
   strumenti: string;
+  provider: string | null;
   attivo: number;
   creato_da: string | null;
   data_creazione: string;
@@ -36,6 +49,7 @@ interface AgenteRow {
 }
 
 const RUOLI_VALIDI: RuoloAgente[] = ["assistente", "contenuti", "clienti", "custom"];
+const PROVIDER_VALIDI: ProviderAgente[] = ["auto", "openrouter", "hermes"];
 
 function aTipo(r: AgenteRow): Agente {
   let strumenti: string[] = [];
@@ -53,6 +67,11 @@ function aTipo(r: AgenteRow): Agente {
     modello: r.modello,
     system_prompt: r.system_prompt,
     strumenti,
+    provider: (
+      r.provider && PROVIDER_VALIDI.includes(r.provider as ProviderAgente)
+        ? r.provider
+        : "auto"
+    ) as ProviderAgente,
     attivo: Number(r.attivo) === 1,
     creato_da: r.creato_da,
     data_creazione: r.data_creazione,
@@ -61,7 +80,7 @@ function aTipo(r: AgenteRow): Agente {
 }
 
 const SELECT_AGENTI = `SELECT id, nome, descrizione, ruolo, modello, system_prompt,
-  strumenti, attivo, creato_da, data_creazione, data_aggiornamento FROM agenti`;
+  strumenti, provider, attivo, creato_da, data_creazione, data_aggiornamento FROM agenti`;
 
 // ---------------------------------------------------------------------------
 // CRUD
@@ -92,6 +111,9 @@ function validaInput(input: Partial<AgenteInput>, parziale: boolean): string | n
   if (input.ruolo !== undefined && !RUOLI_VALIDI.includes(input.ruolo as RuoloAgente)) {
     return "Ruolo non valido.";
   }
+  if (input.provider !== undefined && !PROVIDER_VALIDI.includes(input.provider as ProviderAgente)) {
+    return "Provider non valido.";
+  }
   if (!parziale || input.system_prompt !== undefined) {
     if (typeof input.system_prompt !== "string" || !input.system_prompt.trim()) {
       return "Il prompt di sistema è obbligatorio.";
@@ -99,6 +121,13 @@ function validaInput(input: Partial<AgenteInput>, parziale: boolean): string | n
   }
   if (input.descrizione !== undefined && input.descrizione.length > 2000) {
     return "Descrizione troppo lunga.";
+  }
+  if (input.strumenti !== undefined) {
+    if (!Array.isArray(input.strumenti) || input.strumenti.some((s) => typeof s !== "string")) {
+      return "Strumenti non validi.";
+    }
+    const ignoti = input.strumenti.filter((s) => !TUTTI_STRUMENTI.includes(s));
+    if (ignoti.length > 0) return `Strumenti sconosciuti: ${ignoti.join(", ")}.`;
   }
   return null;
 }
@@ -115,9 +144,9 @@ export async function creaAgente(
   await db
     .prepare(
       `INSERT INTO agenti (id, nome, descrizione, ruolo, modello, system_prompt,
-        strumenti, attivo, creato_da, data_creazione, data_aggiornamento)
+        strumenti, provider, attivo, creato_da, data_creazione, data_aggiornamento)
        VALUES (@id, @nome, @descrizione, @ruolo, @modello, @system_prompt,
-        @strumenti, @attivo, @creato_da, @now, @now)`
+        @strumenti, @provider, @attivo, @creato_da, @now, @now)`
     )
     .run({
       id,
@@ -127,6 +156,7 @@ export async function creaAgente(
       modello: input.modello?.trim() || MODELLO_DEFAULT,
       system_prompt: input.system_prompt.trim(),
       strumenti: JSON.stringify(input.strumenti ?? []),
+      provider: input.provider ?? "auto",
       attivo: input.attivo === false ? 0 : 1,
       creato_da: operatoreId ?? null,
       now,
@@ -161,6 +191,7 @@ export async function aggiornaAgente(
   if (input.modello !== undefined) assegna("modello", input.modello.trim() || MODELLO_DEFAULT);
   if (input.system_prompt !== undefined) assegna("system_prompt", input.system_prompt.trim());
   if (input.strumenti !== undefined) assegna("strumenti", JSON.stringify(input.strumenti));
+  if (input.provider !== undefined) assegna("provider", input.provider);
   if (input.attivo !== undefined) assegna("attivo", input.attivo ? 1 : 0);
 
   await db
@@ -199,19 +230,21 @@ interface EsecuzioneRow {
   durata_ms: number | null;
   operatore_id: string | null;
   contesto: string | null;
+  traccia: string | null;
   data_creazione: string;
 }
 
-function aTipoEsecuzione(r: EsecuzioneRow): AgenteEsecuzione {
-  let contesto: Record<string, unknown> | null = null;
-  if (r.contesto) {
-    try {
-      const parsed = JSON.parse(r.contesto);
-      if (parsed && typeof parsed === "object") contesto = parsed;
-    } catch {
-      // contesto corrotto: si mostra come assente
-    }
+function parseJson<T>(testo: string | null): T | null {
+  if (!testo) return null;
+  try {
+    const parsed = JSON.parse(testo);
+    return (parsed ?? null) as T;
+  } catch {
+    return null;
   }
+}
+
+function aTipoEsecuzione(r: EsecuzioneRow): AgenteEsecuzione {
   return {
     id: r.id,
     agente_id: r.agente_id,
@@ -224,14 +257,15 @@ function aTipoEsecuzione(r: EsecuzioneRow): AgenteEsecuzione {
     completion_tokens: r.completion_tokens != null ? Number(r.completion_tokens) : null,
     durata_ms: r.durata_ms != null ? Number(r.durata_ms) : null,
     operatore_id: r.operatore_id,
-    contesto,
+    contesto: parseJson<Record<string, unknown>>(r.contesto),
+    traccia: parseJson<VoceTraccia[]>(r.traccia),
     data_creazione: r.data_creazione,
   };
 }
 
 const SELECT_ESECUZIONI = `SELECT id, agente_id, input_utente, output, stato, errore,
   modello, prompt_tokens, completion_tokens, durata_ms, operatore_id, contesto,
-  data_creazione FROM agenti_esecuzioni`;
+  traccia, data_creazione FROM agenti_esecuzioni`;
 
 export async function listaEsecuzioni(
   agenteId: string,
@@ -249,8 +283,18 @@ export type EsitoEsecuzione =
   | { ok: true; esecuzione: AgenteEsecuzione }
   | { ok: false; error: string };
 
-// Invoca l'agente attraverso il provider attivo (Hermes se configurato,
-// altrimenti OpenRouter) e logga l'esecuzione completa.
+// Risolve il backend effettivo per questo agente.
+// Regola: strumenti attivi → SEMPRE openrouter (il loop con esecuzione
+// in-app vive lì); altrimenti override di agente.provider, poi 'auto'.
+function risolviProvider(agente: Agente, strumentiAttivi: boolean): ProviderAI {
+  if (strumentiAttivi) return "openrouter";
+  if (agente.provider === "openrouter" || agente.provider === "hermes") {
+    return agente.provider;
+  }
+  return providerAttivo();
+}
+
+// Invoca l'agente sul backend risolto e logga l'esecuzione completa.
 // Sincrona per scelta (la struttura prevede un ritmo umano: la UI attende
 // e mostra l'output; l'eventuale coda asincrona arriverà con i tool lunghi).
 export async function eseguiAgente(opts: {
@@ -266,7 +310,11 @@ export async function eseguiAgente(opts: {
   const input = opts.input.trim();
   if (!input) return { ok: false, error: "Input vuoto." };
 
-  if (providerAttivo() === "hermes") {
+  // Solo strumenti validi (lista cross-checkata anche in validazione).
+  const strumenti = strumentiPerAgente(agente.strumenti);
+  const providerScelto = risolviProvider(agente, strumenti.length > 0);
+
+  if (providerScelto === "hermes") {
     if (!process.env.HERMES_API_KEY) {
       return { ok: false, error: "HERMES_BASE_URL presente ma HERMES_API_KEY mancante." };
     }
@@ -303,13 +351,14 @@ export async function eseguiAgente(opts: {
     errore?: string | null;
     prompt_tokens?: number | null;
     completion_tokens?: number | null;
+    traccia?: VoceTraccia[] | null;
   }): Promise<void> => {
     await db
       .prepare(
         `UPDATE agenti_esecuzioni
          SET stato = @stato, output = @output, errore = @errore,
              prompt_tokens = @prompt_tokens, completion_tokens = @completion_tokens,
-             durata_ms = @durata_ms
+             durata_ms = @durata_ms, traccia = @traccia
          WHERE id = @id`
       )
       .run({
@@ -320,28 +369,112 @@ export async function eseguiAgente(opts: {
         prompt_tokens: dati.prompt_tokens ?? null,
         completion_tokens: dati.completion_tokens ?? null,
         durata_ms: Date.now() - inizio,
+        traccia: dati.traccia ? JSON.stringify(dati.traccia) : null,
       });
   };
 
   try {
-    // Provider parametrico: se HERMES_BASE_URL e' configurato la chiamata
-    // passa dall'agent di Hermes (memoria persistente + skills + tool),
-    // altrimenti va direttamente a OpenRouter come prima.
-    const esito = await invocaModello({
-      systemPrompt: agente.system_prompt,
-      input,
-      modello: agente.modello,
-      // Sessione stabile per agente: continuita' della conversazione e
-      // scope della memoria a lungo termine dedicate a questo agente.
-      sessionId: `ticket-${agente.id}`,
-      sessionKey: `ticket-dashboard:${agente.id}`,
-    });
+    let output: string | null;
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let traccia: VoceTraccia[] | null = null;
+
+    if (strumenti.length > 0) {
+      // === LOOP STRUMENTI IN-APP (OpenRouter) =============================
+      // Il modello chiede tool; le query le esegue la NOSTRA app sul
+      // nostro DB; i risultati tornano al modello fino alla risposta.
+      const messaggi: MessaggioChat[] = [
+        { role: "system", content: agente.system_prompt },
+        { role: "user", content: input },
+      ];
+      const voci: VoceTraccia[] = [];
+      let finito = false;
+      output = null;
+
+      for (let turno = 1; turno <= MAX_TURNI_STRUMENTI + 1 && !finito; turno++) {
+        // All'ultimo turno (oltre il limite) si tolgono i tools: il modello
+        // DEVE produrre la risposta finale con i dati già raccolti.
+        const forzatoFinale = turno > MAX_TURNI_STRUMENTI;
+        const esito = await invocaModello({
+          systemPrompt: agente.system_prompt,
+          input,
+          modello: agente.modello,
+          provider: "openrouter",
+          messaggi,
+          tools: forzatoFinale ? undefined : strumenti,
+        });
+        promptTokens += esito.promptTokens ?? 0;
+        completionTokens += esito.completionTokens ?? 0;
+
+        if (esito.toolCalls.length === 0 || forzatoFinale) {
+          output = esito.output ?? output;
+          finito = true;
+          break;
+        }
+
+        // Storico: il messaggio assistant con i tool richiesti.
+        messaggi.push({
+          role: "assistant",
+          content: esito.output,
+          tool_calls: esito.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function" as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        });
+
+        // Esecuzione IN-APP di ogni chiamata + risultato nello storico.
+        for (const tc of esito.toolCalls) {
+          let args: unknown = {};
+          try {
+            args = JSON.parse(tc.arguments || "{}");
+          } catch {
+            args = {};
+          }
+          const risultato = await eseguiStrumento(tc.name, args);
+          voci.push({
+            turno,
+            tool: tc.name,
+            argomenti: tc.arguments.slice(0, 500),
+            esito: risultato.slice(0, 500),
+          });
+          messaggi.push({ role: "tool", content: risultato, tool_call_id: tc.id });
+        }
+      }
+
+      if (!finito || output === null) {
+        await registra({
+          stato: "errore",
+          errore: "Limite di turni del loop strumenti raggiunto senza risposta finale.",
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          traccia: voci,
+        });
+        return { ok: false, error: "Limite di turni raggiunto senza risposta finale." };
+      }
+      traccia = voci;
+    } else {
+      // === CHIAMATA SEMPLICE (Hermes con memoria, o OpenRouter) ===========
+      const esito = await invocaModello({
+        systemPrompt: agente.system_prompt,
+        input,
+        modello: agente.modello,
+        provider: providerScelto,
+        // Sessione/chiave di memoria: solo Hermes li usa.
+        sessionId: `ticket-${agente.id}`,
+        sessionKey: `ticket-dashboard:${agente.id}`,
+      });
+      output = esito.output;
+      promptTokens = esito.promptTokens ?? 0;
+      completionTokens = esito.completionTokens ?? 0;
+    }
 
     await registra({
       stato: "completata",
-      output: esito.output,
-      prompt_tokens: esito.promptTokens,
-      completion_tokens: esito.completionTokens,
+      output,
+      prompt_tokens: promptTokens || null,
+      completion_tokens: completionTokens || null,
+      traccia,
     });
 
     const esecuzioni = await listaEsecuzioni(agente.id, 1);

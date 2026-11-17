@@ -668,6 +668,16 @@ export interface CasellaEmailInput {
 // prompt predefinito suggerito. 'custom' = libero.
 export type RuoloAgente = "assistente" | "contenuti" | "clienti" | "custom";
 
+// Backend per l'esecuzione: 'auto' = default globale (Hermes se configurato,
+// altrimenti OpenRouter); 'openrouter'/'hermes' = override per-agente.
+// NOTA: un agente con strumenti (dati dell'app) gira SEMPRE su OpenRouter:
+// il loop degli strumenti lo esegue la nostra app, non Hermes.
+export type ProviderAgente = "auto" | "openrouter" | "hermes";
+
+// Gruppi di strumenti (dati dell'app, sola lettura) selezionabili in UI.
+// Ogni gruppo abilita uno piu' tool di lib/agenti-tools.ts.
+export type GruppoStrumenti = "ticket" | "clienti" | "statistiche";
+
 export interface Agente {
   id: string;
   nome: string;
@@ -675,8 +685,9 @@ export interface Agente {
   ruolo: RuoloAgente;
   modello: string;
   system_prompt: string;
-  // JSON array di nomi strumenti (riservato all'evoluzione con tool-calling).
+  // Nomi degli strumenti attivi (es. ["cerca_ticket","get_ticket"]).
   strumenti: string[];
+  provider: ProviderAgente;
   attivo: boolean;
   creato_da: string | null;
   data_creazione: string;
@@ -690,10 +701,19 @@ export interface AgenteInput {
   modello?: string;
   system_prompt: string;
   strumenti?: string[];
+  provider?: ProviderAgente;
   attivo?: boolean;
 }
 
 export type StatoEsecuzioneAgente = "in_corso" | "completata" | "errore";
+
+// Voce del trace: una chiamata a strumento del loop (o il sintetico finale).
+export interface VoceTraccia {
+  turno: number;
+  tool: string;
+  argomenti: string;
+  esito: string;
+}
 
 export interface AgenteEsecuzione {
   id: string;
@@ -709,6 +729,8 @@ export interface AgenteEsecuzione {
   operatore_id: string | null;
   // JSON di contesto opzionale: ticket_id, cliente_id, ...
   contesto: Record<string, unknown> | null;
+  // Trace del loop strumenti (null per le esecuzioni conversazionali).
+  traccia: VoceTraccia[] | null;
   data_creazione: string;
 }
 
