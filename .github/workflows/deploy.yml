@@ -1,31 +1,29 @@
-name: Deploy to Windows Server
+name: Deploy su container Proxmox
 
 on:
   push:
-    branches: [ main ] # o master
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: self-hosted
-    defaults:
-      run:
-        shell: cmd
-        working-directory: C:\Users\Mirko Pandolfi\Desktop\Ticket_Dashboard
+    timeout-minutes: 30
     steps:
-      # 1. Scarica il codice aggiornato da GitHub
-      - name: Checkout code
+      # clean: false preserva i file gitignored tra un deploy e l'altro
+      # (.env e uploads/ non devono venire cancellati dal checkout)
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          clean: false
 
-      # 2. Ogni comando e' uno step separato: se fallisce, il job va in errore
-      - name: Git pull
-        run: git pull origin main
+      # Sorgente di verita' fuori dal repo: se il workspace viene ricreato
+      # da zero il . resta comunque disponibile
+      - name: Ripristina .env dai secret
+        run: cp /opt/secrets/ticket-dashboard.env .env
 
-      - name: Install dipendenze
-        run: npm install
+      - name: Build e avvio
+        run: docker compose up -d --build --wait --wait-timeout 120
 
-      - name: Build
-        run: npm run build
-
-      - name: Riavvia app
-        run: pm2 restart Ticket_Dashboard
+      - name: Stato servizi
+        run: docker compose ps

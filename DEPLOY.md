@@ -1,6 +1,7 @@
 # Deploy con Docker
 
-Stack: `ticket-dashboard` (build multi-stage, Next.js + worker IMAP) + `watchtower` (auto-update da GHCR).
+Stack: `ticket-dashboard` (build multi-stage, Next.js + worker IMAP), build locale
+avviato dal runner GitHub Actions dentro il container Proxmox (vedi §4).
 Porta: **3001**.
 
 ---
@@ -68,16 +69,14 @@ docker compose logs ticket-dashboard | findstr Error
 
 ## 2. Controlli importanti su `docker-compose.yml`
 
-Questi 4 punti sono critici per il funzionamento in produzione:
+Questi punti sono critici per il funzionamento in produzione:
 
 | # | Problema | Soluzione |
 |---|----------|-----------|
 | 1 | `uploads/` non montato → allegati persi ad ogni rebuild | volume `- ./uploads:/app/uploads` |
-| 2 | Watchtower usa `--label-enable` ma il service non ha la label | label `com.centurylinklabs.watchtower.enable=true` |
-| 3 | Watchtower tira un'immagine da GHCR ma il service ha solo `build:` | aggiungere `image: ghcr.io/<tuousername>/<repo>:main` |
-| 4 | Nessun limite RAM/CPU e nessuna rotazione dei log (i log su Windows mangiano disco) | `deploy.resources.limits` + `logging` con max-size |
-| 5 | Il standalone di Next ascolta su `:3000`, ma la mappatura è `3001:3001` | `PORT=3001` + `HOSTNAME=0.0.0.0` in `environment` |
-| 6 | `localhost` risolve su IPv6 `::1`, che il server non serve → healthcheck/Webhook falliscono | usare `127.0.0.1` in healthcheck e `WEBHOOK_URL` |
+| 2 | Nessun limite RAM/CPU e nessuna rotazione dei log (i log su Windows mangiano disco) | `deploy.resources.limits` + `logging` con max-size |
+| 3 | Il standalone di Next ascolta su `:3000`, ma la mappatura è `3001:3001` | `PORT=3001` + `HOSTNAME=0.0.0.0` in `environment` |
+| 4 | `localhost` risolve su IPv6 `::1`, che il server non serve → healthcheck/Webhook falliscono | usare `127.0.0.1` in healthcheck e `WEBHOOK_URL` |
 
 Riferimento – impostazioni attese nel `docker-compose.yml`:
 
@@ -85,11 +84,8 @@ Riferimento – impostazioni attese nel `docker-compose.yml`:
 services:
   ticket-dashboard:
     build: .
-    image: ghcr.io/<tuousername>/<repo>:main   # stesso nome spinto da GitHub Actions
     container_name: ticket-dashboard
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
     ports:
       - "3001:3001"
     env_file:
@@ -118,28 +114,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true                 # rimuove le immagini vecchie dopo il pull
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_LABEL_ENABLE=true
-    command: --label-enable
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: "0.25"
-    logging:
-      driver: local
-      options:
-        max-size: "10m"
-        max-file: "3"
 ```
 
 ---
@@ -179,7 +153,6 @@ git clone https://github.com/<tuousername>/<repo>.git
 cd <repo>
 Copy-Item .env.docker.example .env
 notepad .env
-docker login ghcr.io            # solo se il package GHCR è privato
 docker compose up -d --build
 docker compose ps
 ```
@@ -193,32 +166,33 @@ Per la sync clienti usare SQL Server Authentication (utente/password) in `.env`.
 
 ---
 
-## 4. Auto-deploy con GitHub Actions + Watchtower
+## 4. Auto-deploy con GitHub Actions (runner nel container)
 
 ### Flusso
 1. `git push` da qualsiasi postazione
-2. GitHub Actions (`.github/workflows/deploy.yml`) builda l'immagine e la pusha su **GHCR** con tag `main` e `<sha>`
-3. Watchtower (ogni 300s) controlla GHCR, fa pull della nuova immagine, riavvia il container
-4. `WATCHTOWER_CLEANUP=true` elimina le immagini vecchie → **zero intervento manuale, zero accumulo disco**
+2. GitHub Actions esegue `.github/workflows/deploy.yml` sul **runner self-hosted**
+   installato dentro il container LXC di Proxmox
+3. Il job fa checkout, copia il `.env` da `/opt/secrets/` e esegue
+   `docker compose up -d --build --wait` → **build + riavvio, zero intervento manuale**
 
-### Configurazione GitHub
-```powershell
-git remote add origin https://github.com/<tuousername>/<repo>.git
-git branch -M main
-git push -u origin main
-```
+### Perché non Watchtower / GHCR
+Con il deploy avviene sul server stesso (`build:` locale), quindi non serve
+pushare immagini su GHCR né un agente che le controlla ogni 5 minuti.
+Watchtower è stato rimosso dal compose: se presente insieme al build locale,
+scaricherebbe l'immagine GHCR vecchia sovrascrivendo quella appena costruita.
 
-### Requisiti perché Watchtower funzioni
-1. Nel `docker-compose.yml` il service deve avere `image: ghcr.io/<tuousername>/<repo>:main` (non solo `build:`) **e** la label `com.centurylinklabs.watchtower.enable=true`
-2. Il package GHCR deve essere **pubblico**:
-   GitHub → package → Settings → **Change visibility → Public**
-   (in alternativa `docker login ghcr.io` sul server con un PAT)
-3. I nomi dei repository/package GHCR devono essere **minuscoli**: se il repo si chiama `App-Ticket-Dashboard`, rinominarlo (es. `app-ticket-dashboard`) oppure GHCR rifiuta il push
+### Requisiti
+1. Runner self-hosted registrato su entrambi i repo
+   (GitHub → Settings → Actions → Runners) e avviato come servizio nel container
+2. `cp <.env del progetto> /opt/secrets/ticket-dashboard.env` sul container
+   (il workflow lo copia nel workspace ad ogni deploy; il `.env` del repo è
+   gitignored, la copia fuori dal repo sopravvive anche a un checkout pulito)
+3. Il workspace del runner usa `clean: false` per preservare `uploads/` tra i deploy
 
 ### Aggiornamento manuale (fallback)
-```powershell
-docker compose pull
-docker compose up -d
+```bash
+git pull
+docker compose up -d --build
 ```
 
 ---
@@ -226,7 +200,7 @@ docker compose up -d
 ## 5. Igiene disco e ottimizzazione spazio
 
 - **Log rotation** nel compose (`logging: local, max-size 10m, max-file 3`) → max ~30MB di log per container
-- **Watchtower cleanup** → rimuove le immagini superate ad ogni update
+- **Prune delle immagini vecchie**: dopo ogni build `docker compose up -d --build` lascia l'immagine precedente come dangling → `docker image prune -f` (a mano o via Task Scheduler settimanale)
 - **Build multi-stage** nel `Dockerfile` → in produzione servono solo `.next/standalone` + `scripts/`, non `node_modules` di sviluppo né `.next` completo
 - **`.dockerignore`** esclude `node_modules`, `.next`, `data/`, `uploads/`, `docs/`, `screen/` → contesto di build leggero
 - **Prune periodico** (opzionale) – Task Scheduler settimanale:
@@ -557,8 +531,7 @@ memoria.
 | `/api/hooks/email` risponde 503 | manca `WEBHOOK_SECRET` in `.env` (o il container non è stato riavviato dopo l'aggiunta) |
 | `/api/hooks/email` risponde 401 | `WEBHOOK_SECRET` diverso tra i due lati: deve essere lo stesso valore |
 | Container `unhealthy` | `docker compose logs ticket-dashboard` e controllare `.env` (IMAP/SMTP/Turso) |
-| Watchtower non aggiorna nulla | manca `image: ghcr.io/...` oppure la label `com.centurylinklabs.watchtower.enable=true`; package GHCR privato senza login |
-| Push GHCR fallito con *"must be lowercase"* | rinominare il repository GitHub in minuscolo |
+| Il job di deploy non parte | runner self-hosted non registrato/avviato → GitHub → Settings → Actions → Runners |
 | Allegati non trovati dopo rebuild | verificare il volume `./uploads:/app/uploads` |
 | Log IMAP/worker | `docker compose logs ticket-dashboard \| findstr IMAP` |
 | Entra nel container | `docker exec -it ticket-dashboard sh` |
