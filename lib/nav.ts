@@ -47,7 +47,9 @@ export const NAV_ITEMS: NavItem[] = [
     calda: ["/api/operatori/stats"],
   },
   { href: "/report", label: "Report Ore", icon: ClockIcon, exact: false, adminOnly: true, calda: [] },
-  { href: "/inbox", label: "Inbox Email", icon: MailIcon, exact: false, adminOnly: true, calda: [] },
+  // Inbox Email e Knowledge Base nascoste temporaneamente: per riattivarle
+  // basta rimuovere i commenti sulle due righe sottostanti.
+  // { href: "/inbox", label: "Inbox Email", icon: MailIcon, exact: false, adminOnly: true, calda: [] },
   {
     href: "/admin/email",
     label: "Caselle Email",
@@ -56,7 +58,7 @@ export const NAV_ITEMS: NavItem[] = [
     adminOnly: true,
     calda: ["/api/caselle"],
   },
-  { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false, calda: [] },
+  // { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false, calda: [] },
   {
     href: "/admin/agenti",
     label: "Agenti AI",
