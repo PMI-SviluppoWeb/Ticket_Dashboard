@@ -349,13 +349,12 @@ export async function POST(request: Request) {
     const soglia = config.soglia;
     let decisione: "ticket" | "da_verificare" | "ignorata";
 
+    // L'esito dell'AI vale SEMPRE, anche in "osservazione". L'osservazione
+    // serve a registrare la classificazione, non a forzare un ticket su una
+    // email che il triage ha giudicato da ignorare (era il caso delle email
+    // personali/promozionali che finivano comunque in coda).
     if (!config.attivo) {
       decisione = "ticket";
-    } else if (config.osservazione) {
-      // Modalita' osservazione: le regole deterministiche (posta automatica)
-      // restano ignorate; per tutto il resto si crea il ticket ma si registra
-      // l'esito dell'AI, per misurare gli errori del triage.
-      decisione = regola ? "ignorata" : "ticket";
     } else if (classification.esito === "ignora" && classification.confidenza >= soglia) {
       decisione = "ignorata";
     } else if (classification.esito === "ticket" && classification.confidenza >= soglia) {
@@ -443,12 +442,9 @@ export async function POST(request: Request) {
     const operatoreId = await idOperatorePerNome(config.operatore);
     const messaggioId = crypto.randomUUID();
 
-    const notaTriage = config.osservazione
-      ? `[triage/osservazione] esito AI: ${classification.esito} (${classification.confidenza.toFixed(2)}) - ${classification.motivo}`
-      : classification.requiresHumanReview
-        ? `[AI] Revisione umana richiesta - Intent: ${classification.intent}`
-        : `[AI] Intent: ${classification.intent}`;
-
+    // Il ragionamento del triage resta in email_inbox/registro, NON nel campo
+    // note del ticket: quella nota e' visibile all'operatore come "Risposta
+    // Rapida" e non deve contenere testo generato dall'AI.
     const ticket = await createTicket({
       canale: "email",
       cliente: clienteNome,
@@ -459,7 +455,6 @@ export async function POST(request: Request) {
       sommario_problema: classification.sommario,
       descrizione_dettagliata: email.body || email.subject,
       priorita,
-      note: notaTriage,
       operatore_id: operatoreId,
       cliente_id: cliente?.id ?? null,
       messaggi: [

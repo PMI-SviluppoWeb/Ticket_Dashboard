@@ -10,6 +10,8 @@ import { unlink } from "fs/promises";
 //   npx tsx scripts/pulizia-email.ts
 //   npx tsx scripts/pulizia-email.ts --da 2026-11-01 --a 2026-11-18
 //   npx tsx scripts/pulizia-email.ts --mittente team@learnn.com,bk@email.burgerking.it
+//   npx tsx scripts/pulizia-email.ts --numero TICK-953979 --conferma
+//   npx tsx scripts/pulizia-email.ts --pulisci-note --conferma
 //   npx tsx scripts/pulizia-email.ts --conferma --da 2026-11-01 --a 2026-11-18
 //   npx tsx scripts/pulizia-email.ts --orfani            # anteprima orfani
 //   npx tsx scripts/pulizia-email.ts --orfani --conferma # elimina orfani
@@ -66,9 +68,11 @@ async function main() {
   const conferma = flag("conferma");
   const tutti = flag("tutti");
   const orfani = flag("orfani");
-  const forza = flag("forza");
+  const forzato = flag("forza");
+  const pulisciNote = flag("pulisci-note");
   const da = arg("da");
   const a = arg("a");
+  const numero = arg("numero")?.trim().toUpperCase() || null;
   const mittenti = (arg("mittente") ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
@@ -89,8 +93,18 @@ async function main() {
   // -------------------------------------------------------------------------
   // 1. Ticket da email (anteprima)
   // -------------------------------------------------------------------------
-  const condizioni = ["(i.casella_id = 'env' OR i.casella_id IS NULL)"];
+  // Di default si guardano le email della vecchia casella di .env. Con
+  // --numero si cerca quel ticket specifico, ignorando il filtro casella
+  // (utile per rimuovere un falso positivo da una casella configurata nell'app).
+  const condizioni: string[] = [];
   const params: Array<string> = [];
+  if (!numero) {
+    condizioni.push("(i.casella_id = 'env' OR i.casella_id IS NULL)");
+  }
+  if (numero) {
+    condizioni.push("upper(t.numero) = ?");
+    params.push(numero);
+  }
   if (da) {
     condizioni.push(`i.data_creazione >= ?`);
     params.push(inizioGiorno(da));
@@ -129,7 +143,7 @@ async function main() {
 
   console.log("=== TICKET DA EMAIL SELEZIONATI ===");
   console.log(
-    `Filtri: casella=env/null` +
+    `Filtri: ${numero ? `numero=${numero}` : "casella=env/null"}` +
       (da ? ` · da ${da}` : "") +
       (a ? ` · a ${a}` : "") +
       (mittenti.length ? ` · mittenti ${mittenti.join(", ")}` : "")
@@ -147,7 +161,7 @@ async function main() {
   }
 
   const conOre = candidati.filter((c) => c.oreVoci > 0);
-  const daCancellare = forza ? candidati : candidati.filter((c) => c.oreVoci === 0);
+  const daCancellare = forzato ? candidati : candidati.filter((c) => c.oreVoci === 0);
   const saltati = candidati.length - daCancellare.length;
 
   console.log(
@@ -155,16 +169,17 @@ async function main() {
       (saltati > 0 ? ` · saltati per ore registrate: ${saltati} (usa --forza)` : "")
   );
 
-  if (conferma && candidati.length > 0 && !da && !a && mittenti.length === 0 && !tutti) {
+  if (conferma && candidati.length > 0 && !da && !a && mittenti.length === 0 && !numero && !tutti && !pulisciNote) {
     console.error(
-      "\nRifiuto la cancellazione di TUTTI i ticket da email senza filtri: aggiungi --da/--a o --mittente, oppure --tutti se sei sicuro."
+      "\nRifiuto la cancellazione di TUTTI i ticket da email senza filtri: aggiungi --da/--a, --mittente o --numero, oppure --tutti se sei sicuro."
     );
     process.exit(1);
   }
 
-  if (!conferma) {
-    console.log("\nAnteprima solamente. Aggiungi --conferma per cancellare.");
-  } else {
+  if (!pulisciNote) {
+    if (!conferma) {
+      console.log("\nAnteprima solamente. Aggiungi --conferma per cancellare.");
+    } else {
     let cancellati = 0;
     for (const c of daCancellare) {
       const fileAllegati = await client.execute({
@@ -209,10 +224,28 @@ async function main() {
       cancellati += 1;
     }
     console.log(`\nCancellati ${cancellati} ticket. Le righe di posta restano come "ignorate".`);
+    }
   }
 
   // -------------------------------------------------------------------------
-  // 2. Orfani (figli che puntano a ticket non esistenti)
+  // 2. Note generate dall'AI (vecchi ticket)
+  // -------------------------------------------------------------------------
+  if (pulisciNote) {
+    const cond = "(note LIKE '[triage/%' OR note LIKE '[AI]%')";
+    const r = await client.execute(`SELECT COUNT(*) AS n FROM tickets WHERE ${cond}`);
+    const n = Number(r.rows[0]?.n ?? 0);
+    console.log("\n=== NOTE AI NEI TICKET ===");
+    console.log(`- ticket con nota AI: ${n}`);
+    if (!conferma) {
+      console.log("Anteprima note. Aggiungi --conferma per svuotarle.");
+    } else if (n > 0) {
+      await client.execute(`UPDATE tickets SET note = NULL WHERE ${cond}`);
+      console.log("Note AI rimosse.");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. Orfani (figli che puntano a ticket non esistenti)
   // -------------------------------------------------------------------------
   if (orfani) {
     const regole: Array<[string, string]> = [

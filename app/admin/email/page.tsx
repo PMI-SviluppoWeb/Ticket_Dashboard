@@ -38,7 +38,7 @@ const EMPTY_FORM: FormData = {
   triage_soglia: 0.7,
   triage_priorita: null,
   triage_operatore: null,
-  triage_osservazione: true,
+  triage_osservazione: false,
 };
 
 // Esito del rilevamento automatico delle impostazioni di posta.
@@ -817,20 +817,11 @@ function CaselleEmailPageContent() {
                       />
                       Triage attivo
                     </label>
-                    <label className="flex items-center gap-2 text-sm text-caldo-testo">
-                      <input
-                        type="checkbox"
-                        checked={form.triage_osservazione !== false}
-                        onChange={(e) => setForm({ ...form, triage_osservazione: e.target.checked })}
-                        className="h-4 w-4 cursor-pointer accent-inchiostro"
-                      />
-                      Modalità osservazione (crea comunque il ticket)
-                    </label>
                   </div>
                   <p className="mt-1 text-xs text-caldo-testo">
-                    In osservazione il triage classifica ma il ticket viene creato sempre: serve a
-                    misurare gli errori nella prima settimana. Disattivala quando i risultati sono
-                    soddisfacenti.
+                    Con il triage attivo l&apos;AI decide se creare il ticket, metterlo in
+                    &quot;Da verificare&quot; o ignorarlo. Gli esiti restano registrati nella
+                    Posta in arrivo.
                   </p>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>

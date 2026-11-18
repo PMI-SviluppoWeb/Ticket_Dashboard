@@ -386,7 +386,7 @@ export async function creaCasella(input: CasellaEmailInput): Promise<EsitoSalvat
       triage_soglia: Number(input.triage_soglia ?? 0.7),
       triage_priorita: input.triage_priorita ?? null,
       triage_operatore: input.triage_operatore?.trim() || null,
-      triage_osservazione: input.triage_osservazione === false ? 0 : 1,
+      triage_osservazione: input.triage_osservazione ? 1 : 0,
       data_creazione: now,
       data_aggiornamento: now,
     });
