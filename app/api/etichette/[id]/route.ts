@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
 import { getEtichetta, updateEtichetta, deleteEtichetta, validaColore } from "@/lib/etichette";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
 
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const esistente = await getEtichetta(params.id);
   if (!esistente) {
@@ -71,10 +66,8 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const ok = await deleteEtichetta(params.id);

@@ -127,9 +127,12 @@ export async function invocaModello(opts: {
       "X-Title": "Ticket Dashboard Agents",
     };
     body = {
-      model: opts.modello || "deepseek/deepseek-v4.1-flash-1017",
+      model: opts.modello || process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
       temperature: 0.3,
       messages,
+      // "Cloud senza conservazione": OpenRouter instrada solo verso provider
+      // che non conservano i dati (data_collection: deny).
+      provider: { data_collection: "deny" },
     };
     if (opts.tools && opts.tools.length > 0) {
       body.tools = opts.tools;

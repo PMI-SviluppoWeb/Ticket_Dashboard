@@ -3,6 +3,7 @@ import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
 import { getCasella, credenzialiCasella, credenzialiGmail } from "@/lib/caselle";
 import { ErroreGmail, ottieniAccessToken, profiloGmail } from "@/lib/gmail-oauth";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -15,14 +16,9 @@ export const dynamic = "force-dynamic";
 // Accetta un body opzionale con `password` per provare una password NUOVA
 // non ancora salvata (la form la invia solo quando e' stata modificata).
 
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!request.headers.get("x-operator-id")) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (request.headers.get("x-operator-ruolo") !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
+async function richiediAdmin(request: Request): Promise<NextResponse | null> {
+  const esito = await richiediOperatore(request, { ruolo: "admin" });
+  return esito.ok ? null : esito.risposta;
 }
 
 // Test per una casella Gmail: refresh grant + getProfile. Se Google accetta
@@ -60,7 +56,7 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const negato = richiediAdmin(request);
+  const negato = await richiediAdmin(request);
   if (negato) return negato;
 
   try {
@@ -102,7 +98,7 @@ export async function POST(
       secure: casella.imap_secure,
       auth: { user: casella.utente, pass },
       logger: false,
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: !casella.tls_non_verificato },
       greetingTimeout: 10_000,
       socketTimeout: 15_000,
     });
@@ -125,7 +121,7 @@ export async function POST(
       connectionTimeout: 8_000,
       greetingTimeout: 8_000,
       socketTimeout: 15_000,
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: !casella.tls_non_verificato },
     });
     try {
       await transporter.verify();

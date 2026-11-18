@@ -1,17 +1,11 @@
 import { NextResponse } from "next/server";
-import { getSession, getOperatorById } from "@/lib/auth";
+import { richiediOperatore } from "@/lib/auth";
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ operator: null }, { status: 401 });
-  }
+export async function GET(request: Request) {
+  const esito = await richiediOperatore(request);
+  if (!esito.ok) return esito.risposta;
 
-  const operator = await getOperatorById(session.operatorId);
-  if (!operator) {
-    return NextResponse.json({ operator: null }, { status: 401 });
-  }
-
+  const operator = esito.operatore;
   return NextResponse.json({
     operator: {
       id: operator.id,

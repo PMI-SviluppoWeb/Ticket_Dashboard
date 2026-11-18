@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "./db";
+import { cellaCsv } from "./csv";
 
 // ===========================================================================
 // Report ore (fatturazione agenzia).
@@ -186,10 +187,7 @@ export async function reportOre(filtro: FiltroReport): Promise<ReportOre> {
 // Export CSV per Excel IT: BOM UTF-8 (altrimenti accenti mojibake) e ";" come
 // separatore (la virgola e' il separatore decimale nelle locale italiane).
 export function reportCsv(report: ReportOre): string {
-  const esc = (v: string | number | null): string => {
-    const s = String(v ?? "");
-    return /[";\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+  const esc = cellaCsv;
   const quando = (iso: string | null): string => {
     if (!iso) return "";
     const d = new Date(iso);

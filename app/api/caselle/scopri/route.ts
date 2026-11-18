@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
 import { scopriConfigurazione } from "@/lib/autoconfig";
+import { richiediOperatore } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Stesso criterio di /api/caselle: le intestazioni x-operator-* le inietta
-// il middleware dopo la verifica della sessione.
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!request.headers.get("x-operator-id")) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (request.headers.get("x-operator-ruolo") !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
+// Stesso criterio di /api/caselle: solo amministratori.
+async function richiediAdmin(request: Request): Promise<NextResponse | null> {
+  const esito = await richiediOperatore(request, { ruolo: "admin" });
+  return esito.ok ? null : esito.risposta;
 }
 
 // GET /api/caselle/scopri?indirizzo=a@b.c
@@ -21,7 +16,7 @@ function richiediAdmin(request: Request): NextResponse | null {
 // l'utente inserisce solo email + password, i server li trova la pipeline
 // di lib/autoconfig.ts (provider noti → ISPDB → MX → SRV → indovinelli).
 export async function GET(request: Request) {
-  const negato = richiediAdmin(request);
+  const negato = await richiediAdmin(request);
   if (negato) return negato;
 
   const indirizzo = new URL(request.url).searchParams.get("indirizzo") ?? "";

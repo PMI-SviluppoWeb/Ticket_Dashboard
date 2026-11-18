@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { authenticateOperator, createSession } from "@/lib/auth";
+import {
+  authenticateOperator,
+  createSession,
+  verificaTentativiLogin,
+  registraTentativoFallito,
+  azzeraTentativi,
+  ipRichiesta,
+} from "@/lib/auth";
 
 export async function POST(request: Request) {
   try {
@@ -13,14 +20,32 @@ export async function POST(request: Request) {
       );
     }
 
-    const operator = await authenticateOperator(email, password);
+    const emailPulita = email.trim();
+    const ip = ipRichiesta(request);
+
+    // Rate limit per email+IP: dopo N fallimenti l'account viene bloccato per
+    // un periodo breve. Il controllo precede l'autenticazione, quindi non
+    // rivela se le credenziali sarebbero state valide.
+    const limite = await verificaTentativiLogin(emailPulita, ip);
+    if (!limite.consentito) {
+      const risposta = NextResponse.json(
+        { error: "Troppi tentativi di accesso. Riprova tra qualche minuto." },
+        { status: 429 }
+      );
+      risposta.headers.set("Retry-After", String(limite.secondiRimanenti));
+      return risposta;
+    }
+
+    const operator = await authenticateOperator(emailPulita, password);
     if (!operator) {
+      await registraTentativoFallito(emailPulita, ip);
       return NextResponse.json(
         { error: "Credenziali non valide." },
         { status: 401 }
       );
     }
 
+    await azzeraTentativi(emailPulita, ip);
     await createSession(operator);
 
     return NextResponse.json({

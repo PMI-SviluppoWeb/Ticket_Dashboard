@@ -138,21 +138,6 @@ CREATE TABLE IF NOT EXISTS email_log (
 CREATE INDEX IF NOT EXISTS idx_email_log_ticket ON email_log (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_log_tipo   ON email_log (tipo);
 
-CREATE TABLE IF NOT EXISTS articoli (
-  id             TEXT PRIMARY KEY,
-  codice         TEXT NOT NULL UNIQUE,
-  nome           TEXT NOT NULL,
-  descrizione    TEXT,
-  categoria      TEXT,
-  prezzo         REAL,
-  unita_misura   TEXT DEFAULT 'pezzo',
-  attivo         INTEGER NOT NULL DEFAULT 1 CHECK (attivo IN (0,1)),
-  data_creazione TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_articoli_codice   ON articoli (codice);
-CREATE INDEX IF NOT EXISTS idx_articoli_categoria ON articoli (categoria);
-
 CREATE TABLE IF NOT EXISTS clienti (
   id               TEXT PRIMARY KEY,
   ragione_sociale  TEXT NOT NULL,
@@ -382,7 +367,7 @@ CREATE TABLE IF NOT EXISTS agenti (
   -- Cosa fa l'agente: assistente (ticket), contenuti (social), clienti (CRM)
   ruolo            TEXT NOT NULL DEFAULT 'assistente'
                    CHECK (ruolo IN ('assistente','contenuti','clienti','custom')),
-  modello          TEXT NOT NULL DEFAULT 'deepseek/deepseek-v4.1-flash-1017',
+  modello          TEXT NOT NULL DEFAULT '',
   system_prompt    TEXT NOT NULL,
   -- JSON array di nomi strumenti (lib/agenti-tools.ts). Se vuoto l'agente e'
   -- solo conversazionale; se non vuoto l'esecuzione usa il loop strumenti
@@ -426,6 +411,126 @@ CREATE TABLE IF NOT EXISTS agenti_esecuzioni (
 
 CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_agente ON agenti_esecuzioni (agente_id, data_creazione);
 CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_stato  ON agenti_esecuzioni (stato);
+
+-- Registro attivita': traccia OGNI mutazione fatta dall'app (utente, agente,
+-- API macchina o sistema). E' la base dell'audit: chi ha fatto cosa, su quale
+-- entita', con quali dettagli. "dettagli" e' JSON libero (mai contenuto
+-- sensibile: niente password o token).
+CREATE TABLE IF NOT EXISTS registro_attivita (
+  id             TEXT PRIMARY KEY,
+  operatore_id   TEXT,
+  origine        TEXT NOT NULL DEFAULT 'utente'
+                 CHECK (origine IN ('utente','agente','api','sistema')),
+  azione         TEXT NOT NULL,
+  entita         TEXT,
+  entita_id      TEXT,
+  dettagli       TEXT,
+  data           TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_registro_data      ON registro_attivita (data);
+CREATE INDEX IF NOT EXISTS idx_registro_entita    ON registro_attivita (entita, entita_id);
+CREATE INDEX IF NOT EXISTS idx_registro_operatore ON registro_attivita (operatore_id);
+
+-- Storico delle transizioni di stato di un ticket. Una riga per passaggio:
+-- serve al calcolo SLA e al tasso di riapertura (CHIUSO/RISOLTO -> NUOVO/IN_CORSO).
+CREATE TABLE IF NOT EXISTS tickets_storico_stati (
+  id             TEXT PRIMARY KEY,
+  ticket_id      TEXT NOT NULL,
+  da_stato       TEXT,
+  a_stato        TEXT NOT NULL,
+  operatore_id   TEXT,
+  operatore      TEXT,
+  data           TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_storico_stati_ticket ON tickets_storico_stati (ticket_id, data);
+
+-- Tentativi di login per email+IP: rate limit e blocco temporaneo. Una riga
+-- per coppia; il conteggio si azzera quando il blocco scade o al login valido.
+CREATE TABLE IF NOT EXISTS tentativi_login (
+  chiave           TEXT PRIMARY KEY,
+  email            TEXT NOT NULL,
+  ip               TEXT NOT NULL,
+  tentativi        INTEGER NOT NULL DEFAULT 0,
+  bloccato_fino    TEXT,
+  ultimo_tentativo TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tentativi_email ON tentativi_login (email);
+CREATE INDEX IF NOT EXISTS idx_tentativi_ip    ON tentativi_login (ip);
+
+-- Chiavi API macchina (bot WhatsApp su Hermes). Si conserva solo l'HASH della
+-- chiave: il valore in chiaro viene mostrato una volta sola alla creazione.
+-- "ambiti" e' un array JSON di permessi (es. ["tickets:read","tickets:write"]).
+CREATE TABLE IF NOT EXISTS chiavi_api (
+  id             TEXT PRIMARY KEY,
+  nome           TEXT NOT NULL,
+  hash           TEXT NOT NULL UNIQUE,
+  prefisso       TEXT NOT NULL,
+  ambiti         TEXT NOT NULL DEFAULT '[]',
+  attiva         INTEGER NOT NULL DEFAULT 1 CHECK (attiva IN (0,1)),
+  ultimo_uso     TEXT,
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chiavi_api_attiva ON chiavi_api (attiva);
+
+-- Idempotenza delle chiamate macchina: la stessa Idempotency-Key restituisce
+-- la risposta gia' prodotta invece di creare un doppione (es. retry del bot).
+CREATE TABLE IF NOT EXISTS chiavi_idempotenza (
+  chiave         TEXT PRIMARY KEY,
+  risposta       TEXT NOT NULL,
+  data_creazione TEXT NOT NULL
+);
+
+-- Proposte degli agenti: uno strumento di scrittura NON modifica nulla, crea
+-- una proposta che un umano approva o rifiuta. L'approvazione esegue le
+-- funzioni esistenti con l'identita' dell'operatore.
+CREATE TABLE IF NOT EXISTS agenti_proposte (
+  id             TEXT PRIMARY KEY,
+  esecuzione_id  TEXT,
+  agente_id      TEXT,
+  tipo           TEXT NOT NULL,
+  payload        TEXT NOT NULL,
+  stato          TEXT NOT NULL DEFAULT 'in_attesa'
+                 CHECK (stato IN ('in_attesa','approvata','rifiutata')),
+  proposta_da    TEXT,
+  deciso_da      TEXT,
+  data_creazione TEXT NOT NULL,
+  data_decisione TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agenti_proposte_stato ON agenti_proposte (stato, data_creazione);
+
+-- Stato di lettura PER OPERATORE. La colonna notifications.letta resta per
+-- compatibilita' con i dati esistenti, ma la verita' e' questa tabella: due
+-- operatori che vedono la stessa notifica hanno letture indipendenti.
+CREATE TABLE IF NOT EXISTS notifications_lette (
+  notification_id TEXT NOT NULL,
+  operatore_id    TEXT NOT NULL,
+  data            TEXT NOT NULL,
+  PRIMARY KEY (notification_id, operatore_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_lette_operatore ON notifications_lette (operatore_id);
+
+-- Allegati arrivati per email e agganciati a un MESSAGGIO (non a una nota
+-- tecnica). La tabella allegati richiede note_tecnica_id NOT NULL: per non
+-- ricostruirla si usa questa accanto, con le stesse regole MIME.
+CREATE TABLE IF NOT EXISTS allegati_messaggi (
+  id             TEXT PRIMARY KEY,
+  messaggio_id   TEXT NOT NULL,
+  ticket_id      TEXT NOT NULL,
+  nome_file      TEXT NOT NULL,
+  nome_originale TEXT NOT NULL,
+  dimensione     INTEGER NOT NULL,
+  tipo_mime      TEXT NOT NULL,
+  data_creazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_allegati_messaggi_messaggio ON allegati_messaggi (messaggio_id);
+CREATE INDEX IF NOT EXISTS idx_allegati_messaggi_ticket    ON allegati_messaggi (ticket_id);
 `;
 
 // NOTA sui due vincoli dello SCHEMA (che viene splittato su ";"):
@@ -509,6 +614,106 @@ async function initSchema(): Promise<void> {
       "ALTER TABLE agenti_esecuzioni ADD COLUMN traccia TEXT"
     );
   } catch { /* Column already exists */ }
+
+  // --- Fase 1: colonne additive (sempre, come le ALTER sopra) ---
+  // `versione_sessione` sta nel JWT: incrementarla revoca tutte le sessioni
+  // aperte dell'operatore (cambio password, disattivazione forzata).
+  const colonneAggiuntive = [
+    "ALTER TABLE operatori ADD COLUMN versione_sessione INTEGER NOT NULL DEFAULT 0",
+    // Deroga TLS esplicita per singola casella (certificati non validi).
+    "ALTER TABLE caselle_email ADD COLUMN tls_non_verificato INTEGER NOT NULL DEFAULT 0",
+    // Colonne strutturate accanto a quelle testuali (che restano e vengono
+    // scritte in parallelo finche' la migrazione non e' consolidata).
+    "ALTER TABLE tickets ADD COLUMN operatore_id TEXT",
+    "ALTER TABLE tickets ADD COLUMN cliente_id TEXT",
+    "ALTER TABLE tickets ADD COLUMN creato_il TEXT",
+    "ALTER TABLE tickets ADD COLUMN aggiornato_il TEXT",
+    "ALTER TABLE tickets ADD COLUMN chiuso_il TEXT",
+    "ALTER TABLE tickets ADD COLUMN preso_in_carico_il TEXT",
+    "ALTER TABLE tickets ADD COLUMN canale TEXT NOT NULL DEFAULT 'manuale'",
+    "ALTER TABLE tickets ADD COLUMN eliminato_il TEXT",
+    // NULL = notifica per tutti gli admin; valorizzato = solo quell'operatore.
+    "ALTER TABLE notifications ADD COLUMN destinatario_id TEXT",
+    // --- Fase 2: triage email e threading ---
+    "ALTER TABLE email_inbox ADD COLUMN esito_ai TEXT",
+    "ALTER TABLE email_inbox ADD COLUMN confidenza REAL",
+    "ALTER TABLE email_inbox ADD COLUMN motivo TEXT",
+    "ALTER TABLE email_inbox ADD COLUMN in_reply_to TEXT",
+    "ALTER TABLE email_inbox ADD COLUMN riferimenti TEXT",
+    // Corpo testuale completo: serve a creare/agganciare il ticket dalla coda
+    // "Da verificare" senza riprocessare l'email.
+    "ALTER TABLE email_inbox ADD COLUMN body_text TEXT",
+    // Esito FINALE del triage: ticket | da_verificare | ignora.
+    // La colonna storica `stato` continua a usare i valori ammessi dal suo
+    // CHECK (processata/errore/ignorata): il nuovo stato vive qui, senza
+    // ricostruire la tabella (migrazione additiva).
+    "ALTER TABLE email_inbox ADD COLUMN stato_triage TEXT",
+    // Correzione umana del triage (materiale per migliorare il prompt).
+    "ALTER TABLE email_inbox ADD COLUMN correzione_umana TEXT",
+    "ALTER TABLE email_inbox ADD COLUMN corretto_da TEXT",
+    "ALTER TABLE email_log ADD COLUMN message_id TEXT",
+    "ALTER TABLE email_log ADD COLUMN in_reply_to TEXT",
+    "ALTER TABLE email_log ADD COLUMN riferimenti TEXT",
+    // Impostazioni di triage per casella e cursore UID persistente.
+    "ALTER TABLE caselle_email ADD COLUMN triage_attivo INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE caselle_email ADD COLUMN triage_soglia REAL NOT NULL DEFAULT 0.7",
+    "ALTER TABLE caselle_email ADD COLUMN triage_priorita TEXT",
+    "ALTER TABLE caselle_email ADD COLUMN triage_operatore TEXT",
+    // 1 = modalita' osservazione: classifica ma crea comunque il ticket.
+    "ALTER TABLE caselle_email ADD COLUMN triage_osservazione INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE caselle_email ADD COLUMN ultimo_uid INTEGER",
+    "ALTER TABLE caselle_email ADD COLUMN uid_validita INTEGER",
+    // --- Fase 4: agenti con proprietario/visibilita e costo per esecuzione ---
+    "ALTER TABLE agenti ADD COLUMN proprietario_id TEXT",
+    "ALTER TABLE agenti ADD COLUMN visibilita TEXT NOT NULL DEFAULT 'libreria'",
+    "ALTER TABLE agenti_esecuzioni ADD COLUMN costo_stimato REAL",
+  ];
+  for (const sql of colonneAggiuntive) {
+    try {
+      await getClient().execute(sql);
+    } catch { /* Column already exists */ }
+  }
+
+  // Modello fisso rimosso: gli agenti che puntavano al vecchio default
+  // vengono riportati a "usa il default di sistema" (configurabile da env).
+  try {
+    await getClient().execute(
+      "UPDATE agenti SET modello = '' WHERE modello = 'deepseek/deepseek-v4.1-flash-1017'"
+    );
+  } catch { /* tabella agenti non ancora presente */ }
+  const indiciAggiuntivi = [
+    "CREATE INDEX IF NOT EXISTS idx_tickets_operatore_id ON tickets (operatore_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_cliente_id ON tickets (cliente_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_creato_il ON tickets (creato_il)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_eliminato_il ON tickets (eliminato_il)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_canale ON tickets (canale)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_destinatario ON notifications (destinatario_id)",
+  ];
+  for (const sql of indiciAggiuntivi) {
+    try {
+      await getClient().execute(sql);
+    } catch { /* Index already exists */ }
+  }
+  // Contatore ticket: una riga in impostazioni, inizializzata al massimo
+  // numero gia' assegnato. Da qui in poi createTicket lo incrementa dentro la
+  // stessa transazione dell'INSERT (niente piu' Date.now(), che collideva).
+  // Il SELECT MAX gira solo la prima volta: un INSERT OR IGNORE lo
+  // rieseguirebbe a ogni avvio (scansione completa di tickets inutile).
+  try {
+    const contatore = await getClient().execute(
+      "SELECT 1 AS uno FROM impostazioni WHERE chiave = 'contatore_ticket'"
+    );
+    if (contatore.rows.length === 0) {
+      await getClient().execute({
+        sql: `INSERT INTO impostazioni (chiave, valore, data_aggiornamento)
+              SELECT 'contatore_ticket',
+                     CAST(COALESCE(MAX(CAST(substr(numero, 6) AS INTEGER)), 0) AS TEXT),
+                     :ts
+              FROM tickets`,
+        args: [new Date().toISOString()],
+      });
+    }
+  } catch { /* gia' inizializzato */ }
 
   // Le migrazioni sotto restano idempotenti, ma la pulizia dei contatti legge
   // tutta la tabella `tickets`: gira una volta per database, non a ogni avvio.
@@ -600,24 +805,15 @@ async function initSchema(): Promise<void> {
     await getClient().execute("ALTER TABLE tickets ADD COLUMN tempo_effettivo_minuti INTEGER");
   } catch { /* Column already exists */ }
 
-  // Seed: popola tabella clienti con dati di esempio se vuota
+  // Backfill v3: colonne strutturate dai valori testuali storici. Gira una
+  // volta per database; nessuna colonna vecchia viene rimossa e le colonne
+  // testuali continuano a essere scritte in parallelo.
   try {
-    const { rows } = await getClient().execute("SELECT COUNT(*) AS cnt FROM clienti");
-    const count = (rows[0] as Record<string, unknown>)?.cnt as number;
-    if (count === 0) {
-      const now = new Date().toISOString();
-      await client.executeMultiple(`
-        INSERT INTO clienti (id, ragione_sociale, nome_contatto, email, telefono, indirizzo, citta, provincia, cap, partita_iva, attivo, data_creazione)
-        VALUES
-          ('CLI-001', 'Rossi & Figli S.r.l.', 'Marco Rossi', 'marco.rossi@rossifigli.it', '02 1234567', 'Via Roma 10', 'Milano', 'MI', '20100', 'IT01234567890', 1, '${now}'),
-          ('CLI-002', 'Bianchi Distribuzioni S.p.A.', 'Laura Bianchi', 'laura.bianchi@bianchidist.it', '06 9876543', 'Corso Italia 25', 'Roma', 'RM', '00100', 'IT09876543210', 1, '${now}'),
-          ('CLI-003', 'Verdi Cloud Services', 'Giuseppe Verdi', 'giuseppe.verdi@verdicloud.it', '011 5551234', 'Via Torino 42', 'Torino', 'TO', '10100', 'IT11223344556', 1, '${now}'),
-          ('CLI-004', 'Neri Techno Solutions', 'Francesca Neri', 'francesca.neri@neritech.it', '055 6789012', 'Via Firenze 8', 'Firenze', 'FI', '50100', 'IT66778899001', 1, '${now}'),
-          ('CLI-005', 'Gialli & Partners', 'Alessandro Gialli', 'alessandro.gialli@giallipartners.it', '081 3456789', 'Via Napoli 15', 'Napoli', 'NA', '80100', 'IT55443322110', 1, '${now}');
-      `);
-    }
-  } catch {
-    // Seeding non necessario o tabella già popolata
+    await backfillStrutturato(client);
+  } catch (err) {
+    // Non blocca l'app: la versione dello schema non viene registrata, quindi
+    // il prossimo avvio riprova.
+    console.error("Backfill struttura ticket non applicato:", err);
   }
 
   // Solo se tutte le migrazioni sono andate a termine si registra la versione:
@@ -638,7 +834,118 @@ async function initSchema(): Promise<void> {
 // v2: i ticket arrivati dal centralino/agent MCP hanno i recapiti dentro il
 // testo libero del contatto (email e telefono non avevano colonna scritta):
 // si riestrae tutto.
-const SCHEMA_VERSION = 2;
+// v3: colonne strutturate (operatore_id, cliente_id, date ISO), storico stati,
+// registro attivita', chiavi API, contatore ticket. Backfill per nome esatto.
+const SCHEMA_VERSION = 3;
+
+// Accetta i formati che convivono nella tabella: ISO e "dd/mm/yyyy, hh:mm"
+// (quello scritto da tickets.now()). Restituisce ISO UTC, oppure null se non
+// riconosce la data: meglio una colonna vuota che una data inventata.
+function dataOraIso(valore: unknown): string | null {
+  if (typeof valore !== "string") return null;
+  const s = valore.trim();
+  if (!s) return null;
+
+  const isoDiretto = Date.parse(s);
+  if (Number.isFinite(isoDiretto)) return new Date(isoDiretto).toISOString();
+
+  const m = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (m) {
+    const [, g, me, a, o = "0", mi = "0", se = "0"] = m;
+    const dt = new Date(Number(a), Number(me) - 1, Number(g), Number(o), Number(mi), Number(se));
+    if (!Number.isNaN(dt.getTime())) return dt.toISOString();
+  }
+  return null;
+}
+
+async function backfillStrutturato(client: Client): Promise<void> {
+  const [ticketRes, operatoriRes, clientiRes] = await client.batch(
+    [
+      {
+        sql: `SELECT id, operatore, cliente, data_creazione, data_aggiornamento,
+                     data_chiusura, data_inizio_lavoro
+              FROM tickets
+              WHERE operatore_id IS NULL OR cliente_id IS NULL OR creato_il IS NULL`,
+        args: [],
+      },
+      { sql: "SELECT id, nome FROM operatori", args: [] },
+      { sql: "SELECT id, ragione_sociale FROM clienti", args: [] },
+    ],
+    "read"
+  );
+
+  const perNomeOperatore = new Map<string, string>();
+  for (const r of operatoriRes.rows) {
+    if (typeof r.nome === "string" && typeof r.id === "string") {
+      perNomeOperatore.set(r.nome, r.id);
+    }
+  }
+  const perNomeCliente = new Map<string, string>();
+  for (const r of clientiRes.rows) {
+    if (typeof r.ragione_sociale === "string" && typeof r.id === "string") {
+      perNomeCliente.set(r.ragione_sociale, r.id);
+    }
+  }
+
+  let senzaOperatore = 0;
+  let senzaCliente = 0;
+  let dateNonRiconosciute = 0;
+  const statements: BatchStatement[] = [];
+
+  for (const t of ticketRes.rows) {
+    const id = String(t.id);
+    const operatoreId =
+      typeof t.operatore === "string" ? (perNomeOperatore.get(t.operatore) ?? null) : null;
+    const clienteId =
+      typeof t.cliente === "string" ? (perNomeCliente.get(t.cliente) ?? null) : null;
+
+    if (t.operatore && !operatoreId) senzaOperatore += 1;
+    if (t.cliente && !clienteId) senzaCliente += 1;
+
+    const creato = dataOraIso(t.data_creazione);
+    const aggiornato = dataOraIso(t.data_aggiornamento);
+    const chiuso = dataOraIso(t.data_chiusura);
+    const preso = dataOraIso(t.data_inizio_lavoro);
+    if (!creato) dateNonRiconosciute += 1;
+
+    statements.push({
+      sql: `UPDATE tickets
+            SET operatore_id = COALESCE(operatore_id, @operatore_id),
+                cliente_id = COALESCE(cliente_id, @cliente_id),
+                creato_il = COALESCE(creato_il, @creato_il),
+                aggiornato_il = COALESCE(aggiornato_il, @aggiornato_il),
+                chiuso_il = COALESCE(chiuso_il, @chiuso_il),
+                preso_in_carico_il = COALESCE(preso_in_carico_il, @preso_in_carico_il)
+            WHERE id = @id`,
+      params: {
+        id,
+        operatore_id: operatoreId,
+        cliente_id: clienteId,
+        creato_il: creato,
+        aggiornato_il: aggiornato,
+        chiuso_il: chiuso,
+        preso_in_carico_il: preso,
+      },
+    });
+  }
+
+  if (statements.length > 0) {
+    // A blocchi: un batch unico con migliaia di statement puo' superare i
+    // limiti della richiesta HTTP verso Turso.
+    for (let i = 0; i < statements.length; i += 200) {
+      await client.batch(statements.slice(i, i + 200), "write");
+    }
+  }
+
+  console.log(
+    `[db] Backfill v3: ${ticketRes.rows.length} ticket esaminati, ` +
+      `${senzaOperatore} senza operatore abbinato, ` +
+      `${senzaCliente} senza cliente abbinato, ` +
+      `${dateNonRiconosciute} con data non riconosciuta.`
+  );
+}
 
 async function leggiVersioneSchema(client: Client): Promise<number> {
   try {

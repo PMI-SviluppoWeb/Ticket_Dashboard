@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCliente } from "@/lib/clienti";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
 
 // Scheda cliente in sola lettura: l'anagrafica comanda l'ERP, qui si
 // consulta. Il cliente puo' non essere in anagrafica (ticket libero).
@@ -13,9 +10,8 @@ export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  if (!getOperatorId(request)) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const cliente = await getCliente(params.id);

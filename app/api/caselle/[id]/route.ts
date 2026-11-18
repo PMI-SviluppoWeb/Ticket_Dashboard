@@ -2,34 +2,18 @@ import { NextResponse } from "next/server";
 import { getCasella, aggiornaCasella, eliminaCasella } from "@/lib/caselle";
 import { invalidaTransporter } from "@/lib/email";
 import { encryptionKeyConfigurata } from "@/lib/cifratura";
+import { richiediOperatore } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 import type { CasellaEmailInput } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
-function getOperatorRole(request: Request): string | null {
-  return request.headers.get("x-operator-ruolo");
-}
-
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!getOperatorId(request)) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (getOperatorRole(request) !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
-}
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   try {
     const casella = await getCasella(params.id);
@@ -47,8 +31,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   const body = (await request.json().catch(() => ({}))) as Partial<CasellaEmailInput>;
 
@@ -68,6 +52,19 @@ export async function PATCH(
     }
     // Il transporter SMTP cached della vecchia config non e' piu' valido.
     invalidaTransporter(params.id);
+
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "casella.aggiornata",
+      entita: "casella_email",
+      entitaId: params.id,
+      dettagli: {
+        indirizzo: esito.casella.indirizzo,
+        campi: Object.keys(body).filter((k) => k !== "password"),
+        password_cambiata: passwordNuova,
+      },
+    });
+
     return NextResponse.json({ casella: esito.casella });
   } catch (err) {
     console.error("PATCH /api/caselle/[id]", err);
@@ -79,8 +76,8 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   try {
     const esito = await eliminaCasella(params.id);
@@ -88,6 +85,14 @@ export async function DELETE(
       return NextResponse.json({ error: esito.error ?? "Errore." }, { status: 400 });
     }
     invalidaTransporter(params.id);
+
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "casella.eliminata",
+      entita: "casella_email",
+      entitaId: params.id,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/caselle/[id]", err);

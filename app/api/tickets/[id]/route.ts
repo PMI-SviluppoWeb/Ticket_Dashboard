@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { join } from "path";
 import { readFile } from "fs/promises";
 import { deleteTicket, getTicket, updateTicket, sanificaContatti } from "@/lib/tickets";
-import { getOperatorById } from "@/lib/auth";
+import { richiediOperatore } from "@/lib/auth";
+import { getConfigSla } from "@/lib/sla-config";
+import { inScadenza, valutaSla } from "@/lib/sla";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { emailAssegnazione, emailChiusura } from "@/lib/email-templates";
@@ -16,44 +18,52 @@ const UPLOADS_DIR = join(process.cwd(), "uploads");
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 const STATI: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
 
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+
   const ticket = await getTicket(params.id);
   if (!ticket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
-  // Prima di mostrarlo si estraggono i recapiti nascosti nel testo: il
-  // centralino puo' non essere aggiornato e continua a scriverli dentro
-  // `contatto`, e senza questo passaggio email/telefono restano vuoti.
-  return NextResponse.json(await sanificaContatti(ticket));
+  const config = await getConfigSla();
+  const esito = valutaSla(
+    {
+      id: ticket.id,
+      numero: ticket.numero,
+      priorita: ticket.priorita,
+      stato: ticket.stato,
+      creatoIl: ticket.creato_il ?? null,
+      presoIl: ticket.preso_in_carico_il ?? null,
+      chiusoIl: ticket.chiuso_il ?? null,
+    },
+    config
+  );
+  const slaEvidenza = esito
+    ? esito.presaScaduta || esito.risoluzioneScaduta
+      ? "scaduto"
+      : inScadenza(esito, Date.now())
+        ? "in_scadenza"
+        : null
+    : null;
+  return NextResponse.json({
+    ...(await sanificaContatti(ticket)),
+    sla_evidenza: slaEvidenza,
+  });
 }
 
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+  const operator = auth.operatore;
 
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-
-  // Operatore e ticket sono indipendenti: una lettura in parallelo invece di
-  // due in serie.
-  const [operator, existingTicket] = await Promise.all([
-    getOperatorById(operatorId),
-    getTicket(params.id),
-  ]);
-  if (!operator) {
-    return NextResponse.json({ error: "Operatore non trovato." }, { status: 401 });
-  }
-
+  const existingTicket = await getTicket(params.id);
   if (!existingTicket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
@@ -110,7 +120,10 @@ export async function PATCH(
   }
   if (body.tempo_effettivo_minuti !== undefined) patch.tempo_effettivo_minuti = body.tempo_effettivo_minuti;
 
-  const ticket = await updateTicket(params.id, patch, existingTicket);
+  const ticket = await updateTicket(params.id, patch, existingTicket, {
+    operatoreId: auth.operatore.id,
+    operatore: auth.operatore.nome,
+  });
   if (!ticket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }
@@ -168,6 +181,7 @@ async function inviaNotifica(
       subject: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
       html,
       casellaId,
+      ticketId: ticket.id,
     });
     await logEmail({
       ticket_id: ticket.id,
@@ -177,6 +191,7 @@ async function inviaNotifica(
       corpo: html,
       stato: result.ok ? "inviata" : "errore",
       errore: result.error ?? null,
+      message_id: result.messageId ?? null,
     });
     return;
   }
@@ -232,6 +247,7 @@ async function inviaNotifica(
     html,
     attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
     casellaId,
+    ticketId: ticket.id,
   });
   await logEmail({
     ticket_id: ticket.id,
@@ -241,6 +257,7 @@ async function inviaNotifica(
     corpo: html,
     stato: result.ok ? "inviata" : "errore",
     errore: result.error ?? null,
+    message_id: result.messageId ?? null,
   });
 }
 
@@ -248,13 +265,11 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
+  // Eliminazione definitiva (ticket + figli + file su disco): solo admin.
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-
-  const ok = await deleteTicket(params.id);
+  const ok = await deleteTicket(params.id, { operatoreId: auth.operatore.id });
   if (!ok) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
   }

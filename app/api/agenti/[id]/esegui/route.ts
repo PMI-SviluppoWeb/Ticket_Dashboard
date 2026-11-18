@@ -1,28 +1,23 @@
 import { NextResponse } from "next/server";
-import { eseguiAgente } from "@/lib/agenti";
+import { eseguiAgente, getAgente, puoUsareAgente } from "@/lib/agenti";
+import { richiediOperatore } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!request.headers.get("x-operator-id")) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (request.headers.get("x-operator-ruolo") !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
-}
-
-// POST /api/agenti/[id]/esegui — invoca l'agente con un input di prova e
-// ritorna l'esecuzione completa (output, durata, token). Sincrona: la UI
-// attende la risposta del modello.
+// POST /api/agenti/[id]/esegui — invoca l'agente. Aperto agli operatori per
+// gli agenti di libreria e per i propri agenti personali.
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+
+  const agente = await getAgente(params.id);
+  if (!puoUsareAgente(agente, auth.operatore)) {
+    return NextResponse.json({ error: "Agente non trovato." }, { status: 404 });
+  }
 
   try {
     const body = (await request.json().catch(() => ({}))) as {
@@ -38,7 +33,7 @@ export async function POST(
       input: body.input,
       contesto:
         body.contesto && typeof body.contesto === "object" ? body.contesto : undefined,
-      operatoreId: request.headers.get("x-operator-id") ?? undefined,
+      operatoreId: auth.operatore.id,
     });
 
     if (!esito.ok) {

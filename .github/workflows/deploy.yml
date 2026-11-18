@@ -22,6 +22,12 @@ jobs:
       - name: Ripristina .env dai secret
         run: cp /opt/secrets/ticket-dashboard.env .env
 
+      # Gate: se typecheck o test falliscono il job si ferma qui e il container
+      # in produzione non viene toccato. Gira nello stesso ambiente della build
+      # (stage `check` del Dockerfile), quindi non serve Node sul runner.
+      - name: Verifiche statiche (typecheck + test)
+        run: docker build --target check .
+
       - name: Build e avvio
         run: docker compose up -d --build --wait --wait-timeout 120
 

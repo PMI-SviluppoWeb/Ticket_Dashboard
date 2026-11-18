@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { credenzialiPresenti, ErroreGoogle, listCalendars } from "@/lib/google-calendar";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,15 +15,10 @@ export const dynamic = "force-dynamic";
 // Status scelti qui e documentati (non esistono precedenti nel repo):
 //  503 = sincronizzazione non configurata (mancano le variabili d'ambiente)
 //  502 = Google non raggiungibile o ha risposto male (upstream fallito)
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
 
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   if (!credenzialiPresenti()) {
     return NextResponse.json(

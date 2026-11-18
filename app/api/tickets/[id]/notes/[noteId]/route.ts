@@ -1,22 +1,14 @@
 import { NextResponse } from "next/server";
 import { deleteTechnicalNote, updateTechnicalNote } from "@/lib/tickets";
-
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
-function getOperatorRole(request: Request): string | null {
-  return request.headers.get("x-operator-ruolo");
-}
+import { richiediOperatore } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string; noteId: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const body = (await request.json()) as {
     titolo?: string;
@@ -39,6 +31,14 @@ export async function PATCH(
   // Solo la nota: il client ha gia' il ticket e ricarica lui quando serve
   // (dopo gli allegati). Restituire l'intero ticket era un batch di quattro
   // SELECT il cui risultato veniva scartato.
+  await registra({
+    operatoreId: auth.operatore.id,
+    azione: "nota_tecnica.aggiornata",
+    entita: "nota_tecnica",
+    entitaId: params.noteId,
+    dettagli: { ticket_id: params.id, campi: Object.keys(body) },
+  });
+
   return NextResponse.json({ nota: note });
 }
 
@@ -46,22 +46,23 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string; noteId: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  const operatorRole = getOperatorRole(request);
-  
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  
   // Only admins can delete notes
-  if (operatorRole !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   const ok = await deleteTechnicalNote(params.noteId);
   if (!ok) {
     return NextResponse.json({ error: "Nota tecnica non trovata." }, { status: 404 });
   }
+
+  await registra({
+    operatoreId: auth.operatore.id,
+    azione: "nota_tecnica.eliminata",
+    entita: "nota_tecnica",
+    entitaId: params.noteId,
+    dettagli: { ticket_id: params.id },
+  });
+
   // Niente rilettura del ticket: il client ricarica da se' dopo un'eliminazione.
   return NextResponse.json({ ok: true });
 }

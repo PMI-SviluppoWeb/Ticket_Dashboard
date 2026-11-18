@@ -97,6 +97,10 @@ async function processEmail(
       // Stesso payload dell'IMAP worker: il webhook registra la casella in
       // email_inbox e usa lo stesso account per l'autorisposta.
       casellaId: casella.id,
+      headers: messaggio.headers,
+      inReplyTo: messaggio.inReplyTo,
+      references: messaggio.references,
+      attachments: messaggio.attachments,
     }),
   });
 
@@ -110,7 +114,9 @@ async function processEmail(
   // Solo a POST riuscito si rimuove UNREAD: mai marcare prima, altrimenti
   // un guasto del webhook perderebbe il messaggio.
   await segnaLetta(accessToken, gmailMessageId);
-  console.log(`[gmail] Ticket creato: ${result.ticket ?? "N/A"}`);
+  console.log(
+    `[gmail] Esito: ${result.ticket ?? result.esito ?? result.skipped ?? "N/A"}`
+  );
 }
 
 async function pollCasella(casella: CasellaGmailWorker): Promise<void> {

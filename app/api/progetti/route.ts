@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCliente } from "@/lib/clienti";
 import { insertProgetto, listProgetti, STATI_PROGETTO } from "@/lib/progetti";
 import { parsePersone } from "@/lib/persone";
+import { richiediOperatore } from "@/lib/auth";
 import type { Priorita, ProgettoInput, StatoProgetto } from "@/lib/types";
 import { RE_DATETIME_LOCAL } from "@/lib/calendario";
 
@@ -12,15 +13,10 @@ const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 // Nessun controllo di ruolo su questa area: la scelta "tutti gli utenti
 // autenticati creano e modificano" e' deliberata e diverge dal resto del repo
 // (es. /api/knowledge e' admin-only).
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
 
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q") ?? "";
@@ -49,10 +45,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const body = (await request.json().catch(() => ({}))) as Partial<ProgettoInput>;

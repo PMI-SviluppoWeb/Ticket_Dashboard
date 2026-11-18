@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { richiediOperatore } from "@/lib/auth";
 import { reportOre, reportCsv, type FiltroReport } from "@/lib/report-ore";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,8 @@ function meseCorrente(): { da: string; a: string } {
 
 export async function GET(request: Request) {
   try {
-    await requireAdmin();
+    const auth = await richiediOperatore(request, { ruolo: "admin" });
+    if (!auth.ok) return auth.risposta;
 
     const { searchParams } = new URL(request.url);
     const predefinito = meseCorrente();

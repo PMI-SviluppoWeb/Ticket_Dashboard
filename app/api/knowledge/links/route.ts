@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
 import { listKnowledgeLinks, insertKnowledgeLink } from "@/lib/knowledge-links";
+import { richiediOperatore } from "@/lib/auth";
 import type { KnowledgeLinkInput } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q") ?? undefined;
@@ -23,20 +18,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const body = (await request.json()) as KnowledgeLinkInput;
   if (!body.titolo?.trim() || !body.url?.trim()) {
     return NextResponse.json({ error: "Titolo e URL sono obbligatori." }, { status: 400 });
   }
-
-  try {
-    new URL(body.url);
-  } catch {
-    return NextResponse.json({ error: "URL non valido." }, { status: 400 });
+  if (!urlHttp(body.url)) {
+    return NextResponse.json({ error: "L'URL deve essere http o https." }, { status: 400 });
   }
 
   const link = await insertKnowledgeLink({
@@ -47,4 +37,13 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json(link, { status: 201 });
+}
+
+function urlHttp(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }

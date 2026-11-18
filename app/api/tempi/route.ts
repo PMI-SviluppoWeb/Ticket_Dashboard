@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getOperatorById } from "@/lib/auth";
+import { richiediOperatore } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 import { getAttivita } from "@/lib/attivita";
 import { getTicket } from "@/lib/tickets";
 import {
@@ -14,10 +15,7 @@ import type { VoceTempoInput } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 // Il cronometro e' personale: ogni rotta lavora SOLO sulle voci dell'operatore
-// in sessione. L'id arriva dal middleware, mai dal body.
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
+// in sessione. L'identita' viene dalla sessione, mai dal body.
 
 // GET /api/tempi
 //   ?attivita_minuti=<progetto_id>  -> totali per task del progetto
@@ -25,10 +23,8 @@ function getOperatorId(request: Request): string | null {
 //                                      e minuti per operatore, dalle voci reali
 //   (nessun parametro)              -> voce aperta + ultime voci dell'operatore
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const { searchParams } = new URL(request.url);
   const progettoId = searchParams.get("attivita_minuti");
@@ -48,8 +44,8 @@ export async function GET(request: Request) {
     }
 
     const [aperta, voci] = await Promise.all([
-      getVoceAperta(operatorId),
-      listVociOperatore(operatorId, { limite: 50 }),
+      getVoceAperta(auth.operatore.id),
+      listVociOperatore(auth.operatore.id, { limite: 50 }),
     ]);
     return NextResponse.json({ aperta, voci });
   } catch (err) {
@@ -63,10 +59,8 @@ export async function GET(request: Request) {
 // Nessun bersaglio = tempo generico: e' un caso reale (riunione, telefonata),
 // non un errore.
 export async function POST(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const body = (await request.json().catch(() => ({}))) as VoceTempoInput;
@@ -83,13 +77,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Il nome dell'operatore viene dal DB, non dal client: la colonna
+    // Il nome dell'operatore viene dalla sessione, non dal client: la colonna
     // `operatore` e' denormalizzata per i riepiloghi e non deve poter essere
     // scelta da chi chiama.
-    const operatore = await getOperatorById(operatorId);
-    if (!operatore) {
-      return NextResponse.json({ error: "Operatore non trovato." }, { status: 401 });
-    }
+    const operatore = auth.operatore;
 
     // Le FK non sono applicate dal DB: il bersaglio va verificato qui.
     if (attivitaId && !(await getAttivita(attivitaId))) {
@@ -103,6 +94,14 @@ export async function POST(request: Request) {
       { id: operatore.id, nome: operatore.nome },
       { attivita_id: attivitaId, ticket_id: ticketId, descrizione: body.descrizione ?? null }
     );
+
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "voce_tempo.avviata",
+      entita: "voce_tempo",
+      entitaId: voce.id,
+      dettagli: { attivita_id: attivitaId, ticket_id: ticketId },
+    });
 
     return NextResponse.json(voce, { status: 201 });
   } catch (err) {

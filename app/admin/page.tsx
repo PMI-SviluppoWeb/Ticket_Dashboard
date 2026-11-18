@@ -540,7 +540,7 @@ export default function AdminPage() {
               </div>
               <h3 className="text-center text-lg font-semibold text-inchiostro">Elimina definitivamente?</h3>
               <p className="mt-2 text-center text-sm text-caldo-testo">
-                Questa azione è <strong className="text-inchiostro">irreversibile</strong>. L'operatore verrà eliminato permanentemente dal sistema e non potrà più essere recuperato.
+                Questa azione è <strong className="text-inchiostro">irreversibile</strong>. L&apos;operatore verrà eliminato permanentemente dal sistema e non potrà più essere recuperato.
               </p>
               <div className="mt-5 flex items-center justify-end gap-3">
                 <button

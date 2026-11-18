@@ -1,5 +1,6 @@
 import { startImapWorker } from "../lib/imap-worker";
 import { startGmailWorker } from "../lib/gmail-worker";
+import { startSyncClientiWorker } from "../lib/sync-worker";
 
 console.log("=================================");
 console.log("  Email Worker (IMAP + Gmail) - Docker");
@@ -14,11 +15,12 @@ console.log(`  OAuth Gmail: ${process.env.GOOGLE_GMAIL_CLIENT_ID ? "configurato"
 console.log(`  OpenRouter: ${process.env.OPENROUTER_API_KEY ? "configurato" : "(non configurato - fallback regex)"}`);
 console.log("=================================");
 
-// Vedi scripts/start-worker.ts: stesso processo, due loop indipendenti.
+// Vedi scripts/start-worker.ts: stesso processo, loop indipendenti.
 Promise.all([
   startImapWorker(),
   startGmailWorker(),
+  startSyncClientiWorker(),
 ]).catch((err) => {
-  console.error("Errore fatale nell'avvio dei worker email:", err);
+  console.error("Errore fatale nell'avvio dei worker:", err);
   process.exit(1);
 });

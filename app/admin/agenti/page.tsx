@@ -35,7 +35,7 @@ const EMPTY_FORM: FormData = {
   nome: "",
   descrizione: "",
   ruolo: "assistente",
-  modello: "deepseek/deepseek-v4.1-flash-1017",
+  modello: "",
   system_prompt: "",
   strumenti: [],
   provider: "auto",
@@ -468,7 +468,7 @@ export default function AgentiPage() {
                     value={form.modello ?? ""}
                     onChange={(e) => setForm({ ...form, modello: e.target.value })}
                     className="w-full rounded-control border border-crema-contorno px-3 py-2 font-mono text-xs text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-                    placeholder="deepseek/deepseek-v4.1-flash-1017"
+                    placeholder="es. openai/gpt-4o-mini (vuoto = default di sistema)"
                   />
                   <p className="mt-1 text-xs text-caldo-testo">
                     ID modello OpenRouter (vuoto = predefinito).
@@ -780,7 +780,7 @@ export default function AgentiPage() {
               Default di sistema: <strong className="text-inchiostro">Hermes</strong> — gli agenti
               senza strumenti girano con memoria persistente (memoria per-agente, continua tra le
               esecuzioni). Gli agenti <strong className="text-inchiostro">con strumenti</strong>{" "}
-              ("dati app") girano sempre su OpenRouter: le query sui dati le esegue l&apos;app.
+              (&quot;dati app&quot;) girano sempre su OpenRouter: le query sui dati le esegue l&apos;app.
             </>
           ) : provider === "openrouter" ? (
             <>

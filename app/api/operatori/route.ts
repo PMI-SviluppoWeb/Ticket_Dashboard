@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { richiediOperatore } from "@/lib/auth";
 
 export async function GET(request: Request) {
   try {
+    const auth = await richiediOperatore(request);
+    if (!auth.ok) return auth.risposta;
+
     const { searchParams } = new URL(request.url);
     const all = searchParams.get("all") === "true";
 
-    const operatorRole = request.headers.get("x-operator-ruolo");
+    const operatorRole = auth.operatore.ruolo;
 
     let query: string;
     if (all && operatorRole === "admin") {

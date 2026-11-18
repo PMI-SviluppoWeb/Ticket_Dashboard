@@ -14,6 +14,12 @@ import { decifraSecret } from "./cifratura";
 export interface CasellaWorker {
   id: string;
   indirizzo: string;
+  tlsNonVerificato: boolean;
+  // Cursore persistente: UID piu' alto gia' processato e UIDVALIDITY della
+  // cartella al momento della scrittura. Se UIDVALIDITY cambia, gli UID non
+  // sono piu' comparabili e il cursore va azzerato.
+  ultimoUid: number | null;
+  uidValidita: number | null;
   imap: { host: string; port: number; secure: boolean; user: string; pass: string };
   smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
 }
@@ -30,7 +36,8 @@ export async function caselleAbilitatePerWorker(): Promise<CasellaWorker[]> {
   try {
     result = await client.execute(
       `SELECT id, indirizzo, imap_host, imap_port, imap_secure,
-              smtp_host, smtp_port, smtp_secure, utente, password_cifrata
+              smtp_host, smtp_port, smtp_secure, utente, password_cifrata, tls_non_verificato,
+              ultimo_uid, uid_validita
        FROM caselle_email
        WHERE abilitata = 1 AND tipo = 'imap'
        ORDER BY indirizzo`
@@ -40,7 +47,8 @@ export async function caselleAbilitatePerWorker(): Promise<CasellaWorker[]> {
     if (!messaggio.includes("tipo")) throw err;
     result = await client.execute(
       `SELECT id, indirizzo, imap_host, imap_port, imap_secure,
-              smtp_host, smtp_port, smtp_secure, utente, password_cifrata
+              smtp_host, smtp_port, smtp_secure, utente, password_cifrata, tls_non_verificato,
+              ultimo_uid, uid_validita
        FROM caselle_email
        WHERE abilitata = 1
        ORDER BY indirizzo`
@@ -60,12 +68,18 @@ export async function caselleAbilitatePerWorker(): Promise<CasellaWorker[]> {
       smtp_secure: number;
       utente: string;
       password_cifrata: string;
+      tls_non_verificato: number;
+      ultimo_uid: number | null;
+      uid_validita: number | null;
     };
     try {
       const pass = decifraSecret(r.password_cifrata);
       out.push({
         id: r.id,
         indirizzo: r.indirizzo,
+        tlsNonVerificato: Number(r.tls_non_verificato) === 1,
+        ultimoUid: r.ultimo_uid != null ? Number(r.ultimo_uid) : null,
+        uidValidita: r.uid_validita != null ? Number(r.uid_validita) : null,
         imap: {
           host: r.imap_host,
           port: Number(r.imap_port),
@@ -88,6 +102,33 @@ export async function caselleAbilitatePerWorker(): Promise<CasellaWorker[]> {
     }
   }
   return out;
+}
+
+// Salva il cursore UID della casella. Scrittura best-effort: se fallisce, il
+// worker riprocessa qualche email in piu' (deduplicate dal webhook) ma non si
+// ferma.
+export async function salvaCursoreCasella(
+  casellaId: string,
+  ultimoUid: number,
+  uidValidita: number | null
+): Promise<void> {
+  // La casella configurata da .env non ha una riga DB.
+  if (!casellaId || casellaId === "env") return;
+  try {
+    const client = getTursoClient();
+    await client.execute({
+      sql: `UPDATE caselle_email
+            SET ultimo_uid = @uid, uid_validita = COALESCE(@validita, uid_validita)
+            WHERE id = @id`,
+      args: {
+        uid: ultimoUid,
+        validita: uidValidita,
+        id: casellaId,
+      },
+    });
+  } catch (err) {
+    console.error(`[caselle] Cursore non salvato per ${casellaId}:`, err);
+  }
 }
 
 export interface CasellaGmailWorker {

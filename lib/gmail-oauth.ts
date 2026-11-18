@@ -277,6 +277,14 @@ export interface EmailScaricata {
   body: string;
   bodyHtml?: string;
   date?: Date;
+  headers?: Record<string, string>;
+  inReplyTo?: string;
+  references?: string;
+  attachments?: Array<{
+    filename: string;
+    contentType?: string;
+    contentBase64: string;
+  }>;
 }
 
 // Scarica il messaggio completo (format=raw) e lo parse con PostalMime —
@@ -292,6 +300,42 @@ export async function scaricaMessaggio(
   if (!data.raw) return null;
   const raw = Buffer.from(data.raw, "base64url");
   const parsed = await PostalMime.parse(raw);
+
+  const headers: Record<string, string> = {};
+  const headerUtili = new Set([
+    "auto-submitted",
+    "precedence",
+    "list-unsubscribe",
+    "in-reply-to",
+    "references",
+    "message-id",
+  ]);
+  for (const h of parsed.headers ?? []) {
+    const chiave = String(h.key ?? "").toLowerCase();
+    if (!headerUtili.has(chiave)) continue;
+    headers[chiave] = Array.isArray(h.value)
+      ? h.value.join(" ")
+      : String(h.value ?? "");
+  }
+
+  const attachments = (parsed.attachments ?? [])
+    .filter((a) => a && a.content != null && a.filename)
+    .map((a) => {
+      const contenuto = a.content;
+      const buffer =
+        typeof contenuto === "string"
+          ? Buffer.from(contenuto)
+          : Buffer.from(new Uint8Array(contenuto as ArrayBuffer));
+      return {
+        filename: String(a.filename),
+        contentType: a.mimeType ?? undefined,
+        contentBase64: buffer.toString("base64"),
+        dimensione: buffer.length,
+      };
+    })
+    .filter((a) => a.dimensione > 0 && a.dimensione <= 10 * 1024 * 1024)
+    .map(({ dimensione: _dimensione, ...rest }) => rest);
+
   return {
     messageId: parsed.messageId ?? `<${id}@gmail>`,
     from: parsed.from?.address ?? "",
@@ -301,6 +345,10 @@ export async function scaricaMessaggio(
     bodyHtml: parsed.html ?? undefined,
     // PostalMime tipizza `date` come stringa: il webhook la vuole ISO.
     date: parsed.date ? new Date(parsed.date) : undefined,
+    headers,
+    inReplyTo: headers["in-reply-to"],
+    references: headers["references"],
+    attachments,
   };
 }
 
@@ -326,6 +374,9 @@ export async function inviaEmailGmail(
     html: string;
     from?: string;
     attachments?: { filename: string; path: string }[];
+    messageId?: string;
+    inReplyTo?: string | null;
+    references?: string[];
   }
 ): Promise<void> {
   const headers = [
@@ -334,6 +385,11 @@ export async function inviaEmailGmail(
     "MIME-Version: 1.0",
   ];
   if (opts.from) headers.unshift(`From: ${opts.from}`);
+  if (opts.messageId) headers.push(`Message-ID: ${opts.messageId}`);
+  if (opts.inReplyTo) headers.push(`In-Reply-To: ${opts.inReplyTo}`);
+  if (opts.references && opts.references.length > 0) {
+    headers.push(`References: ${opts.references.join(" ")}`);
+  }
 
   let mime: string;
   if (opts.attachments?.length) {

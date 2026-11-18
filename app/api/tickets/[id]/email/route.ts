@@ -5,11 +5,15 @@ import { emailManuale } from "@/lib/email-templates";
 import { logEmail, getEmailLog } from "@/lib/email-log";
 import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
 import { casellaPerTicket } from "@/lib/caselle";
+import { richiediOperatore } from "@/lib/auth";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+
   try {
     const log = await getEmailLog(params.id);
     return NextResponse.json({ log });
@@ -23,10 +27,8 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = request.headers.get("x-operator-id");
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const found = await getTicket(params.id);
@@ -75,6 +77,7 @@ export async function POST(
       html,
       // Risponde dalla casella che ha ricevuto la mail del ticket.
       casellaId: (await casellaPerTicket(ticket.id)) ?? undefined,
+      ticketId: ticket.id,
     });
 
     await logEmail({
@@ -85,6 +88,7 @@ export async function POST(
       corpo: html,
       stato: result.ok ? "inviata" : "errore",
       errore: result.error ?? null,
+      message_id: result.messageId ?? null,
     });
 
     if (!result.ok) {

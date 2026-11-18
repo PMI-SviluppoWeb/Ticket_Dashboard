@@ -27,7 +27,7 @@ import type {
   VoceTraccia,
 } from "./types";
 
-const MODELLO_DEFAULT = "deepseek/deepseek-v4.1-flash-1017";
+const MODELLO_DEFAULT = process.env.AI_MODEL_DEFAULT ?? "openai/gpt-4o-mini";
 
 // Limite di turni del loop strumenti (1 turno = 1 chiamata modello).
 // Oltre: un'ultima chiamata FORZATA senza tools per produrre la risposta.
@@ -44,6 +44,8 @@ interface AgenteRow {
   provider: string | null;
   attivo: number;
   creato_da: string | null;
+  proprietario_id: string | null;
+  visibilita: string | null;
   data_creazione: string;
   data_aggiornamento: string;
 }
@@ -74,28 +76,62 @@ function aTipo(r: AgenteRow): Agente {
     ) as ProviderAgente,
     attivo: Number(r.attivo) === 1,
     creato_da: r.creato_da,
+    proprietario_id: r.proprietario_id,
+    visibilita: r.visibilita === "personale" ? "personale" : "libreria",
     data_creazione: r.data_creazione,
     data_aggiornamento: r.data_aggiornamento,
   };
 }
 
 const SELECT_AGENTI = `SELECT id, nome, descrizione, ruolo, modello, system_prompt,
-  strumenti, provider, attivo, creato_da, data_creazione, data_aggiornamento FROM agenti`;
+  strumenti, provider, attivo, creato_da, proprietario_id, visibilita,
+  data_creazione, data_aggiornamento FROM agenti`;
 
 // ---------------------------------------------------------------------------
 // CRUD
 // ---------------------------------------------------------------------------
-export async function listaAgenti(opts?: { soloAttivi?: boolean }): Promise<Agente[]> {
-  const sql = opts?.soloAttivi
-    ? `${SELECT_AGENTI} WHERE attivo = 1 ORDER BY nome`
-    : `${SELECT_AGENTI} ORDER BY nome`;
-  const rows = await db.prepare(sql).all();
+export async function listaAgenti(opts?: {
+  soloAttivi?: boolean;
+  // Se valorizzato, restituisce la libreria piu' gli agenti personali di
+  // quell'operatore (usato dalle route aperte agli operatori).
+  operatoreId?: string;
+}): Promise<Agente[]> {
+  const where: string[] = [];
+  const params: Record<string, string | number> = {};
+  if (opts?.soloAttivi) where.push("attivo = 1");
+  if (opts?.operatoreId) {
+    where.push("(visibilita = 'libreria' OR proprietario_id = @operatore_id)");
+    params.operatore_id = opts.operatoreId;
+  }
+  const sql = `${SELECT_AGENTI}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY nome`;
+  const rows = await db.prepare(sql).all(params);
   return (rows as unknown as AgenteRow[]).map(aTipo);
 }
 
 export async function getAgente(id: string): Promise<Agente | null> {
   const row = await db.prepare(`${SELECT_AGENTI} WHERE id = ?`).get(id);
   return row ? aTipo(row as unknown as AgenteRow) : null;
+}
+
+// Un agente e' gestibile (modifica/eliminazione) se l'operatore e' admin
+// oppure ne e' il proprietario e l'agente e' personale.
+export function puoGestireAgente(
+  agente: Agente | null,
+  operatore: { id: string; ruolo: string }
+): boolean {
+  if (!agente) return false;
+  if (operatore.ruolo === "admin") return true;
+  return agente.visibilita === "personale" && agente.proprietario_id === operatore.id;
+}
+
+// Un agente e' eseguibile/visibile se e' di libreria oppure e' il proprio.
+export function puoUsareAgente(
+  agente: Agente | null,
+  operatore: { id: string; ruolo: string }
+): boolean {
+  if (!agente) return false;
+  if (operatore.ruolo === "admin") return true;
+  return agente.visibilita === "libreria" || agente.proprietario_id === operatore.id;
 }
 
 export type EsitoSalvataggioAgente =
@@ -113,6 +149,13 @@ function validaInput(input: Partial<AgenteInput>, parziale: boolean): string | n
   }
   if (input.provider !== undefined && !PROVIDER_VALIDI.includes(input.provider as ProviderAgente)) {
     return "Provider non valido.";
+  }
+  if (
+    input.visibilita !== undefined &&
+    input.visibilita !== "libreria" &&
+    input.visibilita !== "personale"
+  ) {
+    return "Visibilita' non valida.";
   }
   if (!parziale || input.system_prompt !== undefined) {
     if (typeof input.system_prompt !== "string" || !input.system_prompt.trim()) {
@@ -144,9 +187,11 @@ export async function creaAgente(
   await db
     .prepare(
       `INSERT INTO agenti (id, nome, descrizione, ruolo, modello, system_prompt,
-        strumenti, provider, attivo, creato_da, data_creazione, data_aggiornamento)
+        strumenti, provider, attivo, creato_da, proprietario_id, visibilita,
+        data_creazione, data_aggiornamento)
        VALUES (@id, @nome, @descrizione, @ruolo, @modello, @system_prompt,
-        @strumenti, @provider, @attivo, @creato_da, @now, @now)`
+        @strumenti, @provider, @attivo, @creato_da, @proprietario_id, @visibilita,
+        @now, @now)`
     )
     .run({
       id,
@@ -159,6 +204,8 @@ export async function creaAgente(
       provider: input.provider ?? "auto",
       attivo: input.attivo === false ? 0 : 1,
       creato_da: operatoreId ?? null,
+      proprietario_id: operatoreId ?? null,
+      visibilita: input.visibilita === "personale" ? "personale" : "libreria",
       now,
     });
 
@@ -193,6 +240,7 @@ export async function aggiornaAgente(
   if (input.strumenti !== undefined) assegna("strumenti", JSON.stringify(input.strumenti));
   if (input.provider !== undefined) assegna("provider", input.provider);
   if (input.attivo !== undefined) assegna("attivo", input.attivo ? 1 : 0);
+  if (input.visibilita !== undefined) assegna("visibilita", input.visibilita);
 
   await db
     .prepare(`UPDATE agenti SET ${campi.join(", ")} WHERE id = @id`)
@@ -313,6 +361,17 @@ export async function eseguiAgente(opts: {
   // Solo strumenti validi (lista cross-checkata anche in validazione).
   const strumenti = strumentiPerAgente(agente.strumenti);
   const providerScelto = risolviProvider(agente, strumenti.length > 0);
+
+  // Hermes ha accesso a un terminale e a memoria propria: non deve leggere i
+  // contenuti scritti dai clienti (ticket/email). Gli agenti "assistente"
+  // girano quindi solo su OpenRouter.
+  if (providerScelto === "hermes" && agente.ruolo === "assistente") {
+    return {
+      ok: false,
+      error:
+        "Hermes non e' ammesso per gli agenti che leggono i contenuti dei clienti. Usa OpenRouter.",
+    };
+  }
 
   if (providerScelto === "hermes") {
     if (!process.env.HERMES_API_KEY) {
@@ -460,9 +519,10 @@ export async function eseguiAgente(opts: {
         input,
         modello: agente.modello,
         provider: providerScelto,
-        // Sessione/chiave di memoria: solo Hermes li usa.
-        sessionId: `ticket-${agente.id}`,
-        sessionKey: `ticket-dashboard:${agente.id}`,
+        // Sessione/chiave di memoria: solo Hermes li usa. La sessione e' PER
+        // OPERATORE: due operatori non condividono la memoria dell'agente.
+        sessionId: `ticket-${agente.id}-${opts.operatoreId ?? "anon"}`,
+        sessionKey: `ticket-dashboard:${agente.id}:${opts.operatoreId ?? "anon"}`,
       });
       output = esito.output;
       promptTokens = esito.promptTokens ?? 0;
@@ -477,8 +537,12 @@ export async function eseguiAgente(opts: {
       traccia,
     });
 
-    const esecuzioni = await listaEsecuzioni(agente.id, 1);
-    const esecuzione = esecuzioni[0];
+    const riga = await db
+      .prepare(`${SELECT_ESECUZIONI} WHERE id = ?`)
+      .get(id);
+    const esecuzione = riga
+      ? aTipoEsecuzione(riga as unknown as EsecuzioneRow)
+      : null;
     if (!esecuzione) return { ok: false, error: "Errore di log dell'esecuzione." };
     return { ok: true, esecuzione };
   } catch (err) {

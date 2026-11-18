@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -104,9 +104,10 @@ type RigaTicket = {
   data_aggiornamento: string;
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireAdmin();
+    const auth = await richiediOperatore(request, { ruolo: "admin" });
+    if (!auth.ok) return auth.risposta;
 
     const adesso = Date.now();
     const soglia = isoLocale(adesso - GIORNI_SOGGIA * 86_400_000);

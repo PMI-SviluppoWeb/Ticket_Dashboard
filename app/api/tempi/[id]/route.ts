@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { eliminaVoce, fermaVoce } from "@/lib/tempi";
+import { richiediOperatore } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 
 export const dynamic = "force-dynamic";
 
-// Il cronometro e' personale: l'id dell'operatore arriva dal middleware.
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
+// Il cronometro e' personale: l'identita' viene dalla sessione.
 
 // PATCH /api/tempi/[id] — ferma la voce.
 // Andare a capo su una voce gia' chiusa e' idempotente: un doppio clic non
@@ -15,10 +14,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+  const operatorId = auth.operatore.id;
 
   try {
     const voce = await fermaVoce(params.id, operatorId);
@@ -28,6 +26,12 @@ export async function PATCH(
     if (!voce) {
       return NextResponse.json({ error: "Voce di tempo non trovata." }, { status: 404 });
     }
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "voce_tempo.fermata",
+      entita: "voce_tempo",
+      entitaId: params.id,
+    });
     return NextResponse.json(voce);
   } catch (err) {
     console.error("PATCH /api/tempi/[id]", err);
@@ -42,10 +46,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+  const operatorId = auth.operatore.id;
 
   try {
     const ok = await eliminaVoce(params.id, operatorId);
@@ -55,6 +58,12 @@ export async function DELETE(
         { status: 404 }
       );
     }
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "voce_tempo.eliminata",
+      entita: "voce_tempo",
+      entitaId: params.id,
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/tempi/[id]", err);

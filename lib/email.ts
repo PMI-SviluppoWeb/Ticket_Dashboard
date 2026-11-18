@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { credenzialiCasella, credenzialiGmail, getCasellaDefault } from "./caselle";
 import { inviaEmailGmail, ottieniAccessToken } from "./gmail-oauth";
+import { contestoThreading, oggettoConToken } from "./threading";
 
 interface TransporterConfig {
   host: string;
@@ -9,6 +10,7 @@ interface TransporterConfig {
   secure: boolean;
   user: string;
   pass: string;
+  tlsNonVerificato?: boolean;
 }
 
 // Timeout comuni: senza, un SMTP che non risponde lascia appesa la richiesta
@@ -19,8 +21,13 @@ const TIMEOUT = {
   connectionTimeout: 8_000,
   greetingTimeout: 8_000,
   socketTimeout: 15_000,
-  tls: { rejectUnauthorized: false },
 };
+
+function tlsOpzioni(nonVerificato?: boolean) {
+  // Default sicuro: certificato non valido = connessione rifiutata.
+  // La deroga e' per-casella (caselle_email.tls_non_verificato), non globale.
+  return { rejectUnauthorized: !nonVerificato };
+}
 
 // Transporter di fallback: SMTP globale in .env. Usato quando nessuna casella
 // del DB e' applicabile (nessuna predefinita, oppure ENCRYPTION_KEY mancante).
@@ -33,6 +40,7 @@ const transporterEnv = nodemailer.createTransport({
     pass: process.env.SMTP_PASS,
   },
   ...TIMEOUT,
+  tls: tlsOpzioni(false),
 });
 
 // Cache dei transporter per casella: crearne uno per invio farebbe aprire e
@@ -55,12 +63,16 @@ function transporterPerConfig(cfg: TransporterConfig): Transporter {
     secure: cfg.secure,
     auth: { user: cfg.user, pass: cfg.pass },
     ...TIMEOUT,
+    tls: tlsOpzioni(cfg.tlsNonVerificato),
   });
 }
 
 export interface EmailResult {
   ok: boolean;
   error?: string;
+  // Message-ID dell'email inviata: va salvato in email_log per agganciare la
+  // risposta del cliente (In-Reply-To).
+  messageId?: string;
 }
 
 // Id sintetico della casella configurata in .env: non esiste nel DB, quindi
@@ -92,7 +104,7 @@ async function risolviMittente(
     if (cred) {
       let t = transporterCache.get(id);
       if (!t) {
-        t = transporterPerConfig(cred.smtp);
+        t = transporterPerConfig({ ...cred.smtp, tlsNonVerificato: cred.tlsNonVerificato });
         transporterCache.set(id, t);
       }
       return { transporter: t, from: cred.indirizzo };
@@ -111,7 +123,7 @@ async function risolviMittente(
     if (cred) {
       let t = transporterCache.get(predefinita.id);
       if (!t) {
-        t = transporterPerConfig(cred.smtp);
+        t = transporterPerConfig({ ...cred.smtp, tlsNonVerificato: cred.tlsNonVerificato });
         transporterCache.set(predefinita.id, t);
       }
       return { transporter: t, from: cred.indirizzo };
@@ -125,14 +137,44 @@ async function risolviMittente(
   };
 }
 
+function dominioMessageId(from: string): string {
+  const at = from.lastIndexOf("@");
+  const dominio = at >= 0 ? from.slice(at + 1).replace(/[^a-zA-Z0-9.-]/g, "") : "";
+  return dominio || process.env.EMAIL_MESSAGE_DOMAIN || "support-desk.local";
+}
+
 export async function sendEmail(opts: {
   to: string;
   subject: string;
   html: string;
   attachments?: { filename: string; path: string }[];
   casellaId?: string;
+  // Ticket di riferimento: aggiunge [TICK-xxxx] all'oggetto e imposta
+  // In-Reply-To/References sull'ultima email della conversazione.
+  ticketId?: string;
+  // Override espliciti (es. autorisposta alla email appena ricevuta).
+  inReplyTo?: string | null;
+  riferimenti?: string[];
 }): Promise<EmailResult> {
   try {
+    const oggettoBase = opts.subject;
+    let inReplyTo = opts.inReplyTo ?? null;
+    let riferimenti = [...(opts.riferimenti ?? [])];
+    let oggetto = oggettoBase;
+
+    if (opts.ticketId) {
+      const ctx = await contestoThreading(opts.ticketId);
+      oggetto = oggettoConToken(oggettoBase, ctx.numero);
+      if (!inReplyTo && ctx.lastMessageId) inReplyTo = ctx.lastMessageId;
+      riferimenti = Array.from(
+        new Set([
+          ...ctx.references,
+          ...riferimenti,
+          ...(inReplyTo ? [inReplyTo] : []),
+        ])
+      );
+    }
+
     // Caselle Gmail (OAuth): invio via Gmail API con il refresh token, nessun
     // SMTP e nessuna password. Vale sia per la risposta a una mail ricevuta
     // (casellaId esplicito) sia per il mittente predefinito.
@@ -142,16 +184,20 @@ export async function sendEmail(opts: {
       const gmail = await credenzialiGmail(idMittente);
       if (gmail) {
         const accessToken = await ottieniAccessToken(gmail.refreshToken);
+        const messageId = `<${crypto.randomUUID()}@${dominioMessageId(gmail.indirizzo)}>`;
         await inviaEmailGmail(accessToken, {
           to: opts.to,
-          subject: opts.subject,
+          subject: oggetto,
           html: opts.html,
           attachments: opts.attachments,
           from: gmail.etichetta && gmail.etichetta !== gmail.indirizzo
             ? `${gmail.etichetta} <${gmail.indirizzo}>`
             : gmail.indirizzo,
+          messageId,
+          inReplyTo,
+          references: riferimenti,
         });
-        return { ok: true };
+        return { ok: true, messageId };
       }
       // Non e' una casella Gmail: si procede con la risoluzione SMTP sotto.
     }
@@ -166,14 +212,20 @@ export async function sendEmail(opts: {
       };
     }
 
+    const messageId = `<${crypto.randomUUID()}@${dominioMessageId(mittente.from)}>`;
     await mittente.transporter.sendMail({
       from: mittente.from,
       to: opts.to,
-      subject: opts.subject,
+      subject: oggetto,
       html: opts.html,
       attachments: opts.attachments,
+      messageId,
+      headers: {
+        ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
+        ...(riferimenti.length > 0 ? { References: riferimenti.join(" ") } : {}),
+      },
     });
-    return { ok: true };
+    return { ok: true, messageId };
   } catch (err) {
     console.error("Errore invio email:", err);
     return { ok: false, error: err instanceof Error ? err.message : "Errore sconosciuto." };

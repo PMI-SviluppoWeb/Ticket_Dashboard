@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
 import { listClienti } from "@/lib/clienti";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q") ?? "";

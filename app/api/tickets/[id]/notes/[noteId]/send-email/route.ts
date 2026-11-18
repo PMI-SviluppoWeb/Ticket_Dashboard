@@ -8,6 +8,7 @@ import { emailAggiornamentoCliente } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
 import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
 import { casellaPerTicket } from "@/lib/caselle";
+import { richiediOperatore } from "@/lib/auth";
 import type { TechnicalNote, Allegato } from "@/lib/types";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -16,11 +17,8 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string; noteId: string } }
 ) {
-  const operatorId = request.headers.get("x-operator-id");
-
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const found = await getTicket(params.id);
   if (!found) {
@@ -102,6 +100,7 @@ export async function POST(
     attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
     // Stesso account che ha ricevuto la mail del ticket.
     casellaId: (await casellaPerTicket(ticket.id)) ?? undefined,
+    ticketId: ticket.id,
   });
 
   await logEmail({
@@ -112,6 +111,7 @@ export async function POST(
     corpo: html,
     stato: result.ok ? "inviata" : "errore",
     errore: result.error ?? null,
+    message_id: result.messageId ?? null,
   });
 
   if (!result.ok) {

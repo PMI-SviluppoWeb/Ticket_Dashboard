@@ -1,35 +1,17 @@
 import { NextResponse } from "next/server";
 import { listaCaselle, creaCasella } from "@/lib/caselle";
 import { encryptionKeyConfigurata } from "@/lib/cifratura";
+import { richiediOperatore } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 import type { CasellaEmailInput } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 // Le caselle email contengono le credenziali di accesso ai server di posta:
-// lettura e scrittura sono riservate agli amministratori (stesso criterio di
-// /api/google/config in scrittura, ma stretto anche in lettura perche' qui
-// l'elenco indirizzi/host e' sensibile).
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
-function getOperatorRole(request: Request): string | null {
-  return request.headers.get("x-operator-ruolo");
-}
-
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!getOperatorId(request)) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (getOperatorRole(request) !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
-}
-
+// lettura e scrittura sono riservate agli amministratori.
 export async function GET(request: Request) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   try {
     const caselle = await listaCaselle();
@@ -46,8 +28,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   if (!encryptionKeyConfigurata()) {
     return NextResponse.json(
@@ -71,11 +53,35 @@ export async function POST(request: Request) {
       password: typeof body.password === "string" ? body.password : undefined,
       abilitata: body.abilitata !== false,
       predefinita: Boolean(body.predefinita),
+      tls_non_verificato: Boolean(body.tls_non_verificato),
+      triage_attivo: body.triage_attivo !== false,
+      triage_soglia: Number(body.triage_soglia ?? 0.7),
+      triage_priorita:
+        body.triage_priorita === "BASSA" ||
+        body.triage_priorita === "MEDIA" ||
+        body.triage_priorita === "ALTA"
+          ? body.triage_priorita
+          : null,
+      triage_operatore:
+        typeof body.triage_operatore === "string" ? body.triage_operatore : null,
+      triage_osservazione: body.triage_osservazione !== false,
     });
 
     if (!esito.ok) {
       return NextResponse.json({ error: esito.error }, { status: 400 });
     }
+
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "casella.creata",
+      entita: "casella_email",
+      entitaId: esito.casella.id,
+      dettagli: {
+        indirizzo: esito.casella.indirizzo,
+        tls_non_verificato: esito.casella.tls_non_verificato,
+      },
+    });
+
     return NextResponse.json({ casella: esito.casella }, { status: 201 });
   } catch (err) {
     console.error("POST /api/caselle", err);

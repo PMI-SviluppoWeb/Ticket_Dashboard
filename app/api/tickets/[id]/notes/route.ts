@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { insertTechnicalNote } from "@/lib/tickets";
+import { richiediOperatore } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = request.headers.get("x-operator-id");
-  const operatorName = request.headers.get("x-operator-email")?.split("@")[0];
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const operatorName = auth.operatore.nome;
 
   const body = (await request.json()) as {
     titolo?: string;
@@ -47,6 +47,14 @@ export async function POST(
     problema,
     soluzione,
     operatore: body.operatore ?? operatorName ?? null,
+  });
+
+  await registra({
+    operatoreId: auth.operatore.id,
+    azione: "nota_tecnica.creata",
+    entita: "nota_tecnica",
+    entitaId: nota.id,
+    dettagli: { ticket_id: params.id, titolo },
   });
 
   return NextResponse.json({ nota }, { status: 201 });

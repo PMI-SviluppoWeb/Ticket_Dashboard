@@ -28,13 +28,20 @@ interface CasellaRow {
   gmail_da_epoch: number | null;
   abilitata: number;
   predefinita: number;
+  tls_non_verificato: number;
+  triage_attivo: number;
+  triage_soglia: number;
+  triage_priorita: string | null;
+  triage_operatore: string | null;
+  triage_osservazione: number;
   data_creazione: string;
   data_aggiornamento: string;
 }
 
 const SELECT_CASELLE = `SELECT id, etichetta, indirizzo, tipo, imap_host, imap_port, imap_secure,
   smtp_host, smtp_port, smtp_secure, utente, password_cifrata, oauth_refresh_token_cifrata,
-  gmail_da_epoch, abilitata, predefinita,
+  gmail_da_epoch, abilitata, predefinita, tls_non_verificato,
+  triage_attivo, triage_soglia, triage_priorita, triage_operatore, triage_osservazione,
   data_creazione, data_aggiornamento FROM caselle_email`;
 
 function aTipo(r: CasellaRow): CasellaEmail {
@@ -52,6 +59,15 @@ function aTipo(r: CasellaRow): CasellaEmail {
     utente: r.utente,
     abilitata: Number(r.abilitata) === 1,
     predefinita: Number(r.predefinita) === 1,
+    tls_non_verificato: Number(r.tls_non_verificato) === 1,
+    triage_attivo: Number(r.triage_attivo ?? 1) === 1,
+    triage_soglia: Number(r.triage_soglia ?? 0.7),
+    triage_priorita:
+      r.triage_priorita === "BASSA" || r.triage_priorita === "MEDIA" || r.triage_priorita === "ALTA"
+        ? r.triage_priorita
+        : null,
+    triage_operatore: r.triage_operatore ?? null,
+    triage_osservazione: Number(r.triage_osservazione ?? 0) === 1,
     ha_password: Boolean(r.password_cifrata),
     data_creazione: r.data_creazione,
     data_aggiornamento: r.data_aggiornamento,
@@ -86,6 +102,7 @@ export async function getCasellaDefault(): Promise<CasellaEmail | null> {
 export async function credenzialiCasella(id: string): Promise<{
   id: string;
   indirizzo: string;
+  tlsNonVerificato: boolean;
   smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
 } | null> {
   const row = (await db.prepare(`${SELECT_CASELLE} WHERE id = ?`).get(id)) as
@@ -97,6 +114,7 @@ export async function credenzialiCasella(id: string): Promise<{
     return {
       id: row.id,
       indirizzo: row.indirizzo,
+      tlsNonVerificato: Number(row.tls_non_verificato) === 1,
       smtp: {
         host: row.smtp_host,
         port: Number(row.smtp_port),
@@ -228,6 +246,54 @@ export async function collegaGmail(input: {
 
 export type EsitoSalvataggio = { ok: true; casella: CasellaEmail } | { ok: false; error: string };
 
+// Impostazioni di triage della casella. Default prudenti: triage attivo,
+// soglia alta, modalita' osservazione attiva (classifica ma crea comunque il
+// ticket) finche' un admin non la disattiva.
+export interface ConfigTriageCasella {
+  attivo: boolean;
+  soglia: number;
+  priorita: "BASSA" | "MEDIA" | "ALTA" | null;
+  operatore: string | null;
+  osservazione: boolean;
+}
+
+export async function configTriageCasella(
+  casellaId: string | null | undefined
+): Promise<ConfigTriageCasella> {
+  const predefinita: ConfigTriageCasella = {
+    attivo: true,
+    soglia: 0.7,
+    priorita: null,
+    operatore: null,
+    osservazione: false,
+  };
+  if (!casellaId) return predefinita;
+  try {
+    const row = await db
+      .prepare(
+        `SELECT triage_attivo, triage_soglia, triage_priorita, triage_operatore, triage_osservazione
+         FROM caselle_email WHERE id = ?`
+      )
+      .get(casellaId);
+    if (!row) return predefinita;
+    const priorita = row.triage_priorita;
+    return {
+      attivo: Number(row.triage_attivo ?? 1) === 1,
+      soglia: Number(row.triage_soglia ?? 0.7),
+      priorita:
+        priorita === "BASSA" || priorita === "MEDIA" || priorita === "ALTA"
+          ? priorita
+          : null,
+      operatore: typeof row.triage_operatore === "string" && row.triage_operatore
+        ? row.triage_operatore
+        : null,
+      osservazione: Number(row.triage_osservazione ?? 0) === 1,
+    };
+  } catch {
+    return predefinita;
+  }
+}
+
 function validaInput(input: Partial<CasellaEmailInput>, richiediPassword: boolean): string | null {
   const stringa = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
   if (!stringa(input.etichetta) || input.etichetta.length > 200) return "Etichetta non valida.";
@@ -294,9 +360,11 @@ export async function creaCasella(input: CasellaEmailInput): Promise<EsitoSalvat
     .prepare(
       `INSERT INTO caselle_email (id, etichetta, indirizzo, imap_host, imap_port, imap_secure,
         smtp_host, smtp_port, smtp_secure, utente, password_cifrata, abilitata, predefinita,
+        tls_non_verificato, triage_attivo, triage_soglia, triage_priorita, triage_operatore, triage_osservazione,
         data_creazione, data_aggiornamento)
        VALUES (@id, @etichetta, @indirizzo, @imap_host, @imap_port, @imap_secure,
         @smtp_host, @smtp_port, @smtp_secure, @utente, @password_cifrata, @abilitata, @predefinita,
+        @tls_non_verificato, @triage_attivo, @triage_soglia, @triage_priorita, @triage_operatore, @triage_osservazione,
         @data_creazione, @data_aggiornamento)`
     )
     .run({
@@ -313,6 +381,12 @@ export async function creaCasella(input: CasellaEmailInput): Promise<EsitoSalvat
       password_cifrata: cifraSecret(input.password as string),
       abilitata: input.abilitata ? 1 : 0,
       predefinita: input.predefinita ? 1 : 0,
+      tls_non_verificato: input.tls_non_verificato ? 1 : 0,
+      triage_attivo: input.triage_attivo === false ? 0 : 1,
+      triage_soglia: Number(input.triage_soglia ?? 0.7),
+      triage_priorita: input.triage_priorita ?? null,
+      triage_operatore: input.triage_operatore?.trim() || null,
+      triage_osservazione: input.triage_osservazione === false ? 0 : 1,
       data_creazione: now,
       data_aggiornamento: now,
     });
@@ -345,6 +419,12 @@ export async function aggiornaCasella(
     password: input.password && input.password.length > 0 ? input.password : undefined,
     abilitata: input.abilitata ?? corrente.abilitata,
     predefinita: input.predefinita ?? corrente.predefinita,
+    tls_non_verificato: input.tls_non_verificato ?? corrente.tls_non_verificato,
+    triage_attivo: input.triage_attivo ?? corrente.triage_attivo,
+    triage_soglia: input.triage_soglia ?? corrente.triage_soglia,
+    triage_priorita: input.triage_priorita !== undefined ? input.triage_priorita : corrente.triage_priorita,
+    triage_operatore: input.triage_operatore !== undefined ? input.triage_operatore : corrente.triage_operatore,
+    triage_osservazione: input.triage_osservazione ?? corrente.triage_osservazione,
   };
 
   // Le caselle Gmail non hanno password (solo refresh token): la richiesta
@@ -364,12 +444,12 @@ export async function aggiornaCasella(
   if (!merged.predefinita && corrente.predefinita) await impostaDefault(null);
 
   const campi: string[] = ["data_aggiornamento = @data_aggiornamento"];
-  const params: Record<string, string | number> = {
+  const params: Record<string, string | number | null> = {
     id,
     data_aggiornamento: new Date().toISOString(),
   };
 
-  const assegna = (col: string, valore: string | number) => {
+  const assegna = (col: string, valore: string | number | null) => {
     campi.push(`${col} = @${col}`);
     params[col] = valore;
   };
@@ -385,6 +465,12 @@ export async function aggiornaCasella(
   assegna("utente", merged.utente.trim());
   assegna("abilitata", merged.abilitata ? 1 : 0);
   assegna("predefinita", merged.predefinita ? 1 : 0);
+  assegna("tls_non_verificato", merged.tls_non_verificato ? 1 : 0);
+  assegna("triage_attivo", merged.triage_attivo === false ? 0 : 1);
+  assegna("triage_soglia", Number(merged.triage_soglia ?? 0.7));
+  assegna("triage_priorita", merged.triage_priorita ?? null);
+  assegna("triage_operatore", merged.triage_operatore?.trim() || null);
+  assegna("triage_osservazione", merged.triage_osservazione === false ? 0 : 1);
   if (merged.password) assegna("password_cifrata", cifraSecret(merged.password));
 
   await db

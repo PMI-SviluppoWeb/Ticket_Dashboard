@@ -33,6 +33,12 @@ const EMPTY_FORM: FormData = {
   password: "",
   abilitata: true,
   predefinita: false,
+  tls_non_verificato: false,
+  triage_attivo: true,
+  triage_soglia: 0.7,
+  triage_priorita: null,
+  triage_operatore: null,
+  triage_osservazione: true,
 };
 
 // Esito del rilevamento automatico delle impostazioni di posta.
@@ -267,6 +273,12 @@ function CaselleEmailPageContent() {
       password: "",
       abilitata: c.abilitata,
       predefinita: c.predefinita,
+      tls_non_verificato: c.tls_non_verificato,
+      triage_attivo: c.triage_attivo,
+      triage_soglia: c.triage_soglia,
+      triage_priorita: c.triage_priorita,
+      triage_operatore: c.triage_operatore,
+      triage_osservazione: c.triage_osservazione,
     });
     setEditingId(c.id);
     setShowForm(true);
@@ -718,6 +730,23 @@ function CaselleEmailPageContent() {
                     />
                     Connessione sicura (TLS/SSL — porta 465; per 587 con STARTTLS lascia spuntato)
                   </label>
+
+                  <label className="mt-3 flex items-start gap-2 text-sm text-caldo-testo">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.tls_non_verificato)}
+                      onChange={(e) => setForm({ ...form, tls_non_verificato: e.target.checked })}
+                      className="mt-0.5 h-4 w-4 cursor-pointer accent-inchiostro"
+                    />
+                    <span>
+                      Accetta certificato TLS non valido (solo se necessario)
+                      <span className="mt-0.5 block text-xs text-stato-urgenza-testo">
+                        Disattiva la verifica del certificato per questa casella. Usalo solo con un
+                        server interno che sai essere affidabile: senza verifica la connessione non
+                        e&apos; protetta da un certificato attendibile.
+                      </span>
+                    </span>
+                  </label>
                 </div>
 
                 <div>
@@ -773,6 +802,91 @@ function CaselleEmailPageContent() {
                     </label>
                   </div>
                 )}
+
+                <div className="sm:col-span-2 border-t border-crema-bordo pt-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-caldo-testo">
+                    Triage delle email in arrivo
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                    <label className="flex items-center gap-2 text-sm text-caldo-testo">
+                      <input
+                        type="checkbox"
+                        checked={form.triage_attivo !== false}
+                        onChange={(e) => setForm({ ...form, triage_attivo: e.target.checked })}
+                        className="h-4 w-4 cursor-pointer accent-inchiostro"
+                      />
+                      Triage attivo
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-caldo-testo">
+                      <input
+                        type="checkbox"
+                        checked={form.triage_osservazione !== false}
+                        onChange={(e) => setForm({ ...form, triage_osservazione: e.target.checked })}
+                        className="h-4 w-4 cursor-pointer accent-inchiostro"
+                      />
+                      Modalità osservazione (crea comunque il ticket)
+                    </label>
+                  </div>
+                  <p className="mt-1 text-xs text-caldo-testo">
+                    In osservazione il triage classifica ma il ticket viene creato sempre: serve a
+                    misurare gli errori nella prima settimana. Disattivala quando i risultati sono
+                    soddisfacenti.
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                      <label htmlFor="triage-soglia" className="mb-1 block text-sm font-medium text-caldo-testo">
+                        Soglia di confidenza
+                      </label>
+                      <input
+                        id="triage-soglia"
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={form.triage_soglia ?? 0.7}
+                        onChange={(e) => setForm({ ...form, triage_soglia: Number(e.target.value) })}
+                        className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="triage-priorita" className="mb-1 block text-sm font-medium text-caldo-testo">
+                        Priorità predefinita
+                      </label>
+                      <select
+                        id="triage-priorita"
+                        value={form.triage_priorita ?? ""}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            triage_priorita:
+                              e.target.value === "BASSA" || e.target.value === "MEDIA" || e.target.value === "ALTA"
+                                ? e.target.value
+                                : null,
+                          })
+                        }
+                        className="w-full rounded-control border border-crema-contorno bg-white px-3 py-2 text-sm text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                      >
+                        <option value="">Usa quella dell&apos;AI</option>
+                        <option value="BASSA">Bassa</option>
+                        <option value="MEDIA">Media</option>
+                        <option value="ALTA">Alta</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="triage-operatore" className="mb-1 block text-sm font-medium text-caldo-testo">
+                        Operatore predefinito
+                      </label>
+                      <input
+                        id="triage-operatore"
+                        type="text"
+                        value={form.triage_operatore ?? ""}
+                        onChange={(e) => setForm({ ...form, triage_operatore: e.target.value || null })}
+                        placeholder="Nome operatore (opzionale)"
+                        className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 flex flex-wrap items-center gap-3">

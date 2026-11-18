@@ -1,6 +1,12 @@
-import { db } from "./db";
+import { db, type BatchStatement } from "./db";
 import { invalidaMemo } from "./cache";
 import { completaContatti, EMAIL_PLACEHOLDER } from "./contatti";
+import { registra } from "./registro";
+import { getConfigSla } from "./sla-config";
+import { inScadenza, valutaSla } from "./sla";
+import { memo } from "./cache";
+import { join } from "path";
+import { unlink } from "fs/promises";
 import type {
   Allegato,
   Message,
@@ -23,7 +29,9 @@ const ROW_FIELDS = `
   id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
   descrizione_dettagliata, priorita, stato, note, operatore,
   data_creazione, data_aggiornamento, data_chiusura,
-  data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti
+  data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti,
+  operatore_id, cliente_id, creato_il, aggiornato_il, chiuso_il, preso_in_carico_il,
+  canale, eliminato_il
 `;
 
 // Senza i due testi lunghi (descrizione, note): le liste non li mostrano, e
@@ -33,7 +41,9 @@ const ROW_FIELDS_LIST = `
   id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
   priorita, stato, operatore,
   data_creazione, data_aggiornamento, data_chiusura,
-  data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti
+  data_inizio_lavoro, tempo_stimato_minuti, tempo_effettivo_minuti,
+  operatore_id, cliente_id, creato_il, aggiornato_il, chiuso_il, preso_in_carico_il,
+  canale, eliminato_il
 `;
 
 function now(): string {
@@ -48,25 +58,42 @@ function now(): string {
 
 export async function createTicket(input: TicketInput): Promise<TicketRow> {
   const id = input.id ?? crypto.randomUUID();
-  const numero =
-    input.numero ?? `TICK-${String(Date.now()).slice(-6)}`;
   const ts = now();
+  const creatoIso = input.creato_il ?? new Date().toISOString();
+  const canale = input.canale ?? "manuale";
 
-  // Ticket e messaggi iniziali in un solo round-trip.
-  const statements = [
+  // Numero generato dal SERVER da un contatore atomico in `impostazioni`.
+  // Prima era `Date.now()`: due ticket creati nello stesso millisecondo
+  // collidevano sul vincolo UNIQUE e il secondo andava perso.
+  // Il primo statement incrementa il contatore; l'INSERT lo legge nella
+  // stessa transazione (db.batch e' transazionale), quindi non c'e' finestra
+  // di corsa tra due creazioni concorrenti.
+  const statements: BatchStatement[] = [
+    {
+      sql: `UPDATE impostazioni
+            SET valore = CAST(CAST(valore AS INTEGER) + 1 AS TEXT),
+                data_aggiornamento = @ts
+            WHERE chiave = 'contatore_ticket'`,
+      params: { ts: creatoIso },
+    },
     {
       sql: `INSERT INTO tickets (
               id, numero, cliente, contatto, telefono, email, modulo_software, sommario_problema,
               descrizione_dettagliata, priorita, stato, note, operatore,
-              data_creazione, data_aggiornamento, data_chiusura
+              data_creazione, data_aggiornamento, data_chiusura,
+              canale, operatore_id, cliente_id, creato_il, aggiornato_il, chiuso_il, preso_in_carico_il
             ) VALUES (
-              @id, @numero, @cliente, @contatto, @telefono, @email, @modulo_software, @sommario_problema,
+              @id,
+              COALESCE(@numero, 'TICK-' || printf('%06d', COALESCE(
+                (SELECT CAST(valore AS INTEGER) FROM impostazioni WHERE chiave = 'contatore_ticket'), 0))),
+              @cliente, @contatto, @telefono, @email, @modulo_software, @sommario_problema,
               @descrizione_dettagliata, @priorita, 'NUOVO', @note, NULL,
-              @data_creazione, @data_aggiornamento, NULL
+              @data_creazione, @data_aggiornamento, NULL,
+              @canale, @operatore_id, @cliente_id, @creato_il, @creato_il, NULL, NULL
             )`,
       params: {
         id,
-        numero,
+        numero: input.numero ?? null,
         cliente: input.cliente,
         contatto: input.contatto,
         telefono: input.telefono ?? null,
@@ -78,6 +105,10 @@ export async function createTicket(input: TicketInput): Promise<TicketRow> {
         note: input.note ?? null,
         data_creazione: ts,
         data_aggiornamento: ts,
+        canale,
+        operatore_id: input.operatore_id ?? null,
+        cliente_id: input.cliente_id ?? null,
+        creato_il: creatoIso,
       },
     },
     ...(input.messaggi ?? []).map((m) => ({
@@ -91,6 +122,18 @@ export async function createTicket(input: TicketInput): Promise<TicketRow> {
         data_creazione: m.data_creazione ?? ts,
       },
     })),
+    // Storico: il ticket nasce in NUOVO. Una riga anche per la creazione
+    // semplifica il calcolo "tempo alla presa in carico" (parte da qui).
+    {
+      sql: `INSERT INTO tickets_storico_stati (id, ticket_id, da_stato, a_stato, operatore_id, operatore, data)
+            VALUES (@id, @ticket_id, NULL, 'NUOVO', @operatore_id, NULL, @data)`,
+      params: {
+        id: crypto.randomUUID(),
+        ticket_id: id,
+        operatore_id: input.operatore_id ?? null,
+        data: creatoIso,
+      },
+    },
   ];
   await db.batch(statements);
   // L'elenco dei moduli (usato dai filtri) e' memorizzato per 60 s: senza
@@ -98,25 +141,36 @@ export async function createTicket(input: TicketInput): Promise<TicketRow> {
   // filtro fino alla scadenza.
   invalidaMemo("moduli");
 
+  await registra({
+    operatoreId: input.operatore_id ?? null,
+    origine: canale === "manuale" || canale === "telefono" ? "utente" : "sistema",
+    azione: "ticket.creato",
+    entita: "ticket",
+    entitaId: id,
+    dettagli: { canale, cliente: input.cliente, priorita: input.priorita },
+  });
+
   return (await getTicket(id))!;
 }
 
 export async function insertMessage(
   ticketId: string,
   m: Pick<Message, "ruolo" | "contenuto"> & { id?: string; data_creazione?: string }
-): Promise<void> {
+): Promise<string> {
+  const id = m.id ?? crypto.randomUUID();
   await db
     .prepare(
       `INSERT INTO messages (id, ticket_id, ruolo, contenuto, data_creazione)
        VALUES (@id, @ticketId, @ruolo, @contenuto, @data_creazione)`
     )
     .run({
-      id: m.id ?? crypto.randomUUID(),
+      id,
       ticketId,
       ruolo: m.ruolo,
       contenuto: m.contenuto,
       data_creazione: m.data_creazione ?? now(),
     });
+  return id;
 }
 
 export function dataIsoSql(col: string): string {
@@ -139,7 +193,7 @@ export async function listTickets(opts: {
   const pagina = Math.max(1, opts.pagina ?? 1);
   const paginaSize = Math.min(100, Math.max(1, opts.paginaSize ?? 25));
 
-  const where: string[] = [];
+  const where: string[] = ["eliminato_il IS NULL"];
   const params: Record<string, string | number> = {};
 
   if (opts.stato && opts.stato !== "TUTTI") {
@@ -201,7 +255,35 @@ export async function listTickets(opts: {
   const totale = (countRows[0]?.n as number) ?? 0;
   const tickets = rows as unknown as TicketListRow[];
 
-  return { tickets, totale, pagina, paginaSize };
+  // Evidenza SLA calcolata lato server: la tabella non deve conoscere
+  // orario d'ufficio e festivi. La configurazione e' memoizzata 60s.
+  const config = await memo("sla_config", 60_000, getConfigSla);
+  const adesso = Date.now();
+  const arricchiti = tickets.map((t) => {
+    const esito = valutaSla(
+      {
+        id: t.id,
+        numero: t.numero,
+        priorita: t.priorita,
+        stato: t.stato,
+        creatoIl: t.creato_il ?? null,
+        presoIl: t.preso_in_carico_il ?? null,
+        chiusoIl: t.chiuso_il ?? null,
+      },
+      config,
+      adesso
+    );
+    const evidenza: "scaduto" | "in_scadenza" | null = esito
+      ? esito.presaScaduta || esito.risoluzioneScaduta
+        ? "scaduto"
+        : inScadenza(esito, adesso)
+          ? "in_scadenza"
+          : null
+      : null;
+    return { ...t, sla_evidenza: evidenza };
+  });
+
+  return { tickets: arricchiti, totale, pagina, paginaSize };
 }
 
 export async function getTicket(id: string): Promise<Ticket | null> {
@@ -257,13 +339,20 @@ export async function getTicketByNumero(numero: string): Promise<TicketRow | nul
   return (row as TicketRow | undefined) ?? null;
 }
 
+export interface ContestoAggiornamento {
+  operatoreId?: string | null;
+  operatore?: string | null;
+  origine?: "utente" | "agente" | "api" | "sistema";
+}
+
 // `existing` permette al chiamante che ha gia' letto il ticket (es. la route
 // PATCH per validare e decidere le email) di evitare una seconda lettura:
 // ogni lettura sono 3 round-trip verso il DB remoto.
 export async function updateTicket(
   id: string,
   patch: TicketUpdate,
-  existing?: Ticket | null
+  existing?: Ticket | null,
+  contesto: ContestoAggiornamento = {}
 ): Promise<Ticket | null> {
   const corrente = existing ?? (await getTicket(id));
   if (!corrente) return null;
@@ -278,8 +367,18 @@ export async function updateTicket(
   if (patch.email !== undefined) next.email = patch.email || EMAIL_PLACEHOLDER;
 
   const ts = now();
-  const fields: string[] = ["data_aggiornamento = @data_aggiornamento"];
-  const params: Record<string, string | null> = { id, data_aggiornamento: ts };
+  const tsIso = new Date().toISOString();
+  const fields: string[] = [
+    "data_aggiornamento = @data_aggiornamento",
+    "aggiornato_il = @aggiornato_il",
+    "creato_il = COALESCE(creato_il, @creato_il)",
+  ];
+  const params: Record<string, string | null> = {
+    id,
+    data_aggiornamento: ts,
+    aggiornato_il: tsIso,
+    creato_il: tsIso,
+  };
 
   if (next.stato !== undefined) {
     fields.push("stato = @stato");
@@ -296,10 +395,30 @@ export async function updateTicket(
   if (next.operatore !== undefined) {
     fields.push("operatore = @operatore");
     params.operatore = next.operatore;
+    // Collegamento strutturato: si risolve il nome in id (esatto). Se il nome
+    // non e' in anagrafica resta NULL; la colonna testuale resta comunque.
+    let operatoreId: string | null = null;
+    if (next.operatore) {
+      const riga = await db
+        .prepare(`SELECT id FROM operatori WHERE nome = ?`)
+        .get(next.operatore);
+      operatoreId = (riga?.id as string) ?? null;
+    }
+    fields.push("operatore_id = @operatore_id");
+    params.operatore_id = operatoreId;
   }
   if (next.cliente !== undefined) {
     fields.push("cliente = @cliente");
     params.cliente = next.cliente;
+    let clienteId: string | null = null;
+    if (next.cliente) {
+      const riga = await db
+        .prepare(`SELECT id FROM clienti WHERE ragione_sociale = ?`)
+        .get(next.cliente);
+      clienteId = (riga?.id as string) ?? null;
+    }
+    fields.push("cliente_id = @cliente_id");
+    params.cliente_id = clienteId;
   }
   if (next.contatto !== undefined) {
     fields.push("contatto = @contatto");
@@ -334,6 +453,9 @@ export async function updateTicket(
     fields.push("data_inizio_lavoro = COALESCE(data_inizio_lavoro, @data_inizio_lavoro)");
     params.data_inizio_lavoro = ts;
     dataInizioLavoro = dataInizioLavoro ?? ts;
+    // Base per il calcolo SLA della presa in carico.
+    fields.push("preso_in_carico_il = COALESCE(preso_in_carico_il, @preso_in_carico_il)");
+    params.preso_in_carico_il = tsIso;
   }
 
   // Time tracking: calculate tempo_stimato_minuti when closing
@@ -341,6 +463,8 @@ export async function updateTicket(
     fields.push("data_chiusura = COALESCE(data_chiusura, @data_chiusura)");
     params.data_chiusura = ts;
     dataChiusura = dataChiusura ?? ts;
+    fields.push("chiuso_il = COALESCE(chiuso_il, @chiuso_il)");
+    params.chiuso_il = tsIso;
 
     // Auto-calculate estimated time if not already set
     if (corrente.tempo_stimato_minuti === null && corrente.data_inizio_lavoro) {
@@ -357,6 +481,9 @@ export async function updateTicket(
     }
   } else if (corrente.stato === "CHIUSO" || corrente.stato === "RISOLTO") {
     fields.push("data_chiusura = NULL");
+    // Riapertura: la data di chiusura strutturata torna vuota, cosi' SLA e
+    // tasso di riapertura non contano una chiusura che non c'e' piu'.
+    fields.push("chiuso_il = NULL");
     // Clear time tracking fields when reopening
     fields.push("tempo_stimato_minuti = NULL");
     fields.push("tempo_effettivo_minuti = NULL");
@@ -369,11 +496,48 @@ export async function updateTicket(
     .prepare(`UPDATE tickets SET ${fields.join(", ")} WHERE id = @id`)
     .run(params);
 
+  // Storico stati: una riga per ogni transizione reale. E' la base di SLA
+  // (tempo alla presa in carico/risoluzione) e del tasso di riapertura.
+  const statoCambiato = next.stato !== undefined && next.stato !== corrente.stato;
+  if (statoCambiato) {
+    try {
+      await db
+        .prepare(
+          `INSERT INTO tickets_storico_stati (id, ticket_id, da_stato, a_stato, operatore_id, operatore, data)
+           VALUES (@id, @ticket_id, @da_stato, @a_stato, @operatore_id, @operatore, @data)`
+        )
+        .run({
+          id: crypto.randomUUID(),
+          ticket_id: id,
+          da_stato: corrente.stato,
+          a_stato: next.stato as string,
+          operatore_id: contesto.operatoreId ?? null,
+          operatore: contesto.operatore ?? next.operatore ?? null,
+          data: tsIso,
+        });
+    } catch (err) {
+      console.error("Storico stati non scritto:", id, err);
+    }
+  }
+
+  await registra({
+    operatoreId: contesto.operatoreId ?? null,
+    origine: contesto.origine ?? "utente",
+    azione: statoCambiato ? "ticket.stato_cambiato" : "ticket.aggiornato",
+    entita: "ticket",
+    entitaId: id,
+    dettagli: statoCambiato
+      ? { da: corrente.stato, a: next.stato, campi: Object.keys(patch) }
+      : { campi: Object.keys(patch) },
+  });
+
   return {
     ...corrente,
     ...next,
     data_aggiornamento: ts,
+    aggiornato_il: tsIso,
     data_chiusura: dataChiusura,
+    chiuso_il: dataChiusura ? tsIso : null,
     data_inizio_lavoro: dataInizioLavoro,
     tempo_stimato_minuti: tempoStimato,
     tempo_effettivo_minuti: tempoEffettivo,
@@ -408,7 +572,10 @@ export async function sanificaContatti(ticket: Ticket): Promise<Ticket> {
   if (invariato) return ticket;
 
   try {
-    const aggiornato = await updateTicket(ticket.id, contatti, ticket);
+    const aggiornato = await updateTicket(ticket.id, contatti, ticket, {
+      origine: "sistema",
+      operatore: ticket.operatore,
+    });
     return aggiornato ?? ticket;
   } catch (err) {
     console.error("Sanifica contatti non riuscita:", ticket.id, err);
@@ -437,9 +604,61 @@ function parseItalianDate(dateStr: string): number | null {
   }
 }
 
-export async function deleteTicket(id: string): Promise<boolean> {
-  const res = await db.prepare("DELETE FROM tickets WHERE id = ?").run(id);
-  return res.changes > 0;
+// Eliminazione definitiva. Le foreign key non sono applicate dal DB (attivarle
+// su dati vivi sarebbe un rischio), quindi i figli si cancellano esplicitamente
+// in un'unica transazione. I file su disco si rimuovono DOPO il DB: se un
+// unlink fallisce resta un file orfano, non una riga che punta al nulla.
+export async function deleteTicket(
+  id: string,
+  contesto: ContestoAggiornamento = {}
+): Promise<boolean> {
+  const ticket = await getTicket(id);
+  if (!ticket) return false;
+
+  const allegati = await db
+    .prepare(`SELECT nome_file FROM allegati WHERE ticket_id = ?`)
+    .all(id);
+
+  const risultati = await db.batch([
+    { sql: `DELETE FROM allegati WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM technical_notes WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM messages WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM email_log WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM tickets_storico_stati WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM progetti_tickets WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM notifications WHERE ticket_id = @id`, params: { id } },
+    // La posta in arrivo e' un registro storico: si conserva la mail, si
+    // azzera solo il collegamento al ticket che non esiste piu'.
+    { sql: `UPDATE email_inbox SET ticket_id = NULL WHERE ticket_id = @id`, params: { id } },
+    { sql: `DELETE FROM tickets WHERE id = @id`, params: { id } },
+  ]);
+
+  const ok = (risultati[risultati.length - 1]?.changes ?? 0) > 0;
+  if (!ok) return false;
+
+  const uploadsDir = join(process.cwd(), "uploads");
+  await Promise.all(
+    allegati.map(async (a) => {
+      const nome = a.nome_file as string;
+      if (!nome) return;
+      try {
+        await unlink(join(uploadsDir, nome));
+      } catch {
+        /* file gia' assente */
+      }
+    })
+  );
+
+  await registra({
+    operatoreId: contesto.operatoreId ?? null,
+    origine: contesto.origine ?? "utente",
+    azione: "ticket.eliminato",
+    entita: "ticket",
+    entitaId: id,
+    dettagli: { numero: ticket.numero, cliente: ticket.cliente, allegati: allegati.length },
+  });
+
+  return true;
 }
 
 const NOTE_FIELDS = `id, ticket_id, titolo, problema, soluzione, operatore, data_creazione`;

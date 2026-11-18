@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConfigGoogle, salvaConfigGoogle } from "@/lib/google-sync";
 import { ORIGINI, TIMEZONE_DEFAULT } from "@/lib/google-evento";
+import { richiediOperatore } from "@/lib/auth";
 import type { ConfigGoogle, GoogleModalita, OrigineEvento } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -8,21 +9,11 @@ export const dynamic = "force-dynamic";
 // Scrittura riservata agli admin: qui si decide dove finiscono gli eventi
 // dell'azienda su Google, ed e' la configurazione che governa la
 // riconciliazione. In lettura invece basta l'autenticazione (vedi /stato).
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
-function getOperatorRole(request: Request): string | null {
-  return request.headers.get("x-operator-ruolo");
-}
-
 const MODALITA: GoogleModalita[] = ["per_origine", "unico"];
 
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     return NextResponse.json(await getConfigGoogle());
@@ -33,13 +24,8 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (getOperatorRole(request) !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   try {
     const body = (await request.json().catch(() => ({}))) as Partial<ConfigGoogle>;

@@ -3,25 +3,19 @@ import { getCliente } from "@/lib/clienti";
 import { deleteProgetto, getProgetto, STATI_PROGETTO, updateProgetto } from "@/lib/progetti";
 import { parsePersone } from "@/lib/persone";
 import { RE_DATETIME_LOCAL } from "@/lib/calendario";
+import { richiediOperatore } from "@/lib/auth";
 import type { Priorita, ProgettoUpdate } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 
-// Nessun controllo di ruolo: vedi la nota in app/api/progetti/route.ts.
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const progetto = await getProgetto(params.id);
   if (!progetto) {
@@ -34,10 +28,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const existing = await getProgetto(params.id);
   if (!existing) {
@@ -113,10 +105,8 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const ok = await deleteProgetto(params.id);

@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { linkTicket, listTicketsProgetto, unlinkTicket } from "@/lib/progetti";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-
-// Nessun controllo di ruolo: vedi la nota in app/api/progetti/route.ts.
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
 
 // L'esistenza del progetto si verifica con una SELECT che non legge nulla.
 // `getProgetto` carica anche tutte le attivita' e tutti i ticket collegati:
@@ -21,10 +17,8 @@ export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     if (!(await progettoEsiste(params.id))) {
@@ -42,10 +36,8 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     if (!(await progettoEsiste(params.id))) {
@@ -83,10 +75,8 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   const ticketId = new URL(request.url).searchParams.get("ticket_id") ?? "";
   if (!ticketId) {

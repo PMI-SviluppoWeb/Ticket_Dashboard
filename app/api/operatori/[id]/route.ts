@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { requireAdmin, updateOperator, deactivateOperator, activateOperator, deleteOperator } from "@/lib/auth";
+import { richiediOperatore, updateOperator, deactivateOperator, activateOperator, deleteOperator } from "@/lib/auth";
+import { registra } from "@/lib/registro";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdmin();
+    const auth = await richiediOperatore(request, { ruolo: "admin" });
+    if (!auth.ok) return auth.risposta;
     const { id } = await params;
     const body = await request.json();
     const { nome, email, ruolo, password } = body as {
@@ -24,6 +26,17 @@ export async function PATCH(
     }
 
     await updateOperator(id, { nome, email, ruolo, password });
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: "operatore.aggiornato",
+      entita: "operatore",
+      entitaId: id,
+      // Mai il valore della password nel registro: solo se e' stata cambiata.
+      dettagli: {
+        campi: Object.keys(body).filter((k) => k !== "password"),
+        password_cambiata: Boolean(password),
+      },
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof Error && err.message.includes("autenticato")) {
@@ -42,7 +55,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdmin();
+    const auth = await richiediOperatore(request, { ruolo: "admin" });
+    if (!auth.ok) return auth.risposta;
     const { id } = await params;
 
     const body = await request.json().catch(() => ({}));
@@ -55,6 +69,17 @@ export async function DELETE(
     } else {
       await deactivateOperator(id);
     }
+
+    await registra({
+      operatoreId: auth.operatore.id,
+      azione: permanente
+        ? "operatore.eliminato"
+        : attivo === true
+          ? "operatore.riattivato"
+          : "operatore.disattivato",
+      entita: "operatore",
+      entitaId: id,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

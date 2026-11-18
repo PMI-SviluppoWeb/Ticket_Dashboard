@@ -242,9 +242,16 @@ docker image prune -a -f
 
 ## 7. Caselle email multiple (configurate dall'app)
 
-Oltre alla casella singola in `.env` (che resta valida come fallback), si
-possono collegare più caselle direttamente dall'applicazione: **Admin →
-Caselle Email** (`/admin/email`).
+Le caselle si collegano direttamente dall'applicazione: **Admin → Caselle
+Email** (`/admin/email`).
+
+> **Fallback legacy disattivato di default.** Le variabili `IMAP_HOST` /
+> `IMAP_USER` / `IMAP_PASS` in `.env` NON vengono più pollate: prima bastava
+> averle per far arrivare ticket da una casella "nascosta" anche senza caselle
+> configurate nell'app. Se vuoi davvero pollare anche quella casella, imposta
+> `IMAP_ENV_FALLBACK=true`. Per fermarla subito su una versione già in
+> produzione, rimuovi (o svuota) `IMAP_HOST/IMAP_USER/IMAP_PASS` da `.env` e
+> riavvia il container.
 
 - Ogni casella ha IMAP + SMTP dello stesso account: i ticket nascono dalle
   mail in entrata e le risposte (autorisposta, notifiche, aggiornamenti)
@@ -259,6 +266,10 @@ Caselle Email** (`/admin/email`).
   high-water mark all'UID più alto esistente (non processa le mail vecchie).
 - La verifica di connessione (IMAP + SMTP) è disponibile nel form e nella
   tabella, utile subito dopo il salvataggio.
+- Il triage AI usa `EMAIL_TRIAGE_MODEL` (oppure `OPENROUTER_MODEL`). Se non
+  sono impostati, il default è `openai/gpt-4o-mini`: senza un modello il
+  triage ricadrebbe sulle sole euristiche e la posta promozionale rischierebbe
+  di diventare ticket.
 
 ---
 

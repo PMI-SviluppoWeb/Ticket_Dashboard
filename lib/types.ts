@@ -53,6 +53,17 @@ export interface Ticket {
   data_inizio_lavoro: string | null;
   tempo_stimato_minuti: number | null;
   tempo_effettivo_minuti: number | null;
+  // Colonne strutturate (Fase 1): affiancano i campi testuali storici.
+  operatore_id?: string | null;
+  cliente_id?: string | null;
+  creato_il?: string | null;
+  aggiornato_il?: string | null;
+  chiuso_il?: string | null;
+  preso_in_carico_il?: string | null;
+  canale?: string;
+  eliminato_il?: string | null;
+  // Calcolata lato server dalla configurazione SLA.
+  sla_evidenza?: "scaduto" | "in_scadenza" | null;
   messaggi: Message[];
   note_tecniche: TechnicalNote[];
 }
@@ -77,6 +88,14 @@ export interface TicketRow {
   data_inizio_lavoro: string | null;
   tempo_stimato_minuti: number | null;
   tempo_effettivo_minuti: number | null;
+  operatore_id?: string | null;
+  cliente_id?: string | null;
+  creato_il?: string | null;
+  aggiornato_il?: string | null;
+  chiuso_il?: string | null;
+  preso_in_carico_il?: string | null;
+  canale?: string;
+  eliminato_il?: string | null;
 }
 
 export interface TicketInput {
@@ -91,7 +110,15 @@ export interface TicketInput {
   descrizione_dettagliata: string;
   priorita: Priorita;
   note?: string;
-  messaggi?: Message[];
+  // Messaggi iniziali: l'id e' opzionale (lo genera il server se assente).
+  messaggi?: Array<
+    Pick<Message, "ruolo" | "contenuto"> & { id?: string; data_creazione?: string }
+  >;
+  // Fase 1: canale di origine e collegamenti strutturati.
+  canale?: "manuale" | "email" | "whatsapp" | "telefono";
+  operatore_id?: string | null;
+  cliente_id?: string | null;
+  creato_il?: string;
 }
 
 export interface TicketUpdate {
@@ -122,7 +149,9 @@ export interface Stats {
 // mostra, e possono essere di migliaia di caratteri per riga — su una pagina da
 // 25 risultati sono decine di kB trasportati per niente. Il dettaglio
 // (`getTicket`) continua a leggerli.
-export type TicketListRow = Omit<TicketRow, "descrizione_dettagliata" | "note">;
+export type TicketListRow = Omit<TicketRow, "descrizione_dettagliata" | "note"> & {
+  sla_evidenza?: "scaduto" | "in_scadenza" | null;
+};
 
 export interface TicketListResult {
   tickets: TicketListRow[];
@@ -615,7 +644,19 @@ export interface EmailInbox {
   body_html: string | null;
   ticket_id: string | null;
   casella_id: string | null;
-  stato: "processata" | "errore" | "ignorata";
+  // "processata" = flusso completato (ticket creato/agganciato),
+  // "errore" = lavorazione fallita, "ignorata" = scartata dal triage,
+  // "da_verificare" = in attesa di una decisione umana.
+  stato: "processata" | "errore" | "ignorata" | "da_verificare";
+  stato_triage?: "ticket" | "da_verificare" | "ignora" | null;
+  esito_ai: "ticket" | "da_verificare" | "ignora" | null;
+  confidenza: number | null;
+  motivo: string | null;
+  in_reply_to: string | null;
+  riferimenti: string | null;
+  correzione_umana: string | null;
+  corretto_da: string | null;
+  body_text?: string | null;
   data_creazione: string;
 }
 
@@ -638,6 +679,14 @@ export interface CasellaEmail {
   utente: string;
   abilitata: boolean;
   predefinita: boolean;
+  // Deroga esplicita alla verifica del certificato TLS per questa casella.
+  // Default false: un certificato non valido blocca la connessione.
+  tls_non_verificato: boolean;
+  triage_attivo: boolean;
+  triage_soglia: number;
+  triage_priorita: "BASSA" | "MEDIA" | "ALTA" | null;
+  triage_operatore: string | null;
+  triage_osservazione: boolean;
   ha_password: boolean;
   data_creazione: string;
   data_aggiornamento: string;
@@ -658,6 +707,12 @@ export interface CasellaEmailInput {
   password?: string;
   abilitata: boolean;
   predefinita: boolean;
+  tls_non_verificato?: boolean;
+  triage_attivo?: boolean;
+  triage_soglia?: number;
+  triage_priorita?: "BASSA" | "MEDIA" | "ALTA" | null;
+  triage_operatore?: string | null;
+  triage_osservazione?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -689,9 +744,11 @@ export interface Agente {
   strumenti: string[];
   provider: ProviderAgente;
   attivo: boolean;
-  creato_da: string | null;
-  data_creazione: string;
-  data_aggiornamento: string;
+  creato_da?: string | null;
+  proprietario_id?: string | null;
+  visibilita?: "libreria" | "personale";
+  data_creazione?: string;
+  data_aggiornamento?: string;
 }
 
 export interface AgenteInput {
@@ -703,6 +760,7 @@ export interface AgenteInput {
   strumenti?: string[];
   provider?: ProviderAgente;
   attivo?: boolean;
+  visibilita?: "libreria" | "personale";
 }
 
 export type StatoEsecuzioneAgente = "in_corso" | "completata" | "errore";
@@ -748,7 +806,15 @@ export type EmailIntent =
   | "question"
   | "other";
 
+export type EsitoTriage = "ticket" | "da_verificare" | "ignora";
+
 export interface EmailClassification {
+  // Decisione di triage. In caso di dubbio "da_verificare", MAI "ignora".
+  esito: EsitoTriage;
+  // 0..1: quanto il classificatore e' sicuro dell'esito.
+  confidenza: number;
+  // Una frase sul perche' (mostrata all'operatore nella coda "Da verificare").
+  motivo: string;
   intent: EmailIntent;
   priorita: Priorita;
   sommario: string;
@@ -767,5 +833,8 @@ export interface EmailLog {
   corpo: string;
   stato: "inviata" | "errore";
   errore: string | null;
+  message_id?: string | null;
+  in_reply_to?: string | null;
+  riferimenti?: string | null;
   data_creazione: string;
 }

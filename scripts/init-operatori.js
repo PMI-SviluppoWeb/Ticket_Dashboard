@@ -1,6 +1,13 @@
 const { createClient } = require("@libsql/client");
 const crypto = require("crypto");
 
+// Seed con password fissa: vietato in produzione. Gli operatori si creano dal
+// pannello admin (route /api/auth/register).
+if (process.env.NODE_ENV === "production") {
+  console.error("Script di seed disabilitato in produzione.");
+  process.exit(1);
+}
+
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 

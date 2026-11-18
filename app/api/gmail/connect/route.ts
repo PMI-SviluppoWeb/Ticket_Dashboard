@@ -5,6 +5,7 @@ import {
   generaCodeVerifier,
   generaState,
 } from "@/lib/gmail-oauth";
+import { richiediOperatore } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,16 +15,10 @@ export const dynamic = "force-dynamic";
 // collegamento a meta'.
 const COOKIE_TTL_SEC = 600;
 
-// Stesso criterio di /api/caselle: le intestazioni x-operator-* le inietta il
-// middleware dopo la verifica del cookie di sessione.
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!request.headers.get("x-operator-id")) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (request.headers.get("x-operator-ruolo") !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
+// Stesso criterio di /api/caselle: solo amministratori.
+async function richiediAdmin(request: Request): Promise<NextResponse | null> {
+  const esito = await richiediOperatore(request, { ruolo: "admin" });
+  return esito.ok ? null : esito.risposta;
 }
 
 // GET /api/gmail/connect → genera state + code_verifier, li memorizza in un
@@ -31,7 +26,7 @@ function richiediAdmin(request: Request): NextResponse | null {
 // di Google. Da li' in poi l'utente non tocca piu' nulla: nessuna porta,
 // nessun server, nessuna password (zero-configuration).
 export async function GET(request: Request) {
-  const negato = richiediAdmin(request);
+  const negato = await richiediAdmin(request);
   if (negato) return negato;
 
   if (!credenzialiGmailPresenti()) {

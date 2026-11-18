@@ -10,6 +10,18 @@ const FOOTER = `
   Per assistenza contatta il nostro team di supporto.
 </div>`;
 
+// Ogni valore che arriva dal DB o dall'input utente passa da qui. Senza,
+// un ticket con "<script>" nel sommario (o un allegato chiamato "<img onerror=...>")
+// verrebbe eseguito nel client di posta del cliente.
+function esc(valore: unknown): string {
+  return String(valore ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function wrap(title: string, body: string): string {
   return `
 <!DOCTYPE html>
@@ -18,7 +30,7 @@ function wrap(title: string, body: string): string {
 <body style="margin:0;padding:0;background:#ffffff;font-family:sans-serif;color:#334155">
   ${HEADER}
   <div style="padding:24px;max-width:600px;margin:0 auto">
-    <h2 style="margin:0 0 16px;font-size:18px;color:#1e293b">${title}</h2>
+    <h2 style="margin:0 0 16px;font-size:18px;color:#1e293b">${esc(title)}</h2>
     ${body}
   </div>
   ${FOOTER}
@@ -34,22 +46,22 @@ export function emailNuovoTicket(opts: {
   priorita: string;
 }): string {
   return wrap("Ticket Ricevuto", `
-    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.cliente)}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
-      Il tuo ticket <strong>${opts.numero}</strong> e' stato ricevuto e sara' elaborato al piu' presto.
+      Il tuo ticket <strong>${esc(opts.numero)}</strong> e' stato ricevuto e sara' elaborato al piu' presto.
     </p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Numero</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${opts.numero}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${esc(opts.numero)}</td>
       </tr>
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Problema</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.sommario}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${esc(opts.sommario)}</td>
       </tr>
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Priorita'</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.priorita}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${esc(opts.priorita)}</td>
       </tr>
     </table>
     <p style="margin:0;font-size:13px;color:#64748b">
@@ -64,10 +76,10 @@ export function emailAssegnazione(opts: {
   operatore: string;
 }): string {
   return wrap("Ticket Preso in Carico", `
-    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.cliente)}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
-      Il tuo ticket <strong>${opts.numero}</strong> e' stato preso in carico dal nostro operatore
-      <strong>${opts.operatore}</strong>.
+      Il tuo ticket <strong>${esc(opts.numero)}</strong> e' stato preso in carico dal nostro operatore
+      <strong>${esc(opts.operatore)}</strong>.
     </p>
     <p style="margin:0 0 16px;font-size:14px">
       Riceverai ulteriori aggiornamenti man mano che il problema verra' risolto.
@@ -91,7 +103,7 @@ export function emailAggiornamentoCliente(opts: {
   let attachmentsHtml = "";
   if (opts.allegati && opts.allegati.length > 0) {
     const rows = opts.allegati
-      .map((a) => `<li style="margin:4px 0;font-size:13px;color:#475569">${a}</li>`)
+      .map((a) => `<li style="margin:4px 0;font-size:13px;color:#475569">${esc(a)}</li>`)
       .join("");
     attachmentsHtml = `
       <div style="margin-top:16px">
@@ -100,13 +112,13 @@ export function emailAggiornamentoCliente(opts: {
       </div>`;
   }
 
-  return wrap(`Aggiornamento ticket ${opts.numero}`, `
-    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
+  return wrap(`Aggiornamento ticket ${esc(opts.numero)}`, `
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.cliente)}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
-      Abbiamo un aggiornamento sul ticket <strong>${opts.numero}</strong>.
+      Abbiamo un aggiornamento sul ticket <strong>${esc(opts.numero)}</strong>.
     </p>
-    <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1e293b">${opts.titolo}</p>
-    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;margin-bottom:16px;font-size:14px;color:#475569;line-height:1.6;white-space:pre-wrap">${opts.messaggio}</div>
+    <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1e293b">${esc(opts.titolo)}</p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;margin-bottom:16px;font-size:14px;color:#475569;line-height:1.6;white-space:pre-wrap">${esc(opts.messaggio)}</div>
     ${attachmentsHtml}
     <p style="margin:16px 0 0;font-size:13px;color:#64748b">
       Per maggiori dettagli accedi alla piattaforma di supporto.
@@ -128,9 +140,9 @@ export function emailChiusura(opts: {
       .map(
         (n) => `
       <div style="margin-bottom:12px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#1e293b">${n.titolo}</p>
-        <p style="margin:0 0 6px;font-size:11px;color:#94a3b8">Operatore: ${n.operatore}</p>
-        <div style="font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap">${n.soluzione}</div>
+        <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#1e293b">${esc(n.titolo)}</p>
+        <p style="margin:0 0 6px;font-size:11px;color:#94a3b8">Operatore: ${esc(n.operatore)}</p>
+        <div style="font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap">${esc(n.soluzione)}</div>
       </div>`
       )
       .join("");
@@ -144,7 +156,7 @@ export function emailChiusura(opts: {
   let attachmentsHtml = "";
   if (opts.allegati && opts.allegati.length > 0) {
     const items = opts.allegati
-      .map((a) => `<li style="margin:4px 0;font-size:13px;color:#475569">${a}</li>`)
+      .map((a) => `<li style="margin:4px 0;font-size:13px;color:#475569">${esc(a)}</li>`)
       .join("");
     attachmentsHtml = `
       <div style="margin-top:16px">
@@ -154,22 +166,22 @@ export function emailChiusura(opts: {
   }
 
   return wrap("Ticket Chiuso", `
-    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.cliente)}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
-      Il tuo ticket <strong>${opts.numero}</strong> e' stato risolto e chiuso.
+      Il tuo ticket <strong>${esc(opts.numero)}</strong> e' stato risolto e chiuso.
     </p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Numero</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${opts.numero}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${esc(opts.numero)}</td>
       </tr>
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Problema</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.sommario}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${esc(opts.sommario)}</td>
       </tr>
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Chiuso il</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.dataChiusura}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${esc(opts.dataChiusura)}</td>
       </tr>
     </table>
     ${notesHtml}
@@ -190,12 +202,12 @@ export function emailManuale(opts: {
   messaggio: string;
 }): string {
   return wrap(opts.oggetto, `
-    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
-    <div style="margin:0 0 16px;font-size:14px;line-height:1.6;white-space:pre-wrap">${opts.messaggio}</div>
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.cliente)}</strong>,</p>
+    <div style="margin:0 0 16px;font-size:14px;line-height:1.6;white-space:pre-wrap">${esc(opts.messaggio)}</div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Ticket</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${opts.numero}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${esc(opts.numero)}</td>
       </tr>
     </table>
   `);
@@ -207,18 +219,18 @@ export function emailAutoReply(opts: {
   oggettoOriginale: string;
 }): string {
   return wrap("Ricevuto la tua richiesta", `
-    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${opts.cliente}</strong>,</p>
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.cliente)}</strong>,</p>
     <p style="margin:0 0 16px;font-size:14px">
-      Abbiamo ricevuto la tua email e le abbiamo assegnato il ticket <strong>${opts.numero}</strong>.
+      Abbiamo ricevuto la tua email e le abbiamo assegnato il ticket <strong>${esc(opts.numero)}</strong>.
     </p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b;width:120px">Ticket</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${opts.numero}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600">${esc(opts.numero)}</td>
       </tr>
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;color:#64748b">Oggetto</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${opts.oggettoOriginale}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px">${esc(opts.oggettoOriginale)}</td>
       </tr>
     </table>
     <p style="margin:0 0 16px;font-size:14px">

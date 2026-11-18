@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
 import { listEtichette, createEtichetta, validaColore } from "@/lib/etichette";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const etichette = await listEtichette();
@@ -23,10 +18,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const operatorId = getOperatorId(request);
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const body = (await request.json().catch(() => ({}))) as {

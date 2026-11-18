@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { extractText, getDocumentProxy } from "unpdf";
 import { insertKnowledgeDoc, listKnowledgeDocs } from "@/lib/knowledge";
+import { richiediOperatore } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 const MAX_SIZE = 25 * 1024 * 1024;
 
 export async function GET(request: Request) {
-  const operatorId = request.headers.get("x-operator-id");
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+
   const url = new URL(request.url);
   const q = url.searchParams.get("q") ?? "";
   const docs = await listKnowledgeDocs(q);
@@ -18,17 +18,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const operatorId = request.headers.get("x-operator-id");
-  const operatorRole = request.headers.get("x-operator-ruolo");
-  
-  if (!operatorId) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  
-  // Only admins can upload knowledge docs
-  if (operatorRole !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
+  // Solo gli amministratori caricano documenti nella knowledge base.
+  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  if (!auth.ok) return auth.risposta;
 
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("multipart/form-data")) {

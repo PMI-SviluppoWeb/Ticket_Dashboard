@@ -1,31 +1,21 @@
 import { NextResponse } from "next/server";
 import { creaAgente, listaAgenti } from "@/lib/agenti";
 import { providerAttivo } from "@/lib/ai-provider";
+import { richiediOperatore } from "@/lib/auth";
 import type { AgenteInput } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Stesso criterio di /api/caselle: intestazioni x-operator-* iniettate dal
-// middleware dopo la verifica della sessione.
-function richiediAdmin(request: Request): NextResponse | null {
-  if (!request.headers.get("x-operator-id")) {
-    return NextResponse.json({ error: "Non autenticato." }, { status: 401 });
-  }
-  if (request.headers.get("x-operator-ruolo") !== "admin") {
-    return NextResponse.json({ error: "Accesso riservato agli amministratori." }, { status: 403 });
-  }
-  return null;
-}
-
 export async function GET(request: Request) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
-    const agenti = await listaAgenti();
-    // Quale backend servirà le esecuzioni (letto da env lato server):
-    // la UI lo mostra nel footer per non far indovinare dove gira l'AI.
+    const agenti =
+      auth.operatore.ruolo === "admin"
+        ? await listaAgenti()
+        : await listaAgenti({ operatoreId: auth.operatore.id });
     return NextResponse.json({ agenti, provider: providerAttivo() });
   } catch (err) {
     console.error("GET /api/agenti", err);
@@ -34,11 +24,20 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const negato = richiediAdmin(request);
-  if (negato) return negato;
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
 
   try {
     const body = (await request.json().catch(() => ({}))) as Partial<AgenteInput>;
+    const isAdmin = auth.operatore.ruolo === "admin";
+
+    // Un operatore puo' creare SOLO agenti personali; la libreria e' dell'admin.
+    const visibilita = isAdmin
+      ? body.visibilita === "personale"
+        ? "personale"
+        : "libreria"
+      : "personale";
+
     const esito = await creaAgente(
       {
         nome: String(body.nome ?? ""),
@@ -51,8 +50,9 @@ export async function POST(request: Request) {
           : undefined,
         provider: body.provider,
         attivo: body.attivo,
+        visibilita,
       },
-      request.headers.get("x-operator-id") ?? undefined
+      auth.operatore.id
     );
 
     if (!esito.ok) {

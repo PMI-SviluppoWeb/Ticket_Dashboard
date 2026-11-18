@@ -2,6 +2,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { startImapWorker } from "../lib/imap-worker";
 import { startGmailWorker } from "../lib/gmail-worker";
+import { startSyncClientiWorker } from "../lib/sync-worker";
 
 // Carica variabili d'ambiente da .env.local
 config({ path: resolve(__dirname, "../.env.local") });
@@ -30,7 +31,8 @@ console.log("=================================");
 Promise.all([
   startImapWorker(),
   startGmailWorker(),
+  startSyncClientiWorker(),
 ]).catch((err) => {
-  console.error("Errore fatale nell'avvio dei worker email:", err);
+  console.error("Errore fatale nell'avvio dei worker:", err);
   process.exit(1);
 });

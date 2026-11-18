@@ -6,8 +6,10 @@ import {
   ClockIcon,
   FolderIcon,
   GridIcon,
+  LockClosedIcon,
   MailIcon,
   SparklesIcon,
+  TimerIcon,
   UserCircleIcon,
   UserPlusIcon,
 } from "@/components/icons";
@@ -47,9 +49,9 @@ export const NAV_ITEMS: NavItem[] = [
     calda: ["/api/operatori/stats"],
   },
   { href: "/report", label: "Report Ore", icon: ClockIcon, exact: false, adminOnly: true, calda: [] },
-  // Inbox Email e Knowledge Base nascoste temporaneamente: per riattivarle
-  // basta rimuovere i commenti sulle due righe sottostanti.
-  // { href: "/inbox", label: "Inbox Email", icon: MailIcon, exact: false, adminOnly: true, calda: [] },
+  { href: "/admin/sla", label: "SLA", icon: TimerIcon, exact: false, adminOnly: true, calda: [] },
+  // Posta in arrivo: coda di triage delle email (solo admin).
+  { href: "/inbox", label: "Posta in arrivo", icon: MailIcon, exact: false, adminOnly: true, calda: [] },
   {
     href: "/admin/email",
     label: "Caselle Email",
@@ -57,6 +59,14 @@ export const NAV_ITEMS: NavItem[] = [
     exact: false,
     adminOnly: true,
     calda: ["/api/caselle"],
+  },
+  {
+    href: "/admin/chiavi-api",
+    label: "Chiavi API",
+    icon: LockClosedIcon,
+    exact: false,
+    adminOnly: true,
+    calda: ["/api/chiavi-api"],
   },
   // { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false, calda: [] },
   {

@@ -18,6 +18,7 @@ import {
   STATUS_STYLES,
   chip,
 } from "@/components/badges";
+import AssistenteTicket from "./AssistenteTicket";
 import {
   InfoIcon,
   CheckCircleIcon,
@@ -681,6 +682,17 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 <span className={`${CHIP_BASE} ${PRIORITY_STYLES[ticket.priorita]}`}>
                   Priorita: {PRIORITY_LABELS[ticket.priorita]}
                 </span>
+                {ticket.sla_evidenza && (
+                  <span
+                    className={`rounded-control border px-2.5 py-1 text-xs font-semibold ${
+                      ticket.sla_evidenza === "scaduto"
+                        ? "border-stato-urgenza-bordo bg-stato-urgenza-bg text-stato-urgenza-testo"
+                        : "border-stato-attesa-bordo bg-stato-attesa-bg text-stato-attesa-testo"
+                    }`}
+                  >
+                    {ticket.sla_evidenza === "scaduto" ? "SLA scaduto" : "SLA in scadenza"}
+                  </span>
+                )}
               </div>
               <h1 className="break-words text-xl font-bold leading-snug tracking-tight text-inchiostro sm:text-2xl">
                 {ticket.sommario_problema}
@@ -817,6 +829,8 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
             )}
           </div>
         </section>
+
+        <AssistenteTicket ticketId={ticket.id} />
 
         {/* Unassigned ticket CTA */}
         {!isClosed && currentUser?.ruolo !== "admin" && !ticket.operatore && (
@@ -1540,7 +1554,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 )}
                 {ticket.tempo_stimato_minuti !== null && ticket.tempo_stimato_minuti !== undefined && (
                   <div className="flex items-center justify-between">
-                    <span className="text-caldo-testo">Stimato:</span>
+                    <span className="text-caldo-testo">Durata apertura:</span>
                     <span className="tabular font-semibold text-inchiostro">{Math.floor(ticket.tempo_stimato_minuti / 60)}h {ticket.tempo_stimato_minuti % 60}m</span>
                   </div>
                 )}

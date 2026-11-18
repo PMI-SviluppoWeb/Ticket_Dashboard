@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireAdmin, createOperator } from "@/lib/auth";
+import { richiediOperatore, createOperator } from "@/lib/auth";
 
 export async function POST(request: Request) {
   try {
-    await requireAdmin();
+    const esitoAuth = await richiediOperatore(request, { ruolo: "admin" });
+    if (!esitoAuth.ok) return esitoAuth.risposta;
 
     const body = await request.json();
     const { nome, email, password, ruolo } = body as {

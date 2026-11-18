@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createTicket, listTickets, getTicketByNumero } from "@/lib/tickets";
-import { getOperatorById } from "@/lib/auth";
+import { createTicket, listTickets } from "@/lib/tickets";
+import { richiediOperatore } from "@/lib/auth";
 import { createNotification } from "@/lib/notifications";
 import { sendEmail } from "@/lib/email";
 import { emailNuovoTicket } from "@/lib/email-templates";
@@ -11,17 +11,12 @@ import type { Priorita, StatoTicket, TicketInput } from "@/lib/types";
 const PRIORITA: Priorita[] = ["BASSA", "MEDIA", "ALTA"];
 const STATI: StatoTicket[] = ["NUOVO", "IN_CORSO", "RISOLTO", "CHIUSO"];
 
-function getOperatorId(request: Request): string | null {
-  return request.headers.get("x-operator-id");
-}
-
-function getOperatorRole(request: Request): string | null {
-  return request.headers.get("x-operator-ruolo");
-}
-
 export async function GET(request: Request) {
-  const operatorId = getOperatorId(request);
-  const operatorRole = getOperatorRole(request);
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+
+  const operatorId = auth.operatore.id;
+  const operatorRole = auth.operatore.ruolo;
   const url = new URL(request.url);
 
   const stato = (url.searchParams.get("stato") ?? "TUTTI") as StatoTicket | "TUTTI";
@@ -38,10 +33,7 @@ export async function GET(request: Request) {
   } else if (operatorRole === "admin") {
     operatore = "";
   } else if (operatorId && !operatore) {
-    const operator = await getOperatorById(operatorId);
-    if (operator) {
-      operatore = `__MY_AND_UNASSIGNED__:${operator.nome}`;
-    }
+    operatore = `__MY_AND_UNASSIGNED__:${auth.operatore.nome}`;
   }
 
   const result = await listTickets({
@@ -61,6 +53,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const auth = await richiediOperatore(request);
+  if (!auth.ok) return auth.risposta;
+
   try {
     const body = (await request.json()) as Partial<TicketInput> & { invia_conferma?: boolean };
 
@@ -92,16 +87,9 @@ export async function POST(request: Request) {
       ? (body.priorita as Priorita)
       : "BASSA";
 
-    if (body.numero && (await getTicketByNumero(body.numero))) {
-      return NextResponse.json(
-        { error: `Numero ticket gia' esistente: ${body.numero}` },
-        { status: 409 }
-      );
-    }
-
+    // Id e numero sono SEMPRE generati dal server: un client non puo'
+    // sceglierli (numeri duplicati o id arbitrari romperebbero i riferimenti).
     const ticket = await createTicket({
-      id: body.id,
-      numero: body.numero,
       cliente: body.cliente,
       contatto: contatti.contatto,
       telefono: contatti.telefono,
@@ -138,6 +126,7 @@ export async function POST(request: Request) {
         to: email,
         subject: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
         html,
+        ticketId: ticket.id,
       });
       await logEmail({
         ticket_id: ticket.id,
@@ -147,6 +136,7 @@ export async function POST(request: Request) {
         corpo: html,
         stato: result.ok ? "inviata" : "errore",
         errore: result.error ?? null,
+        message_id: result.messageId ?? null,
       });
     }
 

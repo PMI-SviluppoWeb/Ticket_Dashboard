@@ -92,6 +92,22 @@ export default function TicketTable({
             </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
+              {t.sla_evidenza === "scaduto" && (
+                <span
+                  className="rounded border border-stato-urgenza-bordo bg-stato-urgenza-bg px-1.5 py-0.5 text-[10px] font-semibold uppercase text-stato-urgenza-testo"
+                  title="SLA superato"
+                >
+                  SLA
+                </span>
+              )}
+              {t.sla_evidenza === "in_scadenza" && (
+                <span
+                  className="rounded border border-stato-attesa-bordo bg-stato-attesa-bg px-1.5 py-0.5 text-[10px] font-semibold uppercase text-stato-attesa-testo"
+                  title="SLA in scadenza"
+                >
+                  SLA
+                </span>
+              )}
               <PriorityBadge priorita={t.priorita} />
               <StatusBadge stato={t.stato} />
             </div>

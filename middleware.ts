@@ -7,25 +7,28 @@ const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:3000",
 ]);
 
+// Elenco ESPLICITO delle route pubbliche. Prima erano prefissi
+// ("/api/auth/", "/api/hooks/"): una nuova route sotto quei prefissi nasceva
+// pubblica per sbaglio. Ora una route e' pubblica solo se compare qui.
 const PUBLIC_PATHS = new Set([
   "/login",
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/me",
   "/api/auth/register",
+  "/api/hooks/email",
+  // Ritorno da Google: non puo' passare dalla sessione (una sessione scaduta
+  // durante il consenso sprecherebbe il codice monouso). La protezione e' il
+  // confronto state + PKCE col cookie HttpOnly di /api/gmail/connect.
+  "/api/gmail/callback",
 ]);
 
 function isPublicPath(pathname: string): boolean {
-  // /api/gmail/callback e' pubblico: il ritorno da Google non puo' passare
-  // dalla verifica di sessione (una sessione scaduta durante il consenso
-  // sprecerebbe il codice monouso). La protezione di quella rotta e' il
-  // confronto state + PKCE col cookie HttpOnly di /api/gmail/connect.
-  return (
-    PUBLIC_PATHS.has(pathname) ||
-    pathname.startsWith("/api/auth/") ||
-    pathname.startsWith("/api/hooks/") ||
-    pathname === "/api/gmail/callback"
-  );
+  // API macchina (bot WhatsApp): autenticata con Authorization: Bearer e una
+  // chiave API, non con la sessione del browser. E' un namespace separato e
+  // volutamente pubblico a livello di middleware.
+  if (pathname.startsWith("/api/esterni/")) return true;
+  return PUBLIC_PATHS.has(pathname);
 }
 
 export async function middleware(request: NextRequest) {
@@ -73,18 +76,23 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  // Le intestazioni x-operator-* NON vengono piu' emesse: erano fidate da
+  // tutte le route e forgiabili se il middleware venisse aggirato. Ogni route
+  // usa richiediOperatore(), che rilegge la sessione e l'operatore dal DB.
   const response = NextResponse.next();
   if (ALLOWED_ORIGINS.has(origin)) {
     response.headers.set("Access-Control-Allow-Origin", origin);
   }
-  response.headers.set("x-operator-id", payload.operatorId);
-  response.headers.set("x-operator-email", payload.email);
-  response.headers.set("x-operator-ruolo", payload.ruolo);
   return response;
 }
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.png$|.*\\.jpg$|.*\\.svg$|.*\\.ico$|.*\\.woff$|.*\\.woff2$).*)",
+    // Le API passano SEMPRE dal middleware, anche se il percorso termina con
+    // un'estensione (prima il filtro sulle estensioni poteva saltarle).
+    "/api/:path*",
+    // Pagine e asset: si escludono solo le cartelle statiche di Next e i file
+    // con estensione serviti da /public.
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.[a-zA-Z0-9]+$).*)",
   ],
 };
