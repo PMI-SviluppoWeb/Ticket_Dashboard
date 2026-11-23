@@ -14,6 +14,7 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import SectionBar from "@/components/SectionBar";
 import { useOperatore } from "@/lib/operatore-client";
 import type { CasellaEmail, CasellaEmailInput } from "@/lib/types";
@@ -74,6 +75,7 @@ function CaselleEmailPageContent() {
 
   const [testingId, setTestingId] = useState<string | null>(null);
   const [esitoTest, setEsitoTest] = useState<string | null>(null);
+  const [polling, setPolling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   // Auto-scoperta IMAP/SMTP (stile Outlook): l'utente inserisce solo email
@@ -113,6 +115,28 @@ function CaselleEmailPageContent() {
   useEffect(() => {
     if (isAdmin) fetchCaselle();
   }, [isAdmin, fetchCaselle]);
+
+  // Controllo immediato della posta, senza aspettare il worker. Utile subito
+  // dopo il collegamento di una casella o per una verifica veloce.
+  const controllaOra = async () => {
+    setPolling(true);
+    setError(null);
+    setSuccess(null);
+    setEsitoTest(null);
+    try {
+      const res = await fetch("/api/caselle/poll", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+      setSuccess(
+        "Controllo completato. Le nuove email sono in Posta in arrivo o hanno creato un ticket."
+      );
+      await fetchCaselle();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Controllo non riuscito.");
+    } finally {
+      setPolling(false);
+    }
+  };
 
   useEffect(() => {
     if (success) {
@@ -469,6 +493,20 @@ function CaselleEmailPageContent() {
           azioni={
             <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
+                onClick={controllaOra}
+                disabled={polling}
+                title="Legge subito le nuove email, senza aspettare il worker"
+                className="flex cursor-pointer items-center gap-2 rounded-control border border-crema-contorno bg-white px-4 py-2 text-sm font-semibold text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {polling ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshIcon className="h-4 w-4" />
+                )}
+                {polling ? "Controllo..." : "Controlla ora"}
+              </button>
+              <button
                 onClick={() => {
                   // Reindirizza alla schermata ufficiale di consenso Google:
                   // nessun server, porta o password da inserire (OAuth 2.0).
@@ -493,6 +531,8 @@ function CaselleEmailPageContent() {
             </div>
           }
         />
+
+        <AreaTabs areaId="email" />
 
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm text-stato-urgenza-testo">

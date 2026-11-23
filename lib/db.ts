@@ -688,6 +688,13 @@ async function initSchema(): Promise<void> {
     "CREATE INDEX IF NOT EXISTS idx_tickets_eliminato_il ON tickets (eliminato_il)",
     "CREATE INDEX IF NOT EXISTS idx_tickets_canale ON tickets (canale)",
     "CREATE INDEX IF NOT EXISTS idx_notifications_destinatario ON notifications (destinatario_id)",
+    // La coda di triage filtra per stato_triage (colonna aggiunta dopo), non
+    // per la vecchia `stato`: senza indice era una scansione a ogni apertura
+    // della dashboard e a ogni poll del pannello.
+    "CREATE INDEX IF NOT EXISTS idx_email_inbox_triage ON email_inbox (stato_triage, data_creazione DESC)",
+    // Task personali/team: filtro per assegnatario e stato, ordine per data.
+    "CREATE INDEX IF NOT EXISTS idx_attivita_assegnatario ON attivita (assegnatario, stato, data_scadenza)",
+    "CREATE INDEX IF NOT EXISTS idx_attivita_stato_scadenza ON attivita (stato, data_scadenza)",
   ];
   for (const sql of indiciAggiuntivi) {
     try {

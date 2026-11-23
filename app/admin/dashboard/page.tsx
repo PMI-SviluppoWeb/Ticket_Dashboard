@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useOperatore } from "@/lib/operatore-client";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import { LoaderIcon, RefreshIcon, AlertTriangleIcon } from "@/components/icons";
 
 interface PuntoTrend {
@@ -204,6 +205,8 @@ export default function DashboardAdminPage() {
             </div>
           }
         />
+
+        <AreaTabs areaId="report" />
 
         <div className="mb-4 flex flex-wrap items-end gap-3 rounded-card border border-crema-contorno bg-white p-4">
           <label className="text-xs font-semibold text-caldo-testo">

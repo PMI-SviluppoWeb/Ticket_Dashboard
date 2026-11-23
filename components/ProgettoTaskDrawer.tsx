@@ -434,7 +434,7 @@ export default function ProgettoTaskDrawer({
                 Google Calendar e la dashboard leggono), gli altri sono i
                 collaboratori. */}
             <div className="mt-4">
-              <p className={LABEL_CLASS}>Persone</p>
+              <p className={LABEL_CLASS}>Assegnatario e collaboratori</p>
               <PersoneCondivise
                 persone={bozza.persone}
                 onCambia={(persone) => setBozza((b) => ({ ...b, persone }))}

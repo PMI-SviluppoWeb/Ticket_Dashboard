@@ -15,6 +15,9 @@ interface PageHeaderProps {
   // Slot destro: bottoni di pagina. Sotto il breakpoint vanno a capo sotto il
   // titolo invece di comprimerlo.
   azioni?: ReactNode;
+  // Variante densa per le pagine-cruscotto: il titolo scende di un gradino e
+  // il margine sotto si riduce, cosi' i pannelli guadagnano altezza utile.
+  compatto?: boolean;
 }
 
 // Testata di pagina — una sola convenzione per tutta l'app.
@@ -31,9 +34,14 @@ export default function PageHeader({
   conteggio,
   sottotitolo,
   azioni,
+  compatto = false,
 }: PageHeaderProps) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+    <div
+      className={`flex flex-wrap items-end justify-between gap-x-6 gap-y-4 ${
+        compatto ? "mb-4" : "mb-6"
+      }`}
+    >
       <div className="min-w-0">
         {eyebrow && (
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-caldo-testo">
@@ -43,7 +51,11 @@ export default function PageHeader({
 
         {/* `items-baseline` allinea il conteggio alla base del titolo: con
             `items-center` il numero piccolo galleggerebbe a meta' altezza. */}
-        <h1 className="flex flex-wrap items-baseline gap-x-2 font-display text-4xl font-semibold tracking-tight text-inchiostro sm:text-5xl">
+        <h1
+          className={`flex flex-wrap items-baseline gap-x-2 font-display font-semibold tracking-tight text-inchiostro ${
+            compatto ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl"
+          }`}
+        >
           {titolo}
           {conteggio !== undefined && (
             // Un gradino sotto il titolo, non due: a `text-3xl` un conteggio
@@ -57,7 +69,13 @@ export default function PageHeader({
         {sottotitolo && (
           // Il limite di misura tiene la riga sotto le ~80 battute: su schermo
           // largo un sottotitolo libero diventerebbe una riga lunghissima.
-          <p className="mt-2 max-w-2xl text-sm text-caldo-testo">{sottotitolo}</p>
+          <p
+            className={`mt-2 max-w-2xl text-caldo-testo ${
+              compatto ? "text-xs" : "text-sm"
+            }`}
+          >
+            {sottotitolo}
+          </p>
         )}
       </div>
 

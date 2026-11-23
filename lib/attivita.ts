@@ -312,6 +312,9 @@ export async function listEventiCalendario(opts: {
   cliente_id?: string;
   stato?: StatoAttivita | "TUTTE";
   etichetta_id?: string;
+  // Home: niente join Google e niente etichette. Il pannello dashboard mostra
+  // solo ora/titolo/origine, quindi il secondo round-trip e' peso inutile.
+  light?: boolean;
 }): Promise<EventoCalendario[]> {
   const where: string[] = ["a.data_scadenza >= @dal", "a.data_scadenza <= @al"];
   const params: Record<string, string> = { dal: opts.dal, al: opts.al };
@@ -339,14 +342,21 @@ export async function listEventiCalendario(opts: {
     params.etichetta_id = opts.etichetta_id;
   }
 
+  const colonneGoogle = opts.light
+    ? ""
+    : `,
+              ag.stato         AS google_stato,
+              ag.ultimo_errore AS google_ultimo_errore,
+              ag.data_sync     AS google_data_sync`;
+  const joinGoogle = opts.light
+    ? ""
+    : "LEFT JOIN attivita_google ag ON ag.attivita_id = a.id";
+
   const rows = await db
     .prepare(
       `SELECT a.id, a.progetto_id, a.cliente_id, a.titolo, a.descrizione, a.stato,
               a.priorita, a.data_inizio, a.data_scadenza, a.data_completamento,
-              a.assegnatario, a.persone, a.data_creazione, a.data_aggiornamento,
-              ag.stato         AS google_stato,
-              ag.ultimo_errore AS google_ultimo_errore,
-              ag.data_sync     AS google_data_sync,
+              a.assegnatario, a.persone, a.data_creazione, a.data_aggiornamento${colonneGoogle},
               p.nome   AS progetto_nome,
               p.codice AS progetto_codice,
               COALESCE(cp.ragione_sociale, ca.ragione_sociale) AS cliente_ragione_sociale
@@ -354,7 +364,7 @@ export async function listEventiCalendario(opts: {
        LEFT JOIN progetti p  ON p.id  = a.progetto_id
        LEFT JOIN clienti  cp ON cp.id = p.cliente_id
        LEFT JOIN clienti  ca ON ca.id = a.cliente_id
-       LEFT JOIN attivita_google ag ON ag.attivita_id = a.id
+       ${joinGoogle}
        WHERE ${where.join(" AND ")}
        ORDER BY a.data_scadenza ASC`
     )
@@ -362,10 +372,13 @@ export async function listEventiCalendario(opts: {
 
   // Le etichette arrivano con un secondo round-trip (una sola query per
   // tutti gli id): SQLite non ha un modo pulito di fare JSON aggregation
-  // multi-join qui, e il calendario e' l'unico caller che le vuole.
-  const etichettePerId = await getEtichettePerAttivita(
-    (rows as unknown as { id: string }[]).map((r) => r.id)
-  );
+  // multi-join qui, e il calendario e' l'unico caller che le vuole. In
+  // modalita' light si salta del tutto.
+  const etichettePerId = opts.light
+    ? new Map<string, Etichetta[]>()
+    : await getEtichettePerAttivita(
+        (rows as unknown as { id: string }[]).map((r) => r.id)
+      );
 
   return (rows as unknown as Record<string, unknown>[]).map((r): EventoCalendario => {
     const evento: EventoCalendario = {

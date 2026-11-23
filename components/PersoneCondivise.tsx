@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { caricaApi } from "@/lib/api-cache";
 import { conPersona, senzaPersona, tutteLePersone } from "@/lib/persone";
 import { iniziali } from "@/lib/task-local";
@@ -80,6 +81,7 @@ export default function PersoneCondivise({
   const [aperto, setAperto] = useState(false);
   const [testo, setTesto] = useState("");
   const [operatori, setOperatori] = useState<Operatore[]>([]);
+  const [caricandoOperatori, setCaricandoOperatori] = useState(false);
   const contenitoreRef = useRef<HTMLDivElement>(null);
   const bottoneRef = useRef<HTMLButtonElement>(null);
   const pannelloRef = useRef<HTMLDivElement>(null);
@@ -97,12 +99,16 @@ export default function PersoneCondivise({
   useEffect(() => {
     if (!aperto || operatori.length > 0) return;
     let annullato = false;
+    setCaricandoOperatori(true);
     caricaApi<{ operatori: Operatore[] }>("/api/operatori")
       .then((dato) => {
         if (!annullato) setOperatori(dato.operatori ?? []);
       })
       .catch(() => {
         // Senza elenco resta l'input libero: si puo' comunque scrivere un nome.
+      })
+      .finally(() => {
+        if (!annullato) setCaricandoOperatori(false);
       });
     return () => {
       annullato = true;
@@ -136,7 +142,13 @@ export default function PersoneCondivise({
   useEffect(() => {
     if (!aperto) return;
     const suClick = (e: MouseEvent) => {
-      if (!contenitoreRef.current?.contains(e.target as Node)) setAperto(false);
+      const target = e.target as Node;
+      if (
+        !contenitoreRef.current?.contains(target) &&
+        !pannelloRef.current?.contains(target)
+      ) {
+        setAperto(false);
+      }
     };
     const suTasto = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -148,8 +160,12 @@ export default function PersoneCondivise({
     };
     // Un pannello `fixed` non segue il bottone: se scorre il contenitore (la
     // colonna del kanban, la pagina) resterebbe sospeso nel vuoto. Meglio
-    // chiuderlo che lasciarlo scollegato.
-    const suScorrimento = () => setAperto(false);
+    // chiuderlo che lasciarlo scollegato. Lo scroll INTERNO alla lista
+    // operatori non deve chiuderlo.
+    const suScorrimento = (e: Event) => {
+      if (pannelloRef.current?.contains(e.target as Node)) return;
+      setAperto(false);
+    };
     document.addEventListener("mousedown", suClick);
     // `capture`: il listener del drawer e' su document in bolla. In cattura
     // questo arriva prima e lo ferma.
@@ -181,12 +197,16 @@ export default function PersoneCondivise({
     const top = sotto + altezza > window.innerHeight - MARGINE && sopra > MARGINE ? sopra : sotto;
     setPosizione((p) => (p && p.top !== top ? { ...p, top } : p));
     // `persone.length`: aggiungere o togliere un chip cambia l'altezza del
-    // pannello, e con lui lo spazio disponibile sotto il bottone.
-  }, [aperto, persone.length]);
+    // pannello, e con lui lo spazio disponibile sotto il bottone. Anche
+    // l'arrivo della lista operatori cambia l'altezza.
+  }, [aperto, persone.length, operatori.length, caricandoOperatori]);
 
   const primario = persone[0] ?? null;
   const collaboratori = persone.slice(1);
   const elenco = tutteLePersone(primario, collaboratori);
+  const disponibili = operatori.filter(
+    (o) => !elenco.some((n) => n.toLowerCase() === o.nome.toLowerCase())
+  );
 
   const aggiungi = (nome: string) => {
     const pulito = nome.trim();
@@ -243,14 +263,17 @@ export default function PersoneCondivise({
         )}
       </button>
 
-      {aperto && posizione && (
-        <div
-          ref={pannelloRef}
-          role="dialog"
-          aria-label={titolo}
-          style={{ top: posizione.top, left: posizione.left, width: LARGHEZZA_PANNELLO }}
-          className="fixed z-30 rounded-panel border border-crema-contorno bg-white p-3 shadow-soft"
-        >
+      {aperto &&
+        posizione &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={pannelloRef}
+            role="dialog"
+            aria-label={titolo}
+            style={{ top: posizione.top, left: posizione.left, width: LARGHEZZA_PANNELLO }}
+            className="fixed z-[70] rounded-panel border border-crema-contorno bg-white p-3 shadow-soft"
+          >
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-caldo-testo">
             {titolo}
           </p>
@@ -304,15 +327,49 @@ export default function PersoneCondivise({
               className="h-8 w-full rounded-full border border-dashed border-crema-contorno bg-white pl-8 pr-3 text-xs text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
             />
             <datalist id={idLista}>
-              {operatori
-                .filter((o) => !elenco.some((n) => n.toLowerCase() === o.nome.toLowerCase()))
-                .map((o) => (
-                  <option key={o.id} value={o.nome} />
-                ))}
+              {disponibili.map((o) => (
+                <option key={o.id} value={o.nome} />
+              ))}
             </datalist>
           </div>
-        </div>
-      )}
+
+          <div className="mt-2">
+            {caricandoOperatori ? (
+              <p className="py-1 text-[11px] text-caldo-testo">Caricamento operatori…</p>
+            ) : disponibili.length > 0 ? (
+              <>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-caldo-testo">
+                  Operatori
+                </p>
+                <ul className="max-h-36 space-y-0.5 overflow-y-auto pr-1">
+                  {disponibili.map((o) => (
+                    <li key={o.id}>
+                      <button
+                        type="button"
+                        onClick={() => aggiungi(o.nome)}
+                        className="flex w-full items-center gap-2 rounded-control px-1.5 py-1 text-left transition-colors duration-200 hover:bg-crema-scuro focus:outline-none focus-visible:ring-2 focus-visible:ring-inchiostro"
+                      >
+                        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-crema-scuro text-[9px] font-semibold text-inchiostro">
+                          {iniziali(o.nome)}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-inchiostro">
+                          {o.nome}
+                        </span>
+                        <PlusIcon className="h-3 w-3 shrink-0 text-caldo-testo" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : operatori.length > 0 ? (
+              <p className="py-1 text-[11px] text-caldo-testo">
+                Tutti gli operatori sono gia&apos; nella lista.
+              </p>
+            ) : null}
+          </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

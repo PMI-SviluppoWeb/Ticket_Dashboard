@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { richiediOperatore } from "@/lib/auth";
 
+// La risposta dipende dai cookie di sessione e cambia quando un admin
+// crea/disattiva un operatore: nessuna prerender statica.
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   try {
     const auth = await richiediOperatore(request);

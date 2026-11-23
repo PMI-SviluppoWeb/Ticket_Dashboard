@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useOperatore } from "@/lib/operatore-client";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import { LoaderIcon, CheckCircleIcon } from "@/components/icons";
 import type { ConfigSla } from "@/lib/sla";
 
@@ -116,6 +117,8 @@ export default function SlaPage() {
           titolo="SLA"
           sottotitolo="Obiettivi di presa in carico e risoluzione per priorità, calcolati in minuti lavorativi sull'orario d'ufficio."
         />
+
+        <AreaTabs areaId="admin" />
 
         {error && (
           <div role="alert" className="mb-4 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm font-medium text-stato-urgenza-testo">

@@ -6,6 +6,9 @@ export interface Filters {
   priorita: Priorita | "TUTTE";
   q: string;
   modulo: string;
+  // "TUTTI" mostra tutto, "__UNASSIGNED__" solo i non assegnati, altrimenti il
+  // nome esatto di un operatore (il testo libero di tickets.operatore).
+  operatore: string;
   ordina: string;
 }
 
@@ -14,12 +17,15 @@ export const DEFAULT_FILTERS: Filters = {
   priorita: "TUTTE",
   q: "",
   modulo: "",
+  operatore: "TUTTI",
   ordina: "data_desc",
 };
 
 interface FiltersBarProps {
   filters: Filters;
   moduli: string[];
+  // Se assente, il filtro operatore non viene mostrato (pagina /operatore).
+  operatori?: string[];
   onChange: (patch: Partial<Filters>) => void;
 }
 
@@ -110,7 +116,7 @@ export function OrdinaPill({
 // Ordine deliberato da sinistra a destra: prima cosa si cerca (campo largo),
 // poi i filtri che restringono. La pillola "Priorità" resta `primary` perche'
 // e' il filtro che si usa di piu' — gli urgenti.
-export default function FiltersBar({ filters, moduli, onChange }: FiltersBarProps) {
+export default function FiltersBar({ filters, moduli, operatori, onChange }: FiltersBarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-crema-bordo px-5 py-3">
       <div className="relative min-w-[10rem] flex-1">
@@ -162,6 +168,24 @@ export default function FiltersBar({ filters, moduli, onChange }: FiltersBarProp
           </option>
         ))}
       </PillSelect>
+
+      {operatori && (
+        <PillSelect
+          variant="neutral"
+          ariaLabel="Filtra per operatore"
+          value={filters.operatore}
+          onChange={(operatore) => onChange({ operatore })}
+        >
+          <option value="TUTTI">Operatore: tutti</option>
+          <option value="__ME__">I miei</option>
+          <option value="__UNASSIGNED__">Non assegnati</option>
+          {operatori.map((nome) => (
+            <option key={nome} value={nome}>
+              {nome}
+            </option>
+          ))}
+        </PillSelect>
+      )}
     </div>
   );
 }

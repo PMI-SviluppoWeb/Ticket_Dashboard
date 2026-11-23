@@ -13,7 +13,7 @@ interface BarraSintesiProps {
 
 // La fascia delle misure: sei celle in UNA superficie.
 //
-// Prima c'erano tre card tinte (StatsCards) per tre metriche di ticket. Ora le
+// Prima c'erano tre card tinte per tre metriche di ticket. Ora le
 // metriche sono sei e vengono da domini diversi: sei card sarebbero state un
 // muro. Una sola superficie divisa da filetti tiene la fascia a ~100px e
 // lascia il posto alla tabella ticket, che sta sotto.
@@ -21,7 +21,7 @@ interface BarraSintesiProps {
 // "Prima io, poi il team" e' dichiarato dalla TINTA, non dalla posizione: solo
 // le due celle personali hanno un fondo (peach, l'accento del sistema; attesa
 // quando c'e' qualcosa in ritardo). Le altre sono cifre nude separate dal
-// filetto, come le `CifraNuda` di StatsCards.
+// filetto, come le vecchie cifre nude delle card.
 export default function BarraSintesi({
   sintesi,
   generatoIl,

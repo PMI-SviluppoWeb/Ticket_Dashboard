@@ -363,10 +363,13 @@ async function pollCasella(id: string, conn: Connessione): Promise<void> {
       return;
     }
 
-    // Cerca email non lette con UID > high water mark
-    const searchResult = await client.search({ seen: false });
-    const unseen = searchResult === false ? [] : searchResult;
-    const newUids = unseen.filter((uid) => uid > conn.highWaterMark);
+    // Cerca TUTTE le email con UID > high water mark. Non si filtra per
+    // "non lette": una mail letta da webmail o da un altro client sarebbe
+    // altrimenti persa per sempre. Il cursore e' l'unica barriera contro i
+    // doppioni; il webhook deduplica comunque per message-id.
+    const searchResult = await client.search({ all: true });
+    const tutte = searchResult === false ? [] : searchResult;
+    const newUids = tutte.filter((uid) => uid > conn.highWaterMark);
 
     if (newUids.length === 0) {
       return; // Silenzioso se non ci sono nuove email
@@ -400,7 +403,7 @@ async function pollCasella(id: string, conn: Connessione): Promise<void> {
   }
 }
 
-async function pollOnce(): Promise<void> {
+export async function pollOnce(): Promise<void> {
   if (isPolling) return;
   isPolling = true;
 

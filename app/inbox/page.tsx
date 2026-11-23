@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useOperatore } from "@/lib/operatore-client";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import { LoaderIcon, MailIcon, RefreshIcon } from "@/components/icons";
 
 interface InboxRiga {
@@ -156,6 +157,8 @@ export default function InboxPage() {
             </button>
           }
         />
+
+        <AreaTabs areaId="email" />
 
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-card border border-crema-contorno bg-white p-2">
           {TABS.map((t) => (

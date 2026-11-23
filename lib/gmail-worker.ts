@@ -138,7 +138,7 @@ async function pollCasella(casella: CasellaGmailWorker): Promise<void> {
   }
 }
 
-async function pollOnce(): Promise<void> {
+export async function pollOnce(): Promise<void> {
   if (isPolling) return;
   isPolling = true;
 

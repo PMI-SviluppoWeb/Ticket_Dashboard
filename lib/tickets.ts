@@ -214,7 +214,9 @@ export async function listTickets(opts: {
   
   // Handle special operator filter: "__MY_AND_UNASSIGNED__:nome_operatore"
   // Shows tickets assigned to operator OR unassigned (NUOVO) tickets
-  if (opts.operatore?.startsWith("__MY_AND_UNASSIGNED__:")) {
+  if (opts.operatore === "__UNASSIGNED__") {
+    where.push("operatore IS NULL");
+  } else if (opts.operatore?.startsWith("__MY_AND_UNASSIGNED__:")) {
     const operatorName = opts.operatore.replace("__MY_AND_UNASSIGNED__:", "");
     where.push("(operatore = @operatore OR (operatore IS NULL AND stato = 'NUOVO'))");
     params.operatore = operatorName;

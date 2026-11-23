@@ -37,6 +37,7 @@ export async function GET(request: Request) {
   const stato: StatoAttivita | "TUTTE" = STATI_ATTIVITA.includes(statoParam as StatoAttivita)
     ? (statoParam as StatoAttivita)
     : "TUTTE";
+  const light = searchParams.get("light") === "1";
 
   try {
     const eventi = await listEventiCalendario({
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
       cliente_id: clienteId,
       stato,
       etichetta_id: etichettaId,
+      light,
     });
     return NextResponse.json({ eventi, dal, al });
   } catch (err) {

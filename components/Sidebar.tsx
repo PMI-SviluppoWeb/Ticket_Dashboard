@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { resetOperatore, useOperatore } from "@/lib/operatore-client";
@@ -9,7 +10,7 @@ import {
   HelpCircleIcon,
   LogOutIcon,
 } from "@/components/icons";
-import { navVisibile, voceAttiva } from "@/lib/nav";
+import { areeVisibili, areaAttiva } from "@/lib/nav";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -20,15 +21,16 @@ export default function Sidebar() {
   const operator = operatore ? { nome: operatore.nome, email: operatore.email, ruolo: operatore.ruolo } : null;
 
   const isAdmin = operator?.ruolo === "admin";
-  const NAV_ITEMS = navVisibile(isAdmin);
+  const aree = areeVisibili(isAdmin);
+  const attiva = areaAttiva(aree, pathname);
 
   // Passando il mouse (o col focus da tastiera) su una voce, il dato che quella
   // pagina chiede per prima viene richiesto adesso: quando il clic arriva, il
   // viaggio verso il DB e' gia' in corso o finito. Non si precaricano le pagine
   // pesanti (elenchi, calendario): il costo di un prefetch sbagliato non deve
   // superare il beneficio.
-  const riscalda = (item: (typeof NAV_ITEMS)[number]) => {
-    for (const url of item.calda ?? []) prefetchApi(url);
+  const riscalda = (area: (typeof aree)[number]) => {
+    for (const url of area.calda ?? []) prefetchApi(url);
   };
 
   const handleLogout = async () => {
@@ -71,24 +73,34 @@ export default function Sidebar() {
         className="flex flex-col gap-1.5 rounded-full bg-white p-1.5 shadow-soft ring-1 ring-crema-contorno"
         aria-label="Navigazione principale"
       >
-        {NAV_ITEMS.map((item) => {
-          const active = item.href === voceAttiva(NAV_ITEMS, pathname);
+        {aree.map((area, i) => {
+          const active = area.id === attiva?.id;
+          const Icona = area.icon;
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              onMouseEnter={() => riscalda(item)}
-              onFocus={() => riscalda(item)}
-              className={`${cerchio} ${
-                active
-                  ? "bg-inchiostro text-lime"
-                  : "text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
-              }`}
-            >
-              <item.icon className="h-[18px] w-[18px]" />
-              <span className={tooltip}>{item.label}</span>
-            </Link>
+            <Fragment key={area.id}>
+              {/* Divisore tra operativita' quotidiana e amministrazione: la
+                  rail resta una sola pillola, ma i due gruppi si leggono. */}
+              {area.gruppo === "admin" && aree[i - 1]?.gruppo !== "admin" && (
+                <span
+                  className="mx-auto my-1 h-px w-6 bg-crema-contorno"
+                  aria-hidden="true"
+                />
+              )}
+              <Link
+                href={area.href}
+                aria-current={active ? "true" : undefined}
+                onMouseEnter={() => riscalda(area)}
+                onFocus={() => riscalda(area)}
+                className={`${cerchio} ${
+                  active
+                    ? "bg-inchiostro text-lime"
+                    : "text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
+                }`}
+              >
+                <Icona className="h-[18px] w-[18px]" />
+                <span className={tooltip}>{area.label}</span>
+              </Link>
+            </Fragment>
           );
         })}
       </nav>

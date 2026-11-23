@@ -12,6 +12,7 @@
     "backup-db": "tsx scripts/backup-turso.ts",
     "pulizia-email": "tsx scripts/pulizia-email.ts",
     "worker": "npx tsx scripts/start-worker.ts",
+    "poll-mail": "tsx scripts/poll-mail.ts",
     "sync-clienti": "npx tsx scripts/sync-clienti.ts"
   },
   "dependencies": {

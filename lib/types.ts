@@ -586,13 +586,16 @@ export interface TaskScadenzaDashboard {
   titolo: string;
   stato: StatoAttivita;
   priorita: Priorita;
-  data_scadenza: string;
+  // null = task aperta senza scadenza: resta nel pannello, in fondo.
+  data_scadenza: string | null;
   assegnatario: string | null;
   progetto_id: string | null;
   progetto_nome: string | null;
   progetto_codice: string | null;
   cliente_ragione_sociale: string | null;
   in_ritardo: boolean;
+  // Calcolato dal server: scadenza entro i prossimi 7 giorni.
+  in_scadenza: boolean;
 }
 
 export interface ProgettoDashboard {
@@ -624,13 +627,9 @@ export interface DashboardData {
   // ISO: mostrato come "aggiornato alle HH:mm" e usato per delimitare il poll.
   generato_il: string;
   sintesi: DashboardSintesi;
-  agenda: EventoAgendaDashboard[];
+  // Tutte le mie task aperte (assegnate o con me tra i collaboratori),
+  // comprese quelle senza scadenza. Il team si carica a parte, solo admin.
   mie_task: TaskScadenzaDashboard[];
-  progetti: ProgettoDashboard[];
-  // Vuoto per i non admin: l'elenco nomina i colleghi e cosa stanno facendo,
-  // informazione che il resto dell'app riserva agli amministratori
-  // (`/api/operatori/stats`).
-  in_corso_ora: VoceApertaDashboard[];
 }
 
 

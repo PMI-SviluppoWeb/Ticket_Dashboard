@@ -17,7 +17,7 @@ import AppHeader from "@/components/AppHeader";
 import PageHeader from "@/components/PageHeader";
 import SectionBar from "@/components/SectionBar";
 import { ORIGINI, ORIGINI_LABELS, TIMEZONE_DEFAULT } from "@/lib/google-evento";
-import { caricaApi } from "@/lib/api-cache";
+import { caricaApi, datoImmediato } from "@/lib/api-cache";
 import { useOperatore } from "@/lib/operatore-client";
 import {
   type DatiEventoCompatto,
@@ -929,12 +929,19 @@ export default function CalendarioPage() {
 
     setLoading(true);
     setError("");
+    const url = `/api/calendario?${params.toString()}`;
+    // Tornando sul calendario, gli eventi gia' visti compaiono subito; la
+    // richiesta aggiorna in background. `forza` per non mostrare a lungo una
+    // copia vecchia dopo drag/modifiche.
+    const subito = datoImmediato<{ eventi?: EventoCalendario[] }>(url);
+    if (subito) {
+      setEventi(subito.eventi ?? []);
+      setLoading(false);
+    }
     try {
-      const res = await fetch(`/api/calendario?${params.toString()}`);
-      if (!res.ok) throw new Error(`Errore ${res.status}`);
-      const data = await res.json();
+      const data = await caricaApi<{ eventi?: EventoCalendario[] }>(url, { forza: true });
       if (seq === requestSeq.current) {
-        setEventi((data.eventi ?? []) as EventoCalendario[]);
+        setEventi(data.eventi ?? []);
       }
     } catch (err) {
       if (seq === requestSeq.current) {

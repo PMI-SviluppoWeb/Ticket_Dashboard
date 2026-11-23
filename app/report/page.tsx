@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useOperatore } from "@/lib/operatore-client";
 import { formatDurata } from "@/lib/durata";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import {
   DownloadIcon,
   LoaderIcon,
@@ -160,6 +161,8 @@ export default function ReportOrePage() {
             </a>
           }
         />
+
+        <AreaTabs areaId="report" />
 
         {/* Filtri */}
         <div className="mb-6 flex flex-wrap items-end gap-3 rounded-card border border-crema-contorno bg-white p-4">

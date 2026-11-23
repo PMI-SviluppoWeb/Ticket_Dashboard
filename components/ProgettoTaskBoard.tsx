@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type { AttivitaRow, StatoAttivita } from "@/lib/types";
 import { PriorityBadge } from "@/components/badges";
 import {
@@ -14,6 +14,7 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import { formatData } from "@/lib/calendario";
+import { caricaApi } from "@/lib/api-cache";
 import { tutteLePersone } from "@/lib/persone";
 import { nuovoId, type ExtraTask, type Sezione } from "@/lib/task-local";
 import PersoneCondivise from "@/components/PersoneCondivise";
@@ -57,7 +58,12 @@ interface ProgettoTaskBoardProps {
   onCambiaExtra: (attivitaId: string, patch: Partial<ExtraTask>) => void;
   onCambiaPersone: (attivitaId: string, persone: string[]) => void;
   onCambiaSezioni: (sezioni: Sezione[]) => void;
-  onCreaTask: (sezioneId: string, titolo: string) => Promise<void>;
+  onCreaTask: (
+    sezioneId: string,
+    titolo: string,
+    assegnatario?: string,
+    dataScadenza?: string
+  ) => Promise<void>;
   onCompleta: (id: string, completata: boolean) => void;
   onElimina: (id: string) => void;
   onAnnullaElimina: () => void;
@@ -89,15 +95,47 @@ export default function ProgettoTaskBoard({
   // completo sta nel drawer, che pero' ha bisogno di una task gia' esistente.
   const [creandoIn, setCreandoIn] = useState<string | null>(null);
   const [titoloNuovo, setTitoloNuovo] = useState("");
+  const [nuovoAssegnatario, setNuovoAssegnatario] = useState("");
+  const [nuovaScadenza, setNuovaScadenza] = useState("");
+  const [operatori, setOperatori] = useState<{ id: string; nome: string }[]>([]);
+  const [operatoriCaricati, setOperatoriCaricati] = useState(false);
   const [salvandoNuovo, setSalvandoNuovo] = useState(false);
+
+  // Anagrafica per la select di assegnazione. Si carica solo quando serve
+  // davvero (riga di creazione aperta o progetto ancora vuoto): guardare la
+  // board non deve costare una richiesta in piu'. Cache condivisa col popover.
+  useEffect(() => {
+    if (operatoriCaricati) return;
+    if (creandoIn === null && attivita.length > 0) return;
+    let annullato = false;
+    caricaApi<{ operatori?: { id: string; nome: string; attivo?: boolean }[] }>("/api/operatori")
+      .then((data) => {
+        if (annullato) return;
+        setOperatori(
+          (data.operatori ?? [])
+            .filter((o) => o.attivo !== false)
+            .map((o) => ({ id: o.id, nome: o.nome }))
+        );
+        setOperatoriCaricati(true);
+      })
+      .catch(() => {
+        // Senza anagrafica resta la select vuota; il campo libero del popover
+        // Persone continua a funzionare.
+      });
+    return () => {
+      annullato = true;
+    };
+  }, [creandoIn, attivita.length, operatoriCaricati]);
 
   const creaTask = async (sezioneId: string) => {
     const titolo = titoloNuovo.trim();
     if (!titolo) return;
     setSalvandoNuovo(true);
     try {
-      await onCreaTask(sezioneId, titolo);
+      await onCreaTask(sezioneId, titolo, nuovoAssegnatario, nuovaScadenza);
       setTitoloNuovo("");
+      setNuovoAssegnatario("");
+      setNuovaScadenza("");
       setCreandoIn(null);
     } catch {
       // Il messaggio lo mostra la pagina (onCreaTask lo rilancia). Qui si
@@ -253,7 +291,7 @@ export default function ProgettoTaskBoard({
       {attivita.length === 0 ? (
         <div className="px-5 py-12 text-center">
           <p className="text-sm text-caldo-testo">Nessuna task in questo progetto.</p>
-          <div className="mx-auto mt-3 flex max-w-sm items-center gap-2">
+          <div className="mx-auto mt-3 flex max-w-2xl flex-wrap items-center gap-2">
             <input
               value={titoloNuovo}
               onChange={(e) => setTitoloNuovo(e.target.value)}
@@ -265,13 +303,33 @@ export default function ProgettoTaskBoard({
               }}
               placeholder="Titolo della prima task"
               aria-label="Titolo della prima task"
-              className="w-full rounded-full border border-crema-contorno bg-white px-4 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+              className="min-w-[12rem] flex-1 rounded-full border border-crema-contorno bg-white px-4 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+            />
+            <select
+              value={nuovoAssegnatario}
+              onChange={(e) => setNuovoAssegnatario(e.target.value)}
+              aria-label="Assegna la prima task a"
+              className="h-9 cursor-pointer rounded-full border border-crema-contorno bg-white px-3 text-xs font-medium text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+            >
+              <option value="">Nessun operatore</option>
+              {operatori.map((o) => (
+                <option key={o.id} value={o.nome}>
+                  {o.nome}
+                </option>
+              ))}
+            </select>
+            <input
+              type="datetime-local"
+              value={nuovaScadenza}
+              onChange={(e) => setNuovaScadenza(e.target.value)}
+              aria-label="Scadenza della prima task"
+              className="h-9 rounded-full border border-crema-contorno bg-white px-3 text-xs text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
             />
             <button
               type="button"
               onClick={() => creaTask(sezioni[0]?.id ?? "")}
               disabled={!titoloNuovo.trim() || salvandoNuovo}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-inchiostro px-4 py-2 text-sm font-semibold text-white transition hover:bg-inchiostro-profondo disabled:opacity-40"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-inchiostro px-4 text-sm font-semibold text-white transition hover:bg-inchiostro-profondo disabled:opacity-40"
             >
               <PlusIcon className="h-3.5 w-3.5" />
               Crea
@@ -378,7 +436,7 @@ export default function ProgettoTaskBoard({
                 {!chiusa && (
                   <div id={`sez-corpo-${sezione.id}`}>
                     {creandoIn === sezione.id && (
-                      <div className="flex items-center gap-2 px-5 pb-2 pl-14">
+                      <div className="flex flex-wrap items-center gap-2 px-5 pb-2 pl-14">
                         <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-dashed border-crema-contorno text-caldo-testo">
                           <PlusIcon className="h-3 w-3" />
                         </span>
@@ -398,7 +456,27 @@ export default function ProgettoTaskBoard({
                           }}
                           placeholder="Titolo della task e premi Invio"
                           aria-label="Titolo della nuova task"
-                          className="h-8 w-full rounded-full border border-crema-contorno bg-white px-3 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                          className="h-8 min-w-[10rem] flex-1 rounded-full border border-crema-contorno bg-white px-3 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                        />
+                        <select
+                          value={nuovoAssegnatario}
+                          onChange={(e) => setNuovoAssegnatario(e.target.value)}
+                          aria-label="Assegna la nuova task a"
+                          className="h-8 cursor-pointer rounded-full border border-crema-contorno bg-white px-2.5 text-xs font-medium text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                        >
+                          <option value="">Nessun operatore</option>
+                          {operatori.map((o) => (
+                            <option key={o.id} value={o.nome}>
+                              {o.nome}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="datetime-local"
+                          value={nuovaScadenza}
+                          onChange={(e) => setNuovaScadenza(e.target.value)}
+                          aria-label="Scadenza della nuova task"
+                          className="h-8 rounded-full border border-crema-contorno bg-white px-2.5 text-xs text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
                         />
                         <button
                           type="button"
@@ -406,7 +484,7 @@ export default function ProgettoTaskBoard({
                           disabled={!titoloNuovo.trim() || salvandoNuovo}
                           className="shrink-0 rounded-full bg-inchiostro px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-inchiostro-profondo disabled:opacity-40"
                         >
-                          {salvandoNuovo ? "…" : "Crea"}
+                          {salvandoNuovo ? "." : "Crea"}
                         </button>
                         <button
                           type="button"
@@ -615,7 +693,7 @@ function RigaTaskBase({
           persone={persone}
           onCambia={(nuove) => onCambiaPersone(a.id, nuove)}
           titolo={`Persone sulla task «${a.titolo}»`}
-          vuoto=""
+          vuoto="Assegna"
           allinea="destra"
         />
       </div>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useOperatore } from "@/lib/operatore-client";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import { LoaderIcon, LockClosedIcon, RefreshIcon, TrashIcon } from "@/components/icons";
 
 interface ChiaveApi {
@@ -153,6 +154,8 @@ export default function ChiaviApiPage() {
             </button>
           }
         />
+
+        <AreaTabs areaId="admin" />
 
         {error && (
           <div role="alert" className="mb-4 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm font-medium text-stato-urgenza-testo">

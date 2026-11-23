@@ -10,10 +10,9 @@ import {
   LoaderIcon,
   LockClosedIcon,
   HeadsetIcon,
-  BarChartIcon,
 } from "@/components/icons";
-import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import SectionBar from "@/components/SectionBar";
 import { useOperatore } from "@/lib/operatore-client";
 
@@ -288,16 +287,9 @@ export default function AdminPage() {
               <span className="text-xs text-caldo-testo">
                 Sessione admin: <strong>{currentOperator.nome}</strong>
               </span>
-              <Link
-                href="/admin/dashboard"
-                className="flex cursor-pointer items-center gap-2 rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
-              >
-                <BarChartIcon className="h-4 w-4" />
-                Dashboard
-              </Link>
               <button
                 onClick={handleExitAdmin}
-                className="flex cursor-pointer items-center gap-2 rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                className="cursor-pointer rounded-control border border-crema-contorno px-3 py-2 text-sm font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
               >
                 Esci da Admin
               </button>
@@ -311,6 +303,8 @@ export default function AdminPage() {
             </div>
           }
         />
+
+        <AreaTabs areaId="admin" />
 
         {/* Alerts */}
         {error && (

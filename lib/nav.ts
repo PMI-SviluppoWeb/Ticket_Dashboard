@@ -1,96 +1,141 @@
 import type { ComponentType } from "react";
 import {
   BarChartIcon,
-  BookIcon,
   CalendarIcon,
-  ClockIcon,
   FolderIcon,
   GridIcon,
-  LockClosedIcon,
   MailIcon,
-  SparklesIcon,
-  TimerIcon,
-  UserCircleIcon,
-  UserPlusIcon,
+  SettingsIcon,
 } from "@/components/icons";
 
-// Voci di navigazione in UN solo posto: la sidebar (desktop) e la bottom tab
-// bar (mobile) leggono da qui, cosi' non puo' capitare che un link esista su
-// un breakpoint e non sull'altro.
-export type NavItem = {
+// ===========================================================================
+// Navigazione ad AREE, non a singole pagine.
+//
+// Prima la rail aveva una voce per ogni schermata (11 da admin): due icone
+// Mail identiche, due "dashboard", due icone tempo e un overflow verticale su
+// un laptop da 768px. Le pagine che appartengono allo stesso dominio ora
+// stanno sotto un'unica area e si raggiungono con i tab (components/AreaTabs).
+//
+// Gli URL restano quelli attuali: nessun redirect, nessun link profondo rotto.
+// L'area si riconosce dai suoi FIGLI, non dal prefisso del percorso: cosi'
+// `/admin/email` accende Email e non Admin, e `/admin/dashboard` accende
+// Report e non Admin.
+// ===========================================================================
+
+export type NavChild = {
   href: string;
   label: string;
+  // true = il figlio corrisponde solo al percorso esatto. Serve per "/" e
+  // per "/admin": senza, ogni sottopagina accenderebbe anche il padre.
+  exact?: boolean;
+};
+
+export type NavGruppo = "lavoro" | "admin";
+
+export type NavArea = {
+  id: string;
+  label: string;
   icon: ComponentType<{ className?: string }>;
-  exact: boolean;
+  // Pagina di atterraggio dell'area (primo figlio, ma esplicita per leggibilita').
+  href: string;
+  gruppo: NavGruppo;
+  children: NavChild[];
   adminOnly?: boolean;
-  operatoreOnly?: boolean;
+  // URL da riscaldare al passaggio del mouse/focus sulla voce.
   calda?: string[];
 };
 
-export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: GridIcon, exact: true, calda: ["/api/stats"] },
-  { href: "/calendario", label: "Calendario", icon: CalendarIcon, exact: false, calda: [] },
-  { href: "/progetti", label: "Progetti", icon: FolderIcon, exact: false, calda: ["/api/clienti"] },
+export const AREE: NavArea[] = [
   {
-    href: "/operatore",
-    label: "I Miei Ticket",
-    icon: UserCircleIcon,
-    exact: false,
-    operatoreOnly: true,
-    calda: ["/api/stats"],
+    id: "dashboard",
+    label: "Dashboard",
+    icon: GridIcon,
+    href: "/",
+    gruppo: "lavoro",
+    children: [{ href: "/", label: "Dashboard", exact: true }],
   },
-  { href: "/admin", label: "Operatori", icon: UserPlusIcon, exact: false, adminOnly: true, calda: [] },
   {
-    href: "/admin/dashboard",
-    label: "Dashboard Admin",
-    icon: BarChartIcon,
-    exact: false,
-    adminOnly: true,
-    calda: ["/api/operatori/stats"],
+    id: "calendario",
+    label: "Calendario",
+    icon: CalendarIcon,
+    href: "/calendario",
+    gruppo: "lavoro",
+    children: [{ href: "/calendario", label: "Calendario" }],
   },
-  { href: "/report", label: "Report Ore", icon: ClockIcon, exact: false, adminOnly: true, calda: [] },
-  { href: "/admin/sla", label: "SLA", icon: TimerIcon, exact: false, adminOnly: true, calda: [] },
-  // Posta in arrivo: coda di triage delle email (solo admin).
-  { href: "/inbox", label: "Posta in arrivo", icon: MailIcon, exact: false, adminOnly: true, calda: [] },
   {
-    href: "/admin/email",
-    label: "Caselle Email",
+    id: "progetti",
+    label: "Progetti",
+    icon: FolderIcon,
+    href: "/progetti",
+    gruppo: "lavoro",
+    children: [{ href: "/progetti", label: "Progetti" }],
+    calda: ["/api/clienti"],
+  },
+  {
+    id: "email",
+    label: "Email",
     icon: MailIcon,
-    exact: false,
+    href: "/inbox",
+    gruppo: "admin",
     adminOnly: true,
-    calda: ["/api/caselle"],
+    children: [
+      { href: "/inbox", label: "Posta in arrivo", exact: true },
+      { href: "/admin/email", label: "Caselle" },
+    ],
+    calda: ["/api/inbox?stato=da_verificare&limit=20"],
   },
   {
-    href: "/admin/chiavi-api",
-    label: "Chiavi API",
-    icon: LockClosedIcon,
-    exact: false,
+    id: "report",
+    label: "Report",
+    icon: BarChartIcon,
+    href: "/report",
+    gruppo: "admin",
     adminOnly: true,
-    calda: ["/api/chiavi-api"],
+    children: [
+      { href: "/report", label: "Ore" },
+      { href: "/admin/dashboard", label: "Cruscotto" },
+    ],
   },
-  // { href: "/knowledge", label: "Knowledge Base", icon: BookIcon, exact: false, calda: [] },
   {
-    href: "/admin/agenti",
-    label: "Agenti AI",
-    icon: SparklesIcon,
-    exact: false,
+    id: "admin",
+    label: "Admin",
+    icon: SettingsIcon,
+    href: "/admin",
+    gruppo: "admin",
     adminOnly: true,
-    calda: ["/api/agenti"],
+    children: [
+      { href: "/admin", label: "Operatori", exact: true },
+      { href: "/admin/sla", label: "SLA" },
+      { href: "/admin/chiavi-api", label: "Chiavi API" },
+      { href: "/admin/agenti", label: "Agenti AI" },
+    ],
+    calda: ["/api/operatori?all=true"],
   },
 ];
 
-export function navVisibile(isAdmin: boolean): NavItem[] {
-  return NAV_ITEMS.filter((item) => {
-    if (item.adminOnly && !isAdmin) return false;
-    if (item.operatoreOnly && isAdmin) return false;
-    return true;
-  });
+export function areeVisibili(isAdmin: boolean): NavArea[] {
+  return AREE.filter((area) => !area.adminOnly || isAdmin);
 }
 
-// Voce attiva = percorso PIU' SPECIFICO: "/admin/dashboard" inizia anche con
-// "/admin", e il confronto ingenuo accenderebbe due voci insieme.
-export function voceAttiva(items: NavItem[], pathname: string): string | undefined {
-  return items
-    .filter((i) => (i.exact ? pathname === i.href : pathname === i.href || pathname.startsWith(`${i.href}/`)))
-    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+function corrisponde(child: NavChild, pathname: string): boolean {
+  return child.exact
+    ? pathname === child.href
+    : pathname === child.href || pathname.startsWith(`${child.href}/`);
+}
+
+// Area accesa: quella che contiene il percorso corrente tra i suoi figli.
+export function areaAttiva(aree: NavArea[], pathname: string): NavArea | undefined {
+  return aree.find((area) => area.children.some((child) => corrisponde(child, pathname)));
+}
+
+// Figlio attivo (per i tab), scegliendo il percorso piu' specifico: se in
+// futuro un figlio fosse prefisso di un altro, vince quello piu' lungo.
+export function figlioAttivo(area: NavArea, pathname: string): NavChild | undefined {
+  return area.children
+    .filter((child) => corrisponde(child, pathname))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+}
+
+export function getArea(id: string): NavArea | undefined {
+  return AREE.find((area) => area.id === id);
 }

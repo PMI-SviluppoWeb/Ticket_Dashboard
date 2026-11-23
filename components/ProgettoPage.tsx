@@ -33,7 +33,7 @@ import { formatDurata, riepilogoTempi } from "@/lib/durata";
 import { componiPersone, tutteLePersone } from "@/lib/persone";
 import PersoneCondivise from "@/components/PersoneCondivise";
 import { iniziali, SEZIONE_INIZIALE, type ExtraTask, type Sezione } from "@/lib/task-local";
-import { caricaApi } from "@/lib/api-cache";
+import { caricaApi, datoImmediato, invalidaCache } from "@/lib/api-cache";
 // La percentuale del dettaglio e' derivata qui dalle attivita' gia' caricate:
 // getProgetto non restituisce conteggi. Stessa funzione pura della lista,
 // cosi' le due schermate non possono divergere.
@@ -111,17 +111,26 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
 
   const loadProgetto = useCallback(async () => {
     const seq = ++requestSeq.current;
+    const url = `/api/progetti/${id}`;
+    // Riuso immediato: tornando su un progetto gia' visto il contenuto compare
+    // subito, mentre la richiesta aggiorna in background. `forza` perche' il
+    // progetto cambia con le task e non vogliamo una copia vecchia.
+    const subito = datoImmediato<Progetto>(url);
+    if (subito) setProgetto(subito);
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/progetti/${id}`);
-      if (res.status === 404) throw new Error("Progetto non trovato.");
-      if (!res.ok) throw new Error(`Errore ${res.status}`);
-      const data = (await res.json()) as Progetto;
+      const data = await caricaApi<Progetto>(url, { forza: true });
       if (seq === requestSeq.current) setProgetto(data);
     } catch (err) {
       if (seq === requestSeq.current) {
-        setError(err instanceof Error ? err.message : "Errore di caricamento.");
+        setError(
+          err instanceof Error
+            ? err.message === "Errore 404"
+              ? "Progetto non trovato."
+              : err.message
+            : "Errore di caricamento."
+        );
       }
     } finally {
       if (seq === requestSeq.current) setLoading(false);
@@ -222,6 +231,12 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
+    // La dashboard e la lista team sono cache client: senza invalidazione
+    // tornando alla home si vedrebbe la task vecchia per 30 secondi.
+    invalidaCache("/api/dashboard");
+    invalidaCache("/api/attivita/team");
+    invalidaCache("/api/calendario");
+    invalidaCache(`/api/progetti/${id}`);
     // Aggiornamento locale immediato: il drawer calcola "sporco" confrontando
     // la bozza con l'attivita' ricevuta, quindi senza questa scrittura
     // resterebbe "Modifiche non salvate" fino alla risposta di loadProgetto.
@@ -236,7 +251,7 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
           }
         : p
     );
-  }, []);
+  }, [id]);
 
   // Persone sul progetto: il primo nome resta in `responsabile` (lo leggono
   // calendario e liste), gli altri in `persone`. Ottimistico: l'elenco cambia
@@ -306,24 +321,42 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
     }));
   }, []);
 
-  const creaTask = async (sezioneId: string, titolo: string) => {
+  const creaTask = async (
+    sezioneId: string,
+    titolo: string,
+    assegnatario?: string,
+    dataScadenza?: string
+  ) => {
     setError("");
     try {
       const res = await fetch(`/api/progetti/${id}/attivita`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ titolo }),
+        body: JSON.stringify({
+          titolo,
+          assegnatario: assegnatario || null,
+          data_scadenza: dataScadenza || null,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Errore ${res.status}`);
       const creata = data as AttivitaRow;
+      invalidaCache("/api/dashboard");
+      invalidaCache("/api/attivita/team");
+      invalidaCache("/api/calendario");
+      invalidaCache(`/api/progetti/${id}`);
       // La sezione scelta e' uno stato locale: la fissiamo PRIMA del reload,
       // cosi' la nuova riga non fa in tempo a comparire nella prima sezione.
       // Va fatto anche per la prima sezione: "assente" significa "non ancora
       // assegnata", non "prima sezione", e una futura riorganizzazione delle
       // sezioni non deve trascinare la task altrove.
       cambiaExtra(creata.id, { sezione: sezioneId });
-      await loadProgetto();
+      // Inserimento locale invece di rileggere l'intero progetto: la risposta
+      // del POST contiene gia' la riga completa. Un reload qui era un viaggio
+      // al DB in piu' per ogni task creata.
+      setProgetto((p) =>
+        p ? { ...p, attivita: [...p.attivita, creata] } : p
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di creazione.");
       // Rilanciamo: la board svuota il campo solo quando la creazione riesce,
@@ -368,14 +401,23 @@ export default function ProgettoPage({ id, onBack, onDeleted }: ProgettoPageProp
       });
       setConfirmDeleteAttivita(null);
       setSelezionataId((cur) => (cur === attivitaId ? null : cur));
-      await loadProgetto();
+      // Rimozione locale immediata + refresh in background: il drawer si
+      // chiude subito, senza aspettare un altro giro al DB.
+      setProgetto((p) =>
+        p ? { ...p, attivita: p.attivita.filter((a) => a.id !== attivitaId) } : p
+      );
+      invalidaCache("/api/dashboard");
+      invalidaCache("/api/attivita/team");
+      invalidaCache("/api/calendario");
+      invalidaCache(`/api/progetti/${id}`);
+      void loadProgetto();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di cancellazione.");
       setConfirmDeleteAttivita(null);
       return false;
     }
-  }, [loadProgetto]);
+  }, [loadProgetto, id]);
 
   // Handler stabili per la board: la riga e' memoizzata, quindi una funzione
   // nuova a ogni render annullerebbe il memo su tutte le righe.

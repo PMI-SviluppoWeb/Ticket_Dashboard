@@ -14,6 +14,7 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import PageHeader from "@/components/PageHeader";
+import AreaTabs from "@/components/AreaTabs";
 import SectionBar from "@/components/SectionBar";
 import { useOperatore } from "@/lib/operatore-client";
 import {
@@ -306,6 +307,8 @@ export default function AgentiPage() {
             </button>
           }
         />
+
+        <AreaTabs areaId="admin" />
 
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm text-stato-urgenza-testo">

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { resetOperatore, useOperatore } from "@/lib/operatore-client";
 import { prefetchApi, svuotaCache } from "@/lib/api-cache";
-import { navVisibile, voceAttiva, type NavItem } from "@/lib/nav";
+import { areeVisibili, areaAttiva, type NavArea } from "@/lib/nav";
 import { HelpCircleIcon, LayersIcon, LogOutIcon } from "@/components/icons";
 
 // Sotto i 768px la sidebar (hidden md:flex) non esiste: senza questa barra la
@@ -19,17 +19,17 @@ export default function MobileTabBar() {
   const isAdmin = operatore?.ruolo === "admin";
   const [altroAperto, setAltroAperto] = useState(false);
 
-  const tutti = navVisibile(isAdmin);
+  const tutti = areeVisibili(isAdmin);
   const primari = tutti.slice(0, N_PRINCIPALI);
   const extra = tutti.slice(N_PRINCIPALI);
-  const attiva = voceAttiva(tutti, pathname);
-  const extraAttivo = extra.some((i) => i.href === attiva);
+  const attiva = areaAttiva(tutti, pathname);
+  const extraAttivo = extra.some((area) => area.id === attiva?.id);
 
   // La pagina di login non ha una navigazione da mostrare.
   if (pathname === "/login") return null;
 
-  const riscalda = (item: NavItem) => {
-    for (const url of item.calda ?? []) prefetchApi(url);
+  const riscalda = (area: NavArea) => {
+    for (const url of area.calda ?? []) prefetchApi(url);
   };
 
   const handleLogout = async () => {
@@ -43,21 +43,22 @@ export default function MobileTabBar() {
     }
   };
 
-  const voce = (item: NavItem) => {
-    const active = item.href === attiva;
+  const voce = (area: NavArea) => {
+    const active = area.id === attiva?.id;
+    const Icona = area.icon;
     return (
       <Link
-        key={item.href}
-        href={item.href}
-        aria-current={active ? "page" : undefined}
-        onMouseEnter={() => riscalda(item)}
+        key={area.id}
+        href={area.href}
+        aria-current={active ? "true" : undefined}
+        onMouseEnter={() => riscalda(area)}
         onClick={() => setAltroAperto(false)}
         className={`flex flex-1 flex-col items-center gap-0.5 rounded-control py-1.5 transition-colors duration-200 ${
           active ? "bg-inchiostro text-lime" : "text-caldo-testo hover:text-inchiostro"
         }`}
       >
-        <item.icon className="h-5 w-5" />
-        <span className="max-w-full truncate px-1 text-[10px] font-semibold">{item.label}</span>
+        <Icona className="h-5 w-5" />
+        <span className="max-w-full truncate px-1 text-[10px] font-semibold">{area.label}</span>
       </Link>
     );
   };
@@ -72,17 +73,20 @@ export default function MobileTabBar() {
             className="absolute inset-x-3 bottom-[4.5rem] rounded-card border border-crema-contorno bg-white p-2 shadow-soft"
             onClick={(e) => e.stopPropagation()}
           >
-            {extra.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setAltroAperto(false)}
-                className="flex items-center gap-3 rounded-control px-3 py-2.5 text-sm font-medium text-inchiostro transition-colors duration-200 hover:bg-crema-scuro"
-              >
-                <item.icon className="h-4 w-4 text-caldo-testo" />
-                {item.label}
-              </Link>
-            ))}
+            {extra.map((area) => {
+              const Icona = area.icon;
+              return (
+                <Link
+                  key={area.id}
+                  href={area.href}
+                  onClick={() => setAltroAperto(false)}
+                  className="flex items-center gap-3 rounded-control px-3 py-2.5 text-sm font-medium text-inchiostro transition-colors duration-200 hover:bg-crema-scuro"
+                >
+                  <Icona className="h-4 w-4 text-caldo-testo" />
+                  {area.label}
+                </Link>
+              );
+            })}
             <Link
               href="/knowledge"
               onClick={() => setAltroAperto(false)}

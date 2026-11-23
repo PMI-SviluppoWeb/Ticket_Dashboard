@@ -1,25 +1,22 @@
 import "server-only";
 import { db } from "./db";
-import { parsePersone } from "./persone";
-import { getEtichettePerAttivita } from "./etichette";
 import type {
   DashboardData,
   DashboardSintesi,
-  EventoAgendaDashboard,
-  ProgettoDashboard,
   TaskScadenzaDashboard,
   TempoDashboard,
-  VoceApertaDashboard,
 } from "./types";
 
 // ===========================================================================
 // La home in una richiesta.
 //
-// La dashboard mostra ticket, task, agenda, progetti e tempo: cinque domini che
-// con un endpoint ciascuno costerebbero cinque viaggi verso il Turso remoto.
-// Qui sono dieci SELECT indipendenti dentro UN `db.batchRead`, quindi UNA
-// richiesta HTTP. Nel batch non entra niente che dipenda da un risultato
-// precedente: e' la regola del batch.
+// La dashboard mostra ticket, task, progetti (solo conteggio) e tempo. Sono
+// poche SELECT indipendenti dentro UN `db.batchRead`, quindi UNA richiesta
+// HTTP. Nel batch non entra niente che dipenda da un risultato precedente:
+// e' la regola del batch.
+//
+// Il calendario e la posta hanno endpoint propri: caricarli qui a ogni poll
+// significava pagare query che la maggior parte delle visite non guarda.
 //
 // ---------------------------------------------------------------------------
 // IL FUSO E' LA PARTE DELICATA
@@ -118,13 +115,9 @@ interface Confini {
   settimanaInizioIso: string;
   // "YYYY-MM-DDTHH:mm" di Roma: confini per attivita.data_scadenza.
   adessoNaive: string;
-  agendaDal: string;
+  // Orizzonte "in scadenza" (prossimi 7 giorni). La lista task invece mostra
+  // tutte le aperte: qui serve solo per il conteggio della KPI.
   agendaAl: string;
-  // Quanto indietro guarda "in ritardo". Non illimitato: un blocco da 20 righe
-  // ordinate per data veniva riempito da task scadute mesi fa, e le cose da
-  // fare OGGI restavano fuori dal limite. Una task ferma da piu' di due
-  // settimane non e' piu' una scadenza, e' un dato da sistemare altrove.
-  taskDal: string;
 }
 
 function confini(adesso = new Date()): Confini {
@@ -144,12 +137,7 @@ function confini(adesso = new Date()): Confini {
     oggiInizioIso: mezzanotteRomaIso(r.y, r.m, r.g),
     settimanaInizioIso: mezzanotteRomaIso(lunedi.y, lunedi.m, lunedi.g),
     adessoNaive: `${oggi}T${due(r.h)}:${due(r.min)}`,
-    // La giornata di oggi entra intera (anche la mattina già passata), poi
-    // sette giorni in avanti: chi apre la dashboard alle 8 deve vedere anche
-    // l'evento delle 9 di stamattina.
-    agendaDal: `${oggi}T00:00`,
     agendaAl: `${naive(fraSette)}T23:59`,
-    taskDal: `${naive(aggiungiGiorni(r, -14))}T00:00`,
   };
 }
 
@@ -181,6 +169,28 @@ const MIA = `(
   )
 )`;
 
+// Proiezione unica per lista personale e team: stesse colonne, stesso calcolo
+// di "in ritardo"/"in scadenza". Evita che le due viste divergano.
+function mappaTask(rows: Riga[], adessoNaive: string, agendaAl: string): TaskScadenzaDashboard[] {
+  return rows.map((r) => {
+    const data = testo(r.data_scadenza);
+    return {
+      id: String(r.id),
+      titolo: String(r.titolo),
+      stato: r.stato as TaskScadenzaDashboard["stato"],
+      priorita: r.priorita as TaskScadenzaDashboard["priorita"],
+      data_scadenza: data,
+      assegnatario: testo(r.assegnatario),
+      progetto_id: testo(r.progetto_id),
+      progetto_nome: testo(r.progetto_nome),
+      progetto_codice: testo(r.progetto_codice),
+      cliente_ragione_sociale: testo(r.cliente_ragione_sociale),
+      in_ritardo: Boolean(data && data < adessoNaive),
+      in_scadenza: Boolean(data && data >= adessoNaive && data <= agendaAl),
+    };
+  });
+}
+
 export async function caricaDashboard(
   operatoreId: string
 ): Promise<DashboardData | null> {
@@ -192,12 +202,9 @@ export async function caricaDashboard(
     ticketRows,
     taskCountRows,
     taskRows,
-    agendaRows,
-    progettoRows,
     progettoCountRows,
     oggiRows,
     settimanaRows,
-    aperteRows,
   ] = await db.batchRead([
     // 0 — Identità. Se l'id dell'header non esiste più, la route risponde 401.
     {
@@ -222,11 +229,8 @@ export async function caricaDashboard(
       params: paramsOperatore,
     },
 
-    // 2 — Le mie task: quante entro 7 giorni, quante gia' scadute.
-    // Stessa forma "YYYY-MM-DDTHH:mm", quindi il confronto e' lessicografico.
-    // `in_ritardo` usa la stessa finestra del blocco (statement 3): se il
-    // conteggio e la lista guardassero intervalli diversi, la cella direbbe
-    // "3 in ritardo" e la lista ne mostrerebbe altre.
+    // 2 — Le mie task: quante entro 7 giorni, quante già scadute. Il conteggio
+    // resta sull'orizzonte breve della KPI; la lista sotto invece è completa.
     {
       sql: `SELECT
               SUM(CASE WHEN data_scadenza >= @adesso AND data_scadenza <= @limite THEN 1 ELSE 0 END) AS in_scadenza,
@@ -234,23 +238,19 @@ export async function caricaDashboard(
             FROM attivita a
             WHERE ${MIA}
               AND a.stato <> 'COMPLETATA'
-              AND a.data_scadenza IS NOT NULL
-              AND a.data_scadenza >= @dal`,
+              AND a.data_scadenza IS NOT NULL`,
       params: {
         ...paramsOperatore,
         adesso: c.adessoNaive,
         limite: c.agendaAl,
-        dal: c.taskDal,
       },
     },
 
-    // 3 — Le mie task in scadenza (comprese quelle in ritardo).
+    // 3 — Tutte le mie task aperte: con scadenza, in ritardo o senza data.
     //
-    // Ordine: prima le scadute, dalla piu' recente (e' quella su cui si puo'
-    // ancora intervenire), poi le prossime in ordine cronologico. Il secondo
-    // criterio per le scadute e' "giorni di ritardo" crescente: un solo
-    // numero invece del confronto fra date, che in SQLite richiederebbe
-    // julianday su entrambi i lati.
+    // Ordine: prima le scadute (dalla più recente, quella su cui si può ancora
+    // intervenire), poi le prossime in ordine cronologico, infine le task senza
+    // scadenza. `data_creazione DESC` dà un ordine stabile alle senza data.
     {
       sql: `SELECT a.id, a.titolo, a.stato, a.priorita, a.data_scadenza, a.assegnatario,
                    a.progetto_id,
@@ -263,67 +263,29 @@ export async function caricaDashboard(
             LEFT JOIN clienti  ca ON ca.id = a.cliente_id
             WHERE ${MIA}
               AND a.stato <> 'COMPLETATA'
-              AND a.data_scadenza IS NOT NULL
-              AND a.data_scadenza >= @dal
-              AND a.data_scadenza <= @limite
             ORDER BY
+              CASE WHEN a.data_scadenza IS NULL THEN 1 ELSE 0 END,
               CASE WHEN a.data_scadenza < @adesso THEN 0 ELSE 1 END,
               CASE WHEN a.data_scadenza < @adesso
                    THEN julianday(@adesso) - julianday(a.data_scadenza)
                    ELSE 0 END,
-              a.data_scadenza ASC
-            LIMIT 20`,
+              a.data_scadenza ASC,
+              a.data_creazione DESC
+            LIMIT 50`,
       params: {
         ...paramsOperatore,
         adesso: c.adessoNaive,
-        dal: c.taskDal,
-        limite: c.agendaAl,
       },
     },
 
-    // 4 — Agenda: oggi intero + 7 giorni. Gli eventi senza scadenza non
-    // esistono per il calendario, ed e' la stessa regola di listEventiCalendario.
-    {
-      sql: `SELECT a.id, a.titolo, a.stato, a.priorita, a.data_scadenza, a.assegnatario,
-                   a.persone, a.progetto_id, a.cliente_id,
-                   p.nome   AS progetto_nome,
-                   p.codice AS progetto_codice,
-                   COALESCE(cp.ragione_sociale, ca.ragione_sociale) AS cliente_ragione_sociale
-            FROM attivita a
-            LEFT JOIN progetti p  ON p.id  = a.progetto_id
-            LEFT JOIN clienti  cp ON cp.id = p.cliente_id
-            LEFT JOIN clienti  ca ON ca.id = a.cliente_id
-            WHERE a.data_scadenza >= @dal AND a.data_scadenza <= @al
-            ORDER BY a.data_scadenza ASC
-            LIMIT 60`,
-      params: { dal: c.agendaDal, al: c.agendaAl },
-    },
-
-    // 5 — Progetti attivi, i primi a scadere. Stesse sottoquery di listProgetti:
-    // con (progetto_id, stato) indicizzato costano pochi seek per riga, mentre
-    // un GROUP BY sull'intera attivita' scandirebbe tutto a ogni poll.
-    {
-      sql: `SELECT p.id, p.codice, p.nome, p.stato, p.data_fine,
-                   COALESCE(c.ragione_sociale, p.cliente_id) AS cliente_ragione_sociale,
-                   (SELECT COUNT(*) FROM attivita a WHERE a.progetto_id = p.id) AS num_attivita,
-                   (SELECT COUNT(*) FROM attivita a
-                     WHERE a.progetto_id = p.id AND a.stato = 'COMPLETATA') AS num_attivita_completate,
-                   (SELECT COUNT(*) FROM progetti_tickets pt WHERE pt.progetto_id = p.id) AS num_ticket
-            FROM progetti p
-            LEFT JOIN clienti c ON c.id = p.cliente_id
-            WHERE p.stato IN ('IN_CORSO', 'IN_PAUSA')
-            ORDER BY (p.data_fine IS NULL), p.data_fine ASC, p.nome ASC
-            LIMIT 6`,
-      params: {},
-    },
-
-    // 6 — Il conteggio esatto, perché la lista sopra è limitata a 6.
+    // 4 — Il conteggio esatto dei progetti attivi (la lista non serve più:
+    // la home mostra solo la cifra nella KPI).
     {
       sql: `SELECT COUNT(*) AS n FROM progetti WHERE stato IN ('IN_CORSO', 'IN_PAUSA')`,
       params: {},
     },
 
-    // 7 — Minuti di oggi, solo voci CHIUSE e ritagliate sulla finestra.
+    // 5 — Minuti di oggi, solo voci CHIUSE e ritagliate sulla finestra.
     //
     // La voce aperta non entra: non ha un totale definitivo, e il client vi
     // somma il cronometro che scorre (stessa regola di minutiPerAttivita in
@@ -349,26 +311,6 @@ export async function caricaDashboard(
             WHERE v.fine IS NOT NULL AND v.fine > @dal AND v.inizio < @al
             GROUP BY v.operatore_id, v.operatore`,
       params: { dal: c.settimanaInizioIso, al: c.adessoIso },
-    },
-
-    // 9 — Chi sta lavorando adesso. Il filtro per ruolo si applica in JS:
-    // l'elenco nomina i colleghi, e quei nomi restano agli amministratori.
-    {
-      sql: `SELECT v.operatore_id, v.operatore, v.inizio,
-                   CAST(ROUND((julianday(@adesso) - julianday(v.inizio)) * 1440.0) AS INTEGER) AS minuti_finora,
-                   CASE
-                     WHEN v.attivita_id IS NOT NULL THEN 'attivita'
-                     WHEN v.ticket_id   IS NOT NULL THEN 'ticket'
-                     ELSE 'generico'
-                   END AS tipo,
-                   COALESCE(a.titolo, t.numero || ' · ' || t.sommario_problema) AS bersaglio
-            FROM voci_tempo v
-            LEFT JOIN attivita a ON a.id = v.attivita_id
-            LEFT JOIN tickets  t ON t.id = v.ticket_id
-            WHERE v.fine IS NULL
-            ORDER BY v.inizio ASC
-            LIMIT 20`,
-      params: { adesso: c.adessoIso },
     },
   ]);
 
@@ -418,80 +360,44 @@ export async function caricaDashboard(
     tempo: { mio: tempoMio, tutti: tempoTutti },
   };
 
-  // Stessa regola di `MIA`, applicata alle righe gia' lette: una task/evento
-  // e' mio se compare come assegnatario o fra i collaboratori.
-  const appartieneA = (r: Riga, nome: string): boolean =>
-    r.assegnatario === nome ||
-    parsePersone(r.persone).some((p) => p.toLowerCase() === nome.toLowerCase());
-
-  // Le etichette dell'agenda arrivano con un secondo round-trip: la pivot
-  // dipende dagli id appena letti, quindi non puo' entrare nel batch.
-  const etichetteAgenda = await getEtichettePerAttivita(
-    (agendaRows as Riga[]).map((r) => String(r.id))
-  );
-
-  const agenda: EventoAgendaDashboard[] = (agendaRows as Riga[]).map((r) => ({
-    id: String(r.id),
-    titolo: String(r.titolo),
-    stato: r.stato as EventoAgendaDashboard["stato"],
-    priorita: r.priorita as EventoAgendaDashboard["priorita"],
-    data_scadenza: String(r.data_scadenza),
-    assegnatario: testo(r.assegnatario),
-    progetto_id: testo(r.progetto_id),
-    cliente_id: testo(r.cliente_id),
-    progetto_nome: testo(r.progetto_nome),
-    progetto_codice: testo(r.progetto_codice),
-    cliente_ragione_sociale: testo(r.cliente_ragione_sociale),
-    mia: appartieneA(r, operatore.nome),
-    in_ritardo: String(r.data_scadenza) < c.adessoNaive,
-    etichette: etichetteAgenda.get(String(r.id)) ?? [],
-  }));
-
-  const mieTask: TaskScadenzaDashboard[] = (taskRows as Riga[]).map((r) => ({
-    id: String(r.id),
-    titolo: String(r.titolo),
-    stato: r.stato as TaskScadenzaDashboard["stato"],
-    priorita: r.priorita as TaskScadenzaDashboard["priorita"],
-    data_scadenza: String(r.data_scadenza),
-    assegnatario: testo(r.assegnatario),
-    progetto_id: testo(r.progetto_id),
-    progetto_nome: testo(r.progetto_nome),
-    progetto_codice: testo(r.progetto_codice),
-    cliente_ragione_sociale: testo(r.cliente_ragione_sociale),
-    in_ritardo: String(r.data_scadenza) < c.adessoNaive,
-  }));
-
-  const progetti: ProgettoDashboard[] = (progettoRows as Riga[]).map((r) => ({
-    id: String(r.id),
-    codice: String(r.codice),
-    nome: String(r.nome),
-    stato: r.stato as ProgettoDashboard["stato"],
-    data_fine: testo(r.data_fine),
-    cliente_ragione_sociale: String(r.cliente_ragione_sociale ?? ""),
-    num_attivita: num(r.num_attivita),
-    num_attivita_completate: num(r.num_attivita_completate),
-    num_ticket: num(r.num_ticket),
-  }));
-
-  const inCorsoOra: VoceApertaDashboard[] =
-    operatore.ruolo === "admin"
-      ? (aperteRows as Riga[]).map((r) => ({
-          operatore_id: String(r.operatore_id),
-          operatore: String(r.operatore),
-          inizio: String(r.inizio),
-          minuti_finora: num(r.minuti_finora),
-          tipo: r.tipo as VoceApertaDashboard["tipo"],
-          bersaglio: testo(r.bersaglio),
-        }))
-      : [];
+  const mieTask = mappaTask(taskRows as Riga[], c.adessoNaive, c.agendaAl);
 
   return {
     operatore,
     generato_il: c.adessoIso,
     sintesi,
-    agenda,
     mie_task: mieTask,
-    progetti,
-    in_corso_ora: inCorsoOra,
   };
+}
+
+// Lista team: tutte le task aperte di tutti gli operatori. È admin-only ed è
+// caricata solo quando l'admin attiva il toggle "Team" (endpoint dedicato),
+// così la dashboard personale non paga questa query a ogni poll.
+export async function caricaTaskTeam(): Promise<TaskScadenzaDashboard[]> {
+  const c = confini();
+  const rows = (await db
+    .prepare(
+      `SELECT a.id, a.titolo, a.stato, a.priorita, a.data_scadenza, a.assegnatario,
+              a.progetto_id,
+              p.nome   AS progetto_nome,
+              p.codice AS progetto_codice,
+              COALESCE(cp.ragione_sociale, ca.ragione_sociale) AS cliente_ragione_sociale
+       FROM attivita a
+       LEFT JOIN progetti p  ON p.id  = a.progetto_id
+       LEFT JOIN clienti  cp ON cp.id = p.cliente_id
+       LEFT JOIN clienti  ca ON ca.id = a.cliente_id
+       WHERE a.stato <> 'COMPLETATA'
+       ORDER BY
+         CASE WHEN a.data_scadenza IS NULL THEN 1 ELSE 0 END,
+         CASE WHEN a.data_scadenza < @adesso THEN 0 ELSE 1 END,
+         CASE WHEN a.data_scadenza < @adesso
+              THEN julianday(@adesso) - julianday(a.data_scadenza)
+              ELSE 0 END,
+         a.data_scadenza ASC,
+         a.data_creazione DESC
+       LIMIT 50`
+    )
+    .all({ adesso: c.adessoNaive })) as unknown as Riga[];
+
+  return mappaTask(rows, c.adessoNaive, c.agendaAl);
 }
