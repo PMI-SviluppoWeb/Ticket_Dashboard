@@ -1,6 +1,11 @@
 import dotenv from "dotenv";
 import path from "path";
 import { unlink } from "fs/promises";
+import {
+  eMittenteInterno,
+  normalizzaEmail,
+  parseRegoleInterne,
+} from "../lib/email-interni";
 
 // Pulizia dei ticket nati da email (tipicamente la vecchia casella di .env che
 // riceveva posta promozionale).
@@ -11,6 +16,8 @@ import { unlink } from "fs/promises";
 //   npx tsx scripts/pulizia-email.ts --da 2026-11-01 --a 2026-11-18
 //   npx tsx scripts/pulizia-email.ts --mittente team@learnn.com,bk@email.burgerking.it
 //   npx tsx scripts/pulizia-email.ts --numero TICK-953979 --conferma
+//   npx tsx scripts/pulizia-email.ts --interni
+//   npx tsx scripts/pulizia-email.ts --interni --conferma
 //   npx tsx scripts/pulizia-email.ts --pulisci-note --conferma
 //   npx tsx scripts/pulizia-email.ts --conferma --da 2026-11-01 --a 2026-11-18
 //   npx tsx scripts/pulizia-email.ts --orfani            # anteprima orfani
@@ -70,6 +77,7 @@ async function main() {
   const orfani = flag("orfani");
   const forzato = flag("forza");
   const pulisciNote = flag("pulisci-note");
+  const interni = flag("interni");
   const da = arg("da");
   const a = arg("a");
   const numero = arg("numero")?.trim().toUpperCase() || null;
@@ -90,6 +98,38 @@ async function main() {
   const { getTursoClient } = await import("../lib/turso-client");
   const client = getTursoClient();
 
+  // Per --interni servono gli stessi indirizzi usati dal webhook.
+  let regoleInterne = { indirizzi: [] as string[], domini: [] as string[] };
+  if (interni) {
+    const caselle = await client.execute(
+      "SELECT indirizzo FROM caselle_email WHERE abilitata = 1"
+    );
+    const indirizzi = caselle.rows
+      .map((r) => String(r.indirizzo ?? ""))
+      .filter((e) => e.includes("@"))
+      .map(normalizzaEmail);
+    const env = [process.env.EMAIL_FROM, process.env.SMTP_USER]
+      .filter((v): v is string => typeof v === "string" && v.includes("@"))
+      .map(normalizzaEmail);
+    const setting = await client.execute(
+      "SELECT valore FROM impostazioni WHERE chiave = 'email_mittenti_interni'"
+    );
+    let extra: string[] = [];
+    try {
+      const parsed = JSON.parse(String(setting.rows[0]?.valore ?? "[]"));
+      if (Array.isArray(parsed)) {
+        extra = parsed.filter((x): x is string => typeof x === "string");
+      }
+    } catch {
+      extra = [];
+    }
+    const p = parseRegoleInterne(extra);
+    regoleInterne = {
+      indirizzi: Array.from(new Set([...indirizzi, ...env, ...p.indirizzi])),
+      domini: p.domini,
+    };
+  }
+
   // -------------------------------------------------------------------------
   // 1. Ticket da email (anteprima)
   // -------------------------------------------------------------------------
@@ -98,7 +138,7 @@ async function main() {
   // (utile per rimuovere un falso positivo da una casella configurata nell'app).
   const condizioni: string[] = [];
   const params: Array<string> = [];
-  if (!numero) {
+  if (!numero && !interni) {
     condizioni.push("(i.casella_id = 'env' OR i.casella_id IS NULL)");
   }
   if (numero) {
@@ -119,59 +159,96 @@ async function main() {
     params.push(...mittenti);
   }
 
+  const whereSql = condizioni.length > 0 ? `WHERE ${condizioni.join(" AND ")}` : "";
+
   const risultato = await client.execute({
     sql: `SELECT t.id, t.numero, t.cliente, t.email, t.stato,
                  i.from_email, i.subject, i.casella_id, i.data_creazione AS email_data,
                  (SELECT COUNT(*) FROM voci_tempo v WHERE v.ticket_id = t.id) AS ore_voci
           FROM tickets t
           JOIN email_inbox i ON i.ticket_id = t.id
-          WHERE ${condizioni.join(" AND ")}
+          ${whereSql}
           ORDER BY i.data_creazione DESC`,
     args: params,
   });
 
-  const candidati = risultato.rows.map((r) => ({
-    id: String(r.id),
-    numero: String(r.numero),
-    cliente: String(r.cliente ?? ""),
-    from: String(r.from_email ?? ""),
-    subject: String(r.subject ?? ""),
-    casella: r.casella_id ? String(r.casella_id) : "(null)",
-    data: r.email_data ? String(r.email_data) : null,
-    oreVoci: Number(r.ore_voci ?? 0),
-  }));
+  // Un ticket puo' avere piu' righe email_inbox collegate: si tiene una sola
+  // voce per ticket, altrimenti la cancellazione proverebbe a farlo due volte.
+  const perId = new Map<
+    string,
+    {
+      id: string;
+      numero: string;
+      cliente: string;
+      from: string;
+      subject: string;
+      casella: string;
+      data: string | null;
+      oreVoci: number;
+    }
+  >();
+  for (const r of risultato.rows) {
+    const id = String(r.id);
+    if (perId.has(id)) continue;
+    perId.set(id, {
+      id,
+      numero: String(r.numero),
+      cliente: String(r.cliente ?? ""),
+      from: String(r.from_email ?? ""),
+      subject: String(r.subject ?? ""),
+      casella: r.casella_id ? String(r.casella_id) : "(null)",
+      data: r.email_data ? String(r.email_data) : null,
+      oreVoci: Number(r.ore_voci ?? 0),
+    });
+  }
+  const candidati = Array.from(perId.values());
+
+  const selezionati = interni
+    ? candidati.filter((c) => eMittenteInterno(c.from, regoleInterne))
+    : candidati;
 
   console.log("=== TICKET DA EMAIL SELEZIONATI ===");
   console.log(
-    `Filtri: ${numero ? `numero=${numero}` : "casella=env/null"}` +
+    `Filtri: ${numero ? `numero=${numero}` : interni ? "mittenti interni" : "casella=env/null"}` +
       (da ? ` · da ${da}` : "") +
       (a ? ` · a ${a}` : "") +
       (mittenti.length ? ` · mittenti ${mittenti.join(", ")}` : "")
   );
-  if (candidati.length === 0) {
+  if (selezionati.length === 0) {
     console.log("Nessun ticket trovato.");
   } else {
-    for (const c of candidati.slice(0, 200)) {
+    for (const c of selezionati.slice(0, 200)) {
       const ore = c.oreVoci > 0 ? `  [${c.oreVoci} voci tempo]` : "";
       console.log(
         `- ${c.numero}  ${formatta(c.data)}  ${c.from}  "${c.subject.slice(0, 70)}"${ore}`
       );
     }
-    if (candidati.length > 200) console.log(`... e altri ${candidati.length - 200}.`);
+    if (selezionati.length > 200) console.log(`... e altri ${selezionati.length - 200}.`);
   }
 
-  const conOre = candidati.filter((c) => c.oreVoci > 0);
-  const daCancellare = forzato ? candidati : candidati.filter((c) => c.oreVoci === 0);
-  const saltati = candidati.length - daCancellare.length;
+  const daCancellare = forzato
+    ? selezionati
+    : selezionati.filter((c) => c.oreVoci === 0);
+  const saltati = selezionati.length - daCancellare.length;
 
   console.log(
-    `\nTotale: ${candidati.length} ticket · da cancellare: ${daCancellare.length}` +
+    `\nTotale: ${selezionati.length} ticket · da cancellare: ${daCancellare.length}` +
       (saltati > 0 ? ` · saltati per ore registrate: ${saltati} (usa --forza)` : "")
   );
 
-  if (conferma && candidati.length > 0 && !da && !a && mittenti.length === 0 && !numero && !tutti && !pulisciNote) {
+  if (
+    conferma &&
+    selezionati.length > 0 &&
+    !da &&
+    !a &&
+    mittenti.length === 0 &&
+    !numero &&
+    !interni &&
+    !tutti &&
+    !pulisciNote
+  ) {
     console.error(
-      "\nRifiuto la cancellazione di TUTTI i ticket da email senza filtri: aggiungi --da/--a, --mittente o --numero, oppure --tutti se sei sicuro."
+      "\nRifiuto la cancellazione di TUTTI i ticket da email senza filtri: aggiungi --da/--a, --mittente, --numero o --interni, oppure --tutti se sei sicuro."
     );
     process.exit(1);
   }

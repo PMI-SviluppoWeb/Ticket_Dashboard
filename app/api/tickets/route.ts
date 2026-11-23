@@ -127,6 +127,7 @@ export async function POST(request: Request) {
         subject: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
         html,
         ticketId: ticket.id,
+        autoSubmitted: "auto-generated",
       });
       await logEmail({
         ticket_id: ticket.id,

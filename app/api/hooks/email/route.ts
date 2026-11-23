@@ -11,6 +11,7 @@ import { logEmail } from "@/lib/email-log";
 import { classifyEmail, regoleTriage } from "@/lib/email-classifier";
 import { completaContatti } from "@/lib/contatti";
 import { configTriageCasella } from "@/lib/caselle";
+import { mittenteInterno } from "@/lib/email-interni-config";
 import {
   estraiRiferimenti,
   normalizzaMessageId,
@@ -158,15 +159,18 @@ async function salvaInbox(data: {
   motivo: string | null;
   inReplyTo: string | null;
   riferimenti: string | null;
+  correzioneUmana?: string | null;
 }): Promise<void> {
   await db
     .prepare(
       `INSERT INTO email_inbox
          (id, message_id, from_email, from_nome, subject, body_preview, body_text, body_html,
-          ticket_id, casella_id, stato, stato_triage, esito_ai, confidenza, motivo, in_reply_to, riferimenti, data_creazione)
+          ticket_id, casella_id, stato, stato_triage, esito_ai, confidenza, motivo, in_reply_to, riferimenti,
+          correzione_umana, data_creazione)
        VALUES
          (@id, @message_id, @from_email, @from_nome, @subject, @body_preview, @body_text, @body_html,
-          @ticket_id, @casella_id, @stato, @stato_triage, @esito_ai, @confidenza, @motivo, @in_reply_to, @riferimenti, @data_creazione)
+          @ticket_id, @casella_id, @stato, @stato_triage, @esito_ai, @confidenza, @motivo, @in_reply_to, @riferimenti,
+          @correzione_umana, @data_creazione)
        ON CONFLICT (message_id) DO UPDATE SET
          from_email = excluded.from_email,
          from_nome = excluded.from_nome,
@@ -182,7 +186,8 @@ async function salvaInbox(data: {
          confidenza = excluded.confidenza,
          motivo = excluded.motivo,
          in_reply_to = excluded.in_reply_to,
-         riferimenti = excluded.riferimenti`
+         riferimenti = excluded.riferimenti,
+         correzione_umana = COALESCE(excluded.correzione_umana, email_inbox.correzione_umana)`
     )
     .run({
       id: crypto.randomUUID(),
@@ -202,6 +207,7 @@ async function salvaInbox(data: {
       motivo: data.motivo,
       in_reply_to: data.inReplyTo,
       riferimenti: data.riferimenti,
+      correzione_umana: data.correzioneUmana ?? null,
       data_creazione: new Date().toISOString(),
     });
 }
@@ -238,6 +244,117 @@ export async function POST(request: Request) {
     const riferimenti = email.references ?? null;
     const casellaId =
       typeof email.casellaId === "string" && email.casellaId ? email.casellaId : null;
+
+    // -------------------------------------------------------------------
+    // 0. Mittenti interni: non creano ticket.
+    // Se la mail e' una risposta dentro un thread, viene agganciata al ticket
+    // come messaggio in uscita (ruolo assistant), senza notifiche ne'
+    // autorisposte. Se non ha un thread, viene ignorata e registrata.
+    // -------------------------------------------------------------------
+    if (await mittenteInterno(email.from)) {
+      const ticketThread = await trovaTicketPerThread({
+        inReplyTo,
+        riferimenti,
+        subject: email.subject,
+        fromEmail: email.from,
+        consentiTokenSenzaMittente: true,
+      });
+
+      if (ticketThread) {
+        const ticket = await getTicket(ticketThread);
+        if (ticket && !ticket.eliminato_il) {
+          // Una copia di un'email che abbiamo gia' inviato e registrato in
+          // email_log non va duplicata nei messaggi del ticket.
+          const duplicato = await db
+            .prepare(
+              `SELECT 1 AS uno FROM email_log WHERE ticket_id = ? AND message_id = ?`
+            )
+            .get([ticket.id, email.messageId]);
+
+          let allegati = 0;
+          if (!duplicato) {
+            const contenuto = `Risposta inviata da ${email.from}:\n\nOggetto: ${email.subject}\n\n${email.body || "(nessun corpo testuale)"}`;
+            const messaggioId = await insertMessage(ticket.id, {
+              ruolo: "assistant",
+              contenuto,
+              data_creazione: new Date().toISOString(),
+            });
+            allegati = await salvaAllegatiInArrivo(
+              email.attachments,
+              ticket.id,
+              messaggioId
+            );
+          }
+
+          await salvaInbox({
+            messageId: email.messageId,
+            fromEmail: email.from,
+            fromNome: email.fromName ?? null,
+            subject: email.subject,
+            bodyPreview: (email.body || email.subject).slice(0, 500),
+            bodyText: email.body || null,
+            bodyHtml: email.bodyHtml ?? null,
+            ticketId: ticket.id,
+            casellaId,
+            stato: "processata",
+            statoTriage: "ticket",
+            esitoAi: null,
+            confidenza: null,
+            motivo: duplicato
+              ? "Copia di un messaggio interno gia' registrato."
+              : "Messaggio interno agganciato al ticket.",
+            inReplyTo,
+            riferimenti,
+            correzioneUmana: "interno",
+          });
+
+          await registra({
+            origine: "sistema",
+            azione: duplicato ? "email.interna_duplicata" : "email.interna_agganciata",
+            entita: "ticket",
+            entitaId: ticket.id,
+            dettagli: { message_id: email.messageId, allegati },
+          });
+
+          return NextResponse.json({
+            ok: true,
+            ticket: ticket.numero,
+            esito: "interno_agganciato",
+            duplicato: Boolean(duplicato),
+          });
+        }
+      }
+
+      await salvaInbox({
+        messageId: email.messageId,
+        fromEmail: email.from,
+        fromNome: email.fromName ?? null,
+        subject: email.subject,
+        bodyPreview: (email.body || email.subject).slice(0, 500),
+        bodyText: email.body || null,
+        bodyHtml: email.bodyHtml ?? null,
+        ticketId: null,
+        casellaId,
+        stato: "ignorata",
+        statoTriage: "ignora",
+        esitoAi: null,
+        confidenza: null,
+        motivo: "Messaggio inviato da un indirizzo interno.",
+        inReplyTo,
+        riferimenti,
+        correzioneUmana: "interno",
+      });
+
+      await registra({
+        origine: "sistema",
+        azione: "email.interna_ignorata",
+        entita: "email_inbox",
+        entitaId: email.messageId,
+        dettagli: { from: email.from, subject: email.subject },
+      });
+
+      return NextResponse.json({ ok: true, skipped: "interno" });
+    }
 
     const cliente = await trovaCliente(email.from);
 
@@ -501,6 +618,7 @@ export async function POST(request: Request) {
       casellaId: casellaId ?? undefined,
       ticketId: ticket.id,
       inReplyTo: normalizzaMessageId(email.messageId),
+      autoSubmitted: "auto-replied",
     });
     await logEmail({
       ticket_id: ticket.id,

@@ -155,6 +155,9 @@ export async function sendEmail(opts: {
   // Override espliciti (es. autorisposta alla email appena ricevuta).
   inReplyTo?: string | null;
   riferimenti?: string[];
+  // RFC 3834: dichiara l'email come automatica. Serve a fermare i loop con
+  // altri auto-responder e con la nostra stessa casella.
+  autoSubmitted?: "auto-replied" | "auto-generated";
 }): Promise<EmailResult> {
   try {
     const oggettoBase = opts.subject;
@@ -196,6 +199,7 @@ export async function sendEmail(opts: {
           messageId,
           inReplyTo,
           references: riferimenti,
+          autoSubmitted: opts.autoSubmitted,
         });
         return { ok: true, messageId };
       }
@@ -223,6 +227,13 @@ export async function sendEmail(opts: {
       headers: {
         ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
         ...(riferimenti.length > 0 ? { References: riferimenti.join(" ") } : {}),
+        ...(opts.autoSubmitted
+          ? {
+              "Auto-Submitted": opts.autoSubmitted,
+              "X-Auto-Response-Suppress": "All",
+              Precedence: "auto_reply",
+            }
+          : {}),
       },
     });
     return { ok: true, messageId };

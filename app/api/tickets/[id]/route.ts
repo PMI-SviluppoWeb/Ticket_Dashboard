@@ -182,6 +182,7 @@ async function inviaNotifica(
       html,
       casellaId,
       ticketId: ticket.id,
+      autoSubmitted: "auto-generated",
     });
     await logEmail({
       ticket_id: ticket.id,
@@ -248,6 +249,7 @@ async function inviaNotifica(
     attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
     casellaId,
     ticketId: ticket.id,
+    autoSubmitted: "auto-generated",
   });
   await logEmail({
     ticket_id: ticket.id,

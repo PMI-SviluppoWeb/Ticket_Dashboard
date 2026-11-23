@@ -22,6 +22,9 @@ export async function trovaTicketPerThread(opts: {
   riferimenti?: string | null;
   subject: string;
   fromEmail: string;
+  // Solo per mittenti interni (fidati): il token nell'oggetto basta anche se
+  // il mittente non e' l'email del ticket.
+  consentiTokenSenzaMittente?: boolean;
 }): Promise<string | null> {
   const ids = estraiRiferimenti(opts.inReplyTo, opts.riferimenti);
   if (ids.length > 0) {
@@ -60,7 +63,10 @@ export async function trovaTicketPerThread(opts: {
       .get(numero);
     if (ticket) {
       const emailTicket = String(ticket.email ?? "").toLowerCase();
-      if (emailTicket && emailTicket === opts.fromEmail.toLowerCase()) {
+      if (
+        opts.consentiTokenSenzaMittente ||
+        (emailTicket && emailTicket === opts.fromEmail.toLowerCase())
+      ) {
         return String(ticket.id);
       }
     }

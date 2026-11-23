@@ -377,6 +377,7 @@ export async function inviaEmailGmail(
     messageId?: string;
     inReplyTo?: string | null;
     references?: string[];
+    autoSubmitted?: "auto-replied" | "auto-generated";
   }
 ): Promise<void> {
   const headers = [
@@ -389,6 +390,11 @@ export async function inviaEmailGmail(
   if (opts.inReplyTo) headers.push(`In-Reply-To: ${opts.inReplyTo}`);
   if (opts.references && opts.references.length > 0) {
     headers.push(`References: ${opts.references.join(" ")}`);
+  }
+  if (opts.autoSubmitted) {
+    headers.push(`Auto-Submitted: ${opts.autoSubmitted}`);
+    headers.push("X-Auto-Response-Suppress: All");
+    headers.push("Precedence: auto_reply");
   }
 
   let mime: string;

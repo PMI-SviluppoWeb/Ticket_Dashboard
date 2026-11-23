@@ -78,6 +78,12 @@ function CaselleEmailPageContent() {
   const [polling, setPolling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  // Mittenti interni globali: le caselle configurate sono sempre incluse;
+  // qui si gestiscono gli indirizzi/domini extra.
+  const [interniExtra, setInterniExtra] = useState("");
+  const [interniMsg, setInterniMsg] = useState<string | null>(null);
+  const [salvandoInterni, setSalvandoInterni] = useState(false);
+
   // Auto-scoperta IMAP/SMTP (stile Outlook): l'utente inserisce solo email
   // e password, i server li trova /api/caselle/scopri. Stati:
   //  - idle:      email non ancora processata (nuova casella: solo suggerimento)
@@ -115,6 +121,45 @@ function CaselleEmailPageContent() {
   useEffect(() => {
     if (isAdmin) fetchCaselle();
   }, [isAdmin, fetchCaselle]);
+
+  const caricaInterni = useCallback(async () => {
+    try {
+      const res = await fetch("/api/impostazioni/email-interni");
+      if (!res.ok) return;
+      const data = (await res.json()) as { extra?: string[] };
+      setInterniExtra((data.extra ?? []).join("\n"));
+    } catch {
+      /* la sezione resta vuota; non blocca la pagina */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) void caricaInterni();
+  }, [isAdmin, caricaInterni]);
+
+  const salvaInterni = useCallback(async () => {
+    setSalvandoInterni(true);
+    setInterniMsg(null);
+    try {
+      const indirizzi = interniExtra
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const res = await fetch("/api/impostazioni/email-interni", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ indirizzi }),
+      });
+      const data = (await res.json()) as { error?: string; extra?: string[] };
+      if (!res.ok) throw new Error(data.error ?? "Salvataggio non riuscito.");
+      setInterniExtra((data.extra ?? indirizzi).join("\n"));
+      setInterniMsg("Mittenti interni salvati.");
+    } catch (err) {
+      setInterniMsg(err instanceof Error ? err.message : "Salvataggio non riuscito.");
+    } finally {
+      setSalvandoInterni(false);
+    }
+  }, [interniExtra]);
 
   // Controllo immediato della posta, senza aspettare il worker. Utile subito
   // dopo il collegamento di una casella o per una verifica veloce.
@@ -581,6 +626,59 @@ function CaselleEmailPageContent() {
             l&apos;applicazione.
           </div>
         )}
+
+        <section className="mb-4 rounded-card border border-crema-contorno bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-caldo-testo">
+            Mittenti interni
+          </p>
+          <p className="mt-1 text-sm text-caldo-testo">
+            Le email inviate da queste caselle non creano ticket. Se sono risposte dentro un
+            thread esistente, vengono agganciate al ticket come messaggio in uscita.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {caselle.filter((c) => c.abilitata).map((c) => (
+              <span
+                key={c.id}
+                className="tabular rounded border border-stato-neutro-bordo bg-stato-neutro-bg px-2 py-0.5 text-[11px] font-medium text-stato-neutro-testo"
+              >
+                {c.indirizzo}
+              </span>
+            ))}
+            {caselle.filter((c) => c.abilitata).length === 0 && (
+              <span className="text-xs text-caldo-testo">Nessuna casella abilitata.</span>
+            )}
+          </div>
+          <label
+            htmlFor="interni-extra"
+            className="mt-3 block text-xs font-semibold text-caldo-testo"
+          >
+            Indirizzi o domini aggiuntivi (uno per riga)
+          </label>
+          <textarea
+            id="interni-extra"
+            rows={3}
+            value={interniExtra}
+            onChange={(e) => setInterniExtra(e.target.value)}
+            placeholder={"info@pmisoftware.it\n@pmisoftware.it"}
+            className="mt-1 w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={salvaInterni}
+              disabled={salvandoInterni}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-3 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {salvandoInterni && <LoaderIcon className="h-3.5 w-3.5 animate-spin" />}
+              Salva mittenti interni
+            </button>
+            {interniMsg && <span className="text-xs text-caldo-testo">{interniMsg}</span>}
+          </div>
+          <p className="mt-1 text-[11px] text-caldo-testo">
+            Le caselle configurate sono incluse automaticamente. Qui puoi aggiungere altri
+            indirizzi o un dominio (es. @pmisoftware.it).
+          </p>
+        </section>
 
         {showForm && (
           <div className="mb-6 overflow-hidden rounded-card border border-crema-contorno bg-white">
