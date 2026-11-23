@@ -184,16 +184,18 @@ async function inviaNotifica(
       ticketId: ticket.id,
       autoSubmitted: "auto-generated",
     });
-    await logEmail({
-      ticket_id: ticket.id,
-      tipo: "assegnazione",
-      destinatario: ticketEmail,
-      oggetto: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
-      corpo: html,
-      stato: result.ok ? "inviata" : "errore",
-      errore: result.error ?? null,
-      message_id: result.messageId ?? null,
-    });
+    if (!result.skipped) {
+      await logEmail({
+        ticket_id: ticket.id,
+        tipo: "assegnazione",
+        destinatario: ticketEmail,
+        oggetto: `[Support Desk] Ticket ${ticket.numero} preso in carico`,
+        corpo: html,
+        stato: result.ok ? "inviata" : "errore",
+        errore: result.error ?? null,
+        message_id: result.messageId ?? null,
+      });
+    }
     return;
   }
 
@@ -251,16 +253,18 @@ async function inviaNotifica(
     ticketId: ticket.id,
     autoSubmitted: "auto-generated",
   });
-  await logEmail({
-    ticket_id: ticket.id,
-    tipo: "chiusura",
-    destinatario: ticketEmail,
-    oggetto: `[Support Desk] Ticket ${ticket.numero} chiuso`,
-    corpo: html,
-    stato: result.ok ? "inviata" : "errore",
-    errore: result.error ?? null,
-    message_id: result.messageId ?? null,
-  });
+  if (!result.skipped) {
+    await logEmail({
+      ticket_id: ticket.id,
+      tipo: "chiusura",
+      destinatario: ticketEmail,
+      oggetto: `[Support Desk] Ticket ${ticket.numero} chiuso`,
+      corpo: html,
+      stato: result.ok ? "inviata" : "errore",
+      errore: result.error ?? null,
+      message_id: result.messageId ?? null,
+    });
+  }
 }
 
 export async function DELETE(

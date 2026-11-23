@@ -620,18 +620,28 @@ export async function POST(request: Request) {
       inReplyTo: normalizzaMessageId(email.messageId),
       autoSubmitted: "auto-replied",
     });
-    await logEmail({
-      ticket_id: ticket.id,
-      tipo: "nuovo_ticket",
-      destinatario: email.from,
-      oggetto: replySubject,
-      corpo: autoReplyHtml,
-      stato: replyResult.ok ? "inviata" : "errore",
-      errore: replyResult.error ?? null,
-      message_id: replyResult.messageId ?? null,
-      in_reply_to: normalizzaMessageId(email.messageId),
-      riferimenti: email.messageId,
-    });
+    if (replyResult.skipped) {
+      await registra({
+        origine: "sistema",
+        azione: "email.autoriposta_disattivata",
+        entita: "ticket",
+        entitaId: ticket.id,
+        dettagli: { motivo: "EMAIL_AUTOMATICHE_DISATTIVATE" },
+      });
+    } else {
+      await logEmail({
+        ticket_id: ticket.id,
+        tipo: "nuovo_ticket",
+        destinatario: email.from,
+        oggetto: replySubject,
+        corpo: autoReplyHtml,
+        stato: replyResult.ok ? "inviata" : "errore",
+        errore: replyResult.error ?? null,
+        message_id: replyResult.messageId ?? null,
+        in_reply_to: normalizzaMessageId(email.messageId),
+        riferimenti: email.messageId,
+      });
+    }
 
     await registra({
       origine: "sistema",

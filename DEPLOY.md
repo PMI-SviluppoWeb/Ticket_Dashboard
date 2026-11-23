@@ -271,6 +271,20 @@ Email** (`/admin/email`).
   triage ricadrebbe sulle sole euristiche e la posta promozionale rischierebbe
   di diventare ticket.
 
+### Sospendere le email automatiche (test)
+
+Per non inviare email ai clienti durante i test, imposta nel file segreti:
+
+```env
+EMAIL_AUTOMATICHE_DISATTIVATE=true
+```
+
+Poi ricrea il container. Vengono saltate **autorisposte, conferme e notifiche**
+automatiche; le email inviate manualmente dall'operatore restano attive. Le
+email saltate non vengono registrate come inviate in `email_log`.
+Per riattivarle: rimuovi la variabile (o mettila a `false`) e ricrea il
+container.
+
 ---
 
 ## 8. Integrazione Google Calendar

@@ -73,6 +73,17 @@ export interface EmailResult {
   // Message-ID dell'email inviata: va salvato in email_log per agganciare la
   // risposta del cliente (In-Reply-To).
   messageId?: string;
+  // true quando l'invio automatico e' stato sospeso da
+  // EMAIL_AUTOMATICHE_DISATTIVATE. Non e' un errore: il chiamante non deve
+  // registrare l'email come inviata.
+  skipped?: boolean;
+}
+
+// Interruttore temporaneo per i test: sospende SOLO le email automatiche
+// (autorisposte, conferme, notifiche). Le email scritte e inviate a mano
+// dall'operatore restano attive.
+export function emailAutomaticheDisattivate(): boolean {
+  return process.env.EMAIL_AUTOMATICHE_DISATTIVATE === "true";
 }
 
 // Id sintetico della casella configurata in .env: non esiste nel DB, quindi
@@ -160,6 +171,13 @@ export async function sendEmail(opts: {
   autoSubmitted?: "auto-replied" | "auto-generated";
 }): Promise<EmailResult> {
   try {
+    if (opts.autoSubmitted && emailAutomaticheDisattivate()) {
+      console.log(
+        `[email] Invio automatico disattivato (${opts.autoSubmitted}): ${opts.subject}`
+      );
+      return { ok: true, skipped: true };
+    }
+
     const oggettoBase = opts.subject;
     let inReplyTo = opts.inReplyTo ?? null;
     let riferimenti = [...(opts.riferimenti ?? [])];

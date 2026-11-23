@@ -129,16 +129,18 @@ export async function POST(request: Request) {
         ticketId: ticket.id,
         autoSubmitted: "auto-generated",
       });
-      await logEmail({
-        ticket_id: ticket.id,
-        tipo: "nuovo_ticket",
-        destinatario: email,
-        oggetto: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
-        corpo: html,
-        stato: result.ok ? "inviata" : "errore",
-        errore: result.error ?? null,
-        message_id: result.messageId ?? null,
-      });
+      if (!result.skipped) {
+        await logEmail({
+          ticket_id: ticket.id,
+          tipo: "nuovo_ticket",
+          destinatario: email,
+          oggetto: `[Support Desk] Ticket ${ticket.numero} ricevuto`,
+          corpo: html,
+          stato: result.ok ? "inviata" : "errore",
+          errore: result.error ?? null,
+          message_id: result.messageId ?? null,
+        });
+      }
     }
 
     return NextResponse.json(ticket, { status: 201 });
