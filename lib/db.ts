@@ -218,6 +218,19 @@ CREATE TABLE IF NOT EXISTS caselle_email (
 
 CREATE INDEX IF NOT EXISTS idx_caselle_email_abilitata ON caselle_email (abilitata);
 
+-- Accesso degli operatori alle singole caselle. La presenza della riga vale
+-- come autorizzazione: un operatore vede le email SOLO delle caselle qui
+-- elencate. Gli amministratori non passano da questa tabella e vedono tutto.
+CREATE TABLE IF NOT EXISTS caselle_operatori (
+  casella_id     TEXT NOT NULL,
+  operatore_id   TEXT NOT NULL,
+  data_creazione TEXT NOT NULL,
+  PRIMARY KEY (casella_id, operatore_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_caselle_operatori_operatore
+  ON caselle_operatori (operatore_id);
+
 CREATE TABLE IF NOT EXISTS progetti (
   id                 TEXT PRIMARY KEY,
   codice             TEXT NOT NULL UNIQUE,

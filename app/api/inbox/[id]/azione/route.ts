@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { richiediOperatore } from "@/lib/auth";
 import { createTicket, getTicket, getTicketByNumero, insertMessage, updateTicket } from "@/lib/tickets";
 import { createNotification } from "@/lib/notifications";
+import { puoVedereCasella } from "@/lib/caselle";
 import { registra } from "@/lib/registro";
 import { completaContatti } from "@/lib/contatti";
 import type { Priorita } from "@/lib/types";
@@ -20,6 +21,7 @@ interface RigaInbox {
   body_text: string | null;
   body_html: string | null;
   ticket_id: string | null;
+  casella_id: string | null;
   esito_ai: string | null;
   confidenza: number | null;
   motivo: string | null;
@@ -31,7 +33,7 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  const auth = await richiediOperatore(request);
   if (!auth.ok) return auth.risposta;
 
   const body = (await request.json().catch(() => ({}))) as {
@@ -47,12 +49,17 @@ export async function POST(
   const riga = (await db
     .prepare(
       `SELECT id, from_email, from_nome, subject, body_preview, body_text, body_html,
-              ticket_id, esito_ai, confidenza, motivo
+              ticket_id, casella_id, esito_ai, confidenza, motivo
        FROM email_inbox WHERE id = ?`
     )
     .get(params.id)) as unknown as RigaInbox | undefined;
 
   if (!riga) {
+    return NextResponse.json({ error: "Email non trovata." }, { status: 404 });
+  }
+
+  // Le azioni valgono solo sulle email delle caselle accessibili.
+  if (!(await puoVedereCasella(auth.operatore, riga.casella_id))) {
     return NextResponse.json({ error: "Email non trovata." }, { status: 404 });
   }
 

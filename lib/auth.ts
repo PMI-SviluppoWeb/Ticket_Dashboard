@@ -531,7 +531,12 @@ export async function activateOperator(id: string): Promise<void> {
 }
 
 export async function deleteOperator(id: string): Promise<void> {
-  await db.prepare(`DELETE FROM operatori WHERE id = @id`).run({ id });
+  // La pivot degli accessi alle caselle non ha cascata dal DB: si pulisce
+  // prima di eliminare l'operatore.
+  await db.batch([
+    { sql: `DELETE FROM caselle_operatori WHERE operatore_id = @id`, params: { id } },
+    { sql: `DELETE FROM operatori WHERE id = @id`, params: { id } },
+  ]);
 }
 
 export { verifyJWT };

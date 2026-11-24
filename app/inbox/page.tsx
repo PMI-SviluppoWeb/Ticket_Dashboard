@@ -7,6 +7,7 @@ import PageHeader from "@/components/PageHeader";
 import AreaTabs from "@/components/AreaTabs";
 import InboxDettaglio, { type DettaglioInbox } from "@/components/InboxDettaglio";
 import { EyeIcon, LoaderIcon, MailIcon, RefreshIcon } from "@/components/icons";
+import type { CasellaVisibile } from "@/lib/types";
 
 interface InboxRiga {
   id: string;
@@ -16,6 +17,9 @@ interface InboxRiga {
   body_preview: string | null;
   ticket_id: string | null;
   numero_ticket: string | null;
+  casella_id: string | null;
+  casella_etichetta: string | null;
+  casella_indirizzo: string | null;
   stato: string;
   stato_triage: string | null;
   esito_ai: string | null;
@@ -58,6 +62,10 @@ export default function InboxPage() {
   const { operatore, caricamento } = useOperatore();
 
   const [tab, setTab] = useState<Tab>("da_verificare");
+  // Caselle visibili all'utente (admin: tutte; operatore: solo assegnate).
+  const [caselle, setCaselle] = useState<CasellaVisibile[]>([]);
+  const [caselleLoading, setCaselleLoading] = useState(true);
+  const [casellaId, setCasellaId] = useState("");
   const [righe, setRighe] = useState<InboxRiga[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -74,7 +82,9 @@ export default function InboxPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/inbox?stato=${tab}`, { cache: "no-store" });
+      const params = new URLSearchParams({ stato: tab });
+      if (casellaId) params.set("casella_id", casellaId);
+      const res = await fetch(`/api/inbox?${params.toString()}`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { error?: string }).error ?? "Errore nel caricamento.");
       setRighe((data as { inbox?: InboxRiga[] }).inbox ?? []);
@@ -83,12 +93,32 @@ export default function InboxPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, [tab, casellaId]);
 
   useEffect(() => {
     if (!operatore) return;
     void carica();
   }, [operatore, carica]);
+
+  // Elenco sicuro delle caselle: serve al filtro e allo stato vuoto.
+  useEffect(() => {
+    if (!operatore) return;
+    let annullato = false;
+    fetch("/api/caselle/visibili", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { caselle?: CasellaVisibile[] } | null) => {
+        if (!annullato && data) setCaselle(data.caselle ?? []);
+      })
+      .catch(() => {
+        // Senza elenco il filtro resta vuoto: la lista funziona comunque.
+      })
+      .finally(() => {
+        if (!annullato) setCaselleLoading(false);
+      });
+    return () => {
+      annullato = true;
+    };
+  }, [operatore]);
 
   const eseguiAzione = useCallback(
     async (id: string, azione: "crea_ticket" | "aggancia" | "ignora" | "recupera", ticketId?: string) => {
@@ -156,17 +186,6 @@ export default function InboxPage() {
     );
   }
 
-  if (operatore.ruolo !== "admin") {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-card border border-crema-contorno bg-white p-8 text-center">
-          <h2 className="text-lg font-semibold text-inchiostro">Accesso riservato</h2>
-          <p className="mt-2 text-sm text-caldo-testo">La posta in arrivo è visibile solo agli amministratori.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 overflow-y-auto px-6 py-5">
       <div className="mx-auto max-w-5xl">
@@ -203,7 +222,32 @@ export default function InboxPage() {
               {t.label}
             </button>
           ))}
-          <span className="ml-auto tabular pr-2 text-xs text-caldo-testo">{righe.length} email</span>
+          {caselle.length > 0 && (
+            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-caldo-testo">
+              <span className="hidden sm:inline">Casella</span>
+              <select
+                value={casellaId}
+                onChange={(e) => setCasellaId(e.target.value)}
+                aria-label="Filtra per casella"
+                className="max-w-[220px] cursor-pointer rounded-control border border-crema-contorno bg-white px-2 py-1 text-xs text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+              >
+                <option value="">Tutte le caselle</option>
+                {caselle.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.etichetta}
+                    {c.abilitata ? "" : " (disabilitata)"} · {c.indirizzo}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <span
+            className={`tabular pr-2 text-xs text-caldo-testo ${
+              caselle.length === 0 ? "ml-auto" : ""
+            }`}
+          >
+            {righe.length} email
+          </span>
         </div>
 
         {error && (
@@ -212,7 +256,25 @@ export default function InboxPage() {
           </div>
         )}
 
-        {righe.length === 0 ? (
+        {caselleLoading ? (
+          <div className="flex items-center justify-center rounded-card border border-dashed border-crema-contorno bg-white py-12">
+            <LoaderIcon className="h-6 w-6 animate-spin text-inchiostro" />
+          </div>
+        ) : caselle.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-crema-contorno bg-white p-10 text-center">
+            <MailIcon className="h-8 w-8 text-caldo-testo" />
+            <p className="text-sm font-medium text-inchiostro">
+              {operatore.ruolo === "admin"
+                ? "Nessuna casella configurata"
+                : "Nessuna casella assegnata"}
+            </p>
+            <p className="max-w-md text-xs text-caldo-testo">
+              {operatore.ruolo === "admin"
+                ? "Aggiungi una casella da Admin → Caselle per iniziare a ricevere email."
+                : "Chiedi all'amministratore di abilitarti una o più caselle: vedrai solo le email di quelle caselle."}
+            </p>
+          </div>
+        ) : righe.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-crema-contorno bg-white p-10 text-center">
             <MailIcon className="h-8 w-8 text-caldo-testo" />
             <p className="text-sm text-caldo-testo">
@@ -245,6 +307,14 @@ export default function InboxPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                      {r.casella_etichetta && (
+                        <span
+                          className="hidden max-w-[160px] truncate rounded border border-crema-contorno bg-crema-scuro px-1.5 py-0.5 text-[10px] font-medium text-caldo-testo sm:inline"
+                          title={r.casella_indirizzo ?? undefined}
+                        >
+                          {r.casella_etichetta}
+                        </span>
+                      )}
                       <span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${badge.classe}`}>
                         {badge.label}
                       </span>

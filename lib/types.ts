@@ -850,6 +850,27 @@ export interface CasellaEmailInput {
   triage_osservazione?: boolean;
 }
 
+// Proiezione SICURA per gli operatori: nessuna credenziale, nessun server.
+// E' cio' che la Posta in arrivo puo' mostrare come elenco delle caselle.
+export interface CasellaVisibile {
+  id: string;
+  etichetta: string;
+  indirizzo: string;
+  abilitata: boolean;
+}
+
+// Riga del pannello admin "Accessi": l'operatore e se puo' vedere la casella.
+export interface AccessoCasellaOperatore {
+  operatore_id: string;
+  nome: string;
+  email: string;
+  // Gli admin vedono sempre tutte le caselle: il flag serve solo alla UI per
+  // non mostrare una checkbox che non cambierebbe nulla.
+  admin: boolean;
+  attivo: boolean;
+  abilitato: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Agenti AI
 // ---------------------------------------------------------------------------

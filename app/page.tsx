@@ -359,14 +359,12 @@ export default function Dashboard() {
 
           <PannelloCalendarioDashboard className="max-h-[72vh] lg:col-span-5 lg:row-start-1 lg:max-h-[calc(100dvh-16rem)]" />
 
-          {isAdmin && (
-            <PannelloInbox className="max-h-[60vh] lg:col-span-7 lg:row-start-2 lg:max-h-[calc(100dvh-16rem)]" />
-          )}
+          {/* Anche l'operatore vede la posta: l'API filtra sulle sole caselle
+              che l'admin gli ha assegnato. */}
+          <PannelloInbox className="max-h-[60vh] lg:col-span-7 lg:row-start-2 lg:max-h-[calc(100dvh-16rem)]" />
 
           <PannelloTask
-            className={`max-h-[60vh] lg:row-start-2 lg:max-h-[calc(100dvh-16rem)] ${
-              isAdmin ? "lg:col-span-5" : "lg:col-span-12"
-            }`}
+            className="max-h-[60vh] lg:col-span-5 lg:row-start-2 lg:max-h-[calc(100dvh-16rem)]"
             task={dashboard?.mie_task ?? []}
             caricamento={caricamentoSintesi}
             isAdmin={isAdmin}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { puoVedereCasella } from "@/lib/caselle";
 import { richiediOperatore } from "@/lib/auth";
 import { stripHtml } from "@/lib/email-classifier";
 
@@ -14,7 +15,7 @@ export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const auth = await richiediOperatore(request, { ruolo: "admin" });
+  const auth = await richiediOperatore(request);
   if (!auth.ok) return auth.risposta;
 
   try {
@@ -26,6 +27,7 @@ export async function GET(
                 i.in_reply_to, i.riferimenti, i.correzione_umana, i.corretto_da,
                 i.data_creazione,
                 t.numero AS numero_ticket,
+                c.etichetta AS casella_etichetta,
                 c.indirizzo AS casella_indirizzo
          FROM email_inbox i
          LEFT JOIN tickets t ON t.id = i.ticket_id
@@ -35,6 +37,17 @@ export async function GET(
       .get(params.id);
 
     if (!row) {
+      return NextResponse.json({ error: "Email non trovata." }, { status: 404 });
+    }
+
+    // Accesso: l'admin vede tutto; l'operatore solo le caselle assegnate.
+    // 404 (non 403) per non confermare l'esistenza di email non accessibili.
+    if (
+      !(await puoVedereCasella(
+        auth.operatore,
+        row.casella_id ? String(row.casella_id) : null
+      ))
+    ) {
       return NextResponse.json({ error: "Email non trovata." }, { status: 404 });
     }
 
@@ -56,6 +69,7 @@ export async function GET(
         ticket_id: row.ticket_id ? String(row.ticket_id) : null,
         numero_ticket: row.numero_ticket ? String(row.numero_ticket) : null,
         casella_id: row.casella_id ? String(row.casella_id) : null,
+        casella_etichetta: row.casella_etichetta ? String(row.casella_etichetta) : null,
         casella_indirizzo: row.casella_indirizzo ? String(row.casella_indirizzo) : null,
         stato: String(row.stato),
         stato_triage: row.stato_triage ? String(row.stato_triage) : null,

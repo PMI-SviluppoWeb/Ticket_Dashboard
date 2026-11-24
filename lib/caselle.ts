@@ -9,7 +9,12 @@ import "server-only";
 // funzioni di lettura "grezza" sono private e le API espongono solo righe
 // senza password (ha_password booleano).
 
-import type { CasellaEmail, CasellaEmailInput } from "./types";
+import type {
+  AccessoCasellaOperatore,
+  CasellaEmail,
+  CasellaEmailInput,
+  CasellaVisibile,
+} from "./types";
 
 interface CasellaRow {
   id: string;
@@ -485,8 +490,133 @@ export async function aggiornaCasella(
 export async function eliminaCasella(id: string): Promise<{ ok: boolean; error?: string }> {
   const corrente = await getCasella(id);
   if (!corrente) return { ok: false, error: "Casella non trovata." };
-  await db.prepare("DELETE FROM caselle_email WHERE id = ?").run(id);
+  // La pivot non ha cascata applicata dal DB: si pulisce esplicitamente,
+  // altrimenti restano accessi orfani verso una casella che non esiste piu'.
+  await db.batch([
+    { sql: "DELETE FROM caselle_operatori WHERE casella_id = @id", params: { id } },
+    { sql: "DELETE FROM caselle_email WHERE id = @id", params: { id } },
+  ]);
   // Se era quella predefinita, nessuna casella lo e' piu': le uscite
   // senza contesto cadranno sull'SMTP di env (fallback previsto).
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Accesso degli operatori alle caselle
+// ---------------------------------------------------------------------------
+
+interface CasellaVisibileRow {
+  id: string;
+  etichetta: string;
+  indirizzo: string;
+  abilitata: number;
+}
+
+// Elenco SICURO per la UI: niente host, utente o credenziali. L'admin vede
+// tutte le caselle; l'operatore solo quelle assegnate.
+export async function caselleVisibili(operatore: {
+  id: string;
+  ruolo: string;
+}): Promise<CasellaVisibile[]> {
+  const rows =
+    operatore.ruolo === "admin"
+      ? await db
+          .prepare(
+            `SELECT id, etichetta, indirizzo, abilitata
+             FROM caselle_email ORDER BY predefinita DESC, indirizzo`
+          )
+          .all()
+      : await db
+          .prepare(
+            `SELECT c.id, c.etichetta, c.indirizzo, c.abilitata
+             FROM caselle_email c
+             JOIN caselle_operatori co ON co.casella_id = c.id
+             WHERE co.operatore_id = @operatore_id
+             ORDER BY c.predefinita DESC, c.indirizzo`
+          )
+          .all({ operatore_id: operatore.id });
+
+  return (rows as unknown as CasellaVisibileRow[]).map((r) => ({
+    id: String(r.id),
+    etichetta: String(r.etichetta),
+    indirizzo: String(r.indirizzo),
+    abilitata: Number(r.abilitata) === 1,
+  }));
+}
+
+// Un admin vede tutto; un operatore solo le caselle assegnate. Una email
+// senza casella (storico) non e' mai visibile a un operatore.
+export async function puoVedereCasella(
+  operatore: { id: string; ruolo: string },
+  casellaId: string | null
+): Promise<boolean> {
+  // L'admin vede anche le email storiche senza casella; per un operatore
+  // un'email senza casella non e' mai accessibile.
+  if (operatore.ruolo === "admin") return true;
+  if (!casellaId) return false;
+  const row = await db
+    .prepare(
+      "SELECT 1 AS uno FROM caselle_operatori WHERE casella_id = ? AND operatore_id = ?"
+    )
+    .get([casellaId, operatore.id]);
+  return Boolean(row);
+}
+
+// Pannello admin di una casella: tutti gli operatori con il flag di accesso.
+export async function operatoriConAccesso(
+  casellaId: string
+): Promise<AccessoCasellaOperatore[]> {
+  const rows = await db
+    .prepare(
+      `SELECT o.id AS operatore_id, o.nome, o.email, o.attivo,
+              CASE WHEN o.ruolo = 'admin' THEN 1 ELSE 0 END AS admin,
+              CASE WHEN co.operatore_id IS NULL THEN 0 ELSE 1 END AS abilitato
+       FROM operatori o
+       LEFT JOIN caselle_operatori co
+         ON co.casella_id = @casella_id AND co.operatore_id = o.id
+       ORDER BY o.nome`
+    )
+    .all({ casella_id: casellaId });
+
+  return (rows as unknown as Array<{
+    operatore_id: string;
+    nome: string;
+    email: string;
+    attivo: number;
+    admin: number;
+    abilitato: number;
+  }>).map((r) => ({
+    operatore_id: String(r.operatore_id),
+    nome: String(r.nome),
+    email: String(r.email),
+    admin: Number(r.admin) === 1,
+    attivo: Number(r.attivo) === 1,
+    abilitato: Number(r.abilitato) === 1,
+  }));
+}
+
+export async function impostaAccessoCasella(
+  casellaId: string,
+  operatoreId: string,
+  abilitato: boolean
+): Promise<void> {
+  if (abilitato) {
+    await db
+      .prepare(
+        `INSERT INTO caselle_operatori (casella_id, operatore_id, data_creazione)
+         VALUES (@casella_id, @operatore_id, @now)
+         ON CONFLICT (casella_id, operatore_id) DO NOTHING`
+      )
+      .run({
+        casella_id: casellaId,
+        operatore_id: operatoreId,
+        now: new Date().toISOString(),
+      });
+    return;
+  }
+  await db
+    .prepare(
+      "DELETE FROM caselle_operatori WHERE casella_id = ? AND operatore_id = ?"
+    )
+    .run([casellaId, operatoreId]);
 }

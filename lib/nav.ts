@@ -87,6 +87,17 @@ export const AREE: NavArea[] = [
     calda: ["/api/clienti"],
   },
   {
+    // Posta in arrivo: visibile a tutti. Un operatore vede solo le email delle
+    // caselle che l'admin gli ha assegnato (filtro lato server).
+    id: "email",
+    label: "Email",
+    icon: MailIcon,
+    href: "/inbox",
+    gruppo: "lavoro",
+    children: [{ href: "/inbox", label: "Posta in arrivo", exact: true }],
+    calda: ["/api/inbox?stato=da_verificare&limit=20"],
+  },
+  {
     // Rapportini di chiusura: operativi, quindi visibili a tutti gli operatori.
     id: "rapportini",
     label: "Rapportini",
@@ -108,19 +119,6 @@ export const AREE: NavArea[] = [
       { href: "/agenti/attivita", label: "Attività" },
     ],
     calda: ["/api/agenti"],
-  },
-  {
-    id: "email",
-    label: "Email",
-    icon: MailIcon,
-    href: "/inbox",
-    gruppo: "admin",
-    adminOnly: true,
-    children: [
-      { href: "/inbox", label: "Posta in arrivo", exact: true },
-      { href: "/admin/email", label: "Caselle" },
-    ],
-    calda: ["/api/inbox?stato=da_verificare&limit=20"],
   },
   {
     id: "report",
@@ -146,6 +144,7 @@ export const AREE: NavArea[] = [
       { href: "/admin/sla", label: "SLA" },
       { href: "/admin/chiavi-api", label: "Chiavi API" },
       { href: "/admin/agenti", label: "Agenti AI" },
+      { href: "/admin/email", label: "Caselle" },
     ],
     calda: ["/api/operatori?all=true"],
   },

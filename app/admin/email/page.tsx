@@ -12,10 +12,12 @@ import {
   PlusIcon,
   RefreshIcon,
   TrashIcon,
+  UserPlusIcon,
 } from "@/components/icons";
 import PageHeader from "@/components/PageHeader";
 import AreaTabs from "@/components/AreaTabs";
 import SectionBar from "@/components/SectionBar";
+import AccessiCasellaPanel from "@/components/caselle/AccessiCasellaPanel";
 import { useOperatore } from "@/lib/operatore-client";
 import type { CasellaEmail, CasellaEmailInput } from "@/lib/types";
 
@@ -77,6 +79,8 @@ function CaselleEmailPageContent() {
   const [esitoTest, setEsitoTest] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Casella di cui si stanno gestendo gli accessi degli operatori.
+  const [accessiCasella, setAccessiCasella] = useState<CasellaEmail | null>(null);
 
   // Mittenti interni globali: le caselle configurate sono sempre incluse;
   // qui si gestiscono gli indirizzi/domini extra.
@@ -480,6 +484,7 @@ function CaselleEmailPageContent() {
       if (!res.ok) throw new Error(data.error || "Errore nell'eliminazione.");
       setSuccess("Casella eliminata.");
       setConfirmDelete(null);
+      if (accessiCasella?.id === id) setAccessiCasella(null);
       await fetchCaselle();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore nell'eliminazione.");
@@ -577,7 +582,7 @@ function CaselleEmailPageContent() {
           }
         />
 
-        <AreaTabs areaId="email" />
+        <AreaTabs areaId="admin" />
 
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm text-stato-urgenza-testo">
@@ -1121,6 +1126,14 @@ function CaselleEmailPageContent() {
                       <td className="px-5 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button
+                            onClick={() => setAccessiCasella(c)}
+                            className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
+                            title="Accessi operatori"
+                            aria-label={`Gestisci gli accessi di ${c.indirizzo}`}
+                          >
+                            <UserPlusIcon className="h-4 w-4" />
+                          </button>
+                          <button
                             onClick={() => handleTest(c.id)}
                             disabled={testingId !== null}
                             className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-ok-bordo hover:bg-stato-ok-bg hover:text-stato-ok-testo disabled:cursor-not-allowed disabled:opacity-50"
@@ -1186,6 +1199,15 @@ function CaselleEmailPageContent() {
             </div>
           )}
         </div>
+
+        {accessiCasella && (
+          <div className="mt-6">
+            <AccessiCasellaPanel
+              casella={accessiCasella}
+              onChiudi={() => setAccessiCasella(null)}
+            />
+          </div>
+        )}
 
         <p className="mt-4 text-xs text-caldo-testo">
           Le nuove caselle vengono colte dal worker entro un ciclo di polling (ogni 5 minuti in
