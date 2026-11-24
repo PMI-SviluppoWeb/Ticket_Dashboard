@@ -3,6 +3,7 @@ import {
   BarChartIcon,
   BookIcon,
   CalendarIcon,
+  EyeIcon,
   FolderIcon,
   GridIcon,
   MailIcon,
@@ -48,6 +49,18 @@ export type NavArea = {
 };
 
 export const AREE: NavArea[] = [
+  {
+    // Vista "oggi" del capo: solo admin, prima voce della rail. Per gli
+    // operatori l'area non esiste (areeVisibili filtra adminOnly).
+    id: "direzione",
+    label: "Direzione",
+    icon: EyeIcon,
+    href: "/direzione",
+    gruppo: "lavoro",
+    adminOnly: true,
+    children: [{ href: "/direzione", label: "Direzione" }],
+    calda: ["/api/direzione"],
+  },
   {
     id: "dashboard",
     label: "Dashboard",

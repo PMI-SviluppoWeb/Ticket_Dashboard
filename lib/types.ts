@@ -690,6 +690,84 @@ export interface DashboardData {
   mie_task: TaskScadenzaDashboard[];
 }
 
+// ---------------------------------------------------------------------------
+// Direzione (admin): cosa succede OGGI. La presenza e' inferita: una voce
+// tempo aperta significa "al lavoro"; senza voce, un'azione recente nel
+// registro significa "attivo". Non esiste un tracking di sessione.
+// ---------------------------------------------------------------------------
+
+export type PresenzaOperatore = "al_lavoro" | "attivo" | "non_attivo";
+
+export interface DirezioneCosaFa {
+  tipo: "ticket" | "attivita" | "generico";
+  // id del ticket o dell'attivita' (null per "generico").
+  id: string | null;
+  etichetta: string;
+  // Progetto dell'attivita', per il link /progetti/[id].
+  progetto_id: string | null;
+  inizio: string;
+  minuti_finora: number;
+}
+
+export interface SquadraOperatore {
+  id: string;
+  nome: string;
+  ruolo: "admin" | "operatore";
+  presenza: PresenzaOperatore;
+  ultimo_accesso: string | null;
+  ultima_attivita: string | null;
+  attivita_aperta: DirezioneCosaFa | null;
+  minuti_oggi: number;
+  minuti_settimana: number;
+  ticket_aperti: number;
+  task_in_ritardo: number;
+}
+
+export interface DirezioneTicketAperto {
+  id: string;
+  numero: string;
+  cliente: string;
+  sommario: string;
+  priorita: Priorita;
+  stato: StatoTicket;
+  operatore: string | null;
+  creato_il: string | null;
+  eta_ore: number;
+  sla: "scaduto" | "in_scadenza" | null;
+}
+
+export interface DirezioneTrendPunto {
+  giorno: string;
+  creati: number;
+  chiusi: number;
+}
+
+export interface DirezioneKpi {
+  ticket: { aperti: number; nuovi: number; in_corso: number; da_prendere: number };
+  sla: { scaduti: number; in_scadenza: number };
+  tempo: { oggi_minuti: number; settimana_minuti: number };
+  squadra: { al_lavoro: number; attivi: number; totale: number };
+  inbox_da_verificare: number;
+  progetti_attivi: number;
+}
+
+export interface DirezioneMiei {
+  ticket: { aperti: number; nuovi: number; in_corso: number };
+  task: { in_scadenza: number; in_ritardo: number };
+  task_lista: TaskScadenzaDashboard[];
+  tempo: TempoDashboard;
+  attivita_aperta: VoceApertaDashboard | null;
+}
+
+export interface DirezioneData {
+  generato_il: string;
+  kpi: DirezioneKpi;
+  squadra: SquadraOperatore[];
+  ticket_aperti: DirezioneTicketAperto[];
+  miei: DirezioneMiei;
+  trend: DirezioneTrendPunto[];
+}
+
 
 export interface EmailInbox {
   id: string;

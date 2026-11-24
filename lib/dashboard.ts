@@ -108,7 +108,7 @@ function naive({ y, m, g }: PartiData): string {
   return `${y}-${due(m)}-${due(g)}`;
 }
 
-interface Confini {
+export interface Confini {
   // ISO UTC: confini per voci_tempo (confrontabili come stringhe).
   adessoIso: string;
   oggiInizioIso: string;
@@ -120,7 +120,7 @@ interface Confini {
   agendaAl: string;
 }
 
-function confini(adesso = new Date()): Confini {
+export function confini(adesso = new Date()): Confini {
   const r = partiRoma(adesso);
   const oggi = naive(r);
   const fraSette = aggiungiGiorni(r, 7);

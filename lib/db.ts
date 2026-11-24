@@ -798,6 +798,9 @@ async function initSchema(): Promise<void> {
     // Monitor agenti: thread di una conversazione e timeline per operatore.
     "CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_conversazione ON agenti_esecuzioni (conversazione_id, data_creazione)",
     "CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_operatore ON agenti_esecuzioni (operatore_id, data_creazione DESC)",
+    // Direzione: le voci APERTE (fine NULL) si cercano per tutti gli operatori.
+    // L'indice esistente parte da operatore_id, quindi non aiuta questa query.
+    "CREATE INDEX IF NOT EXISTS idx_voci_tempo_fine ON voci_tempo (fine)",
   ];
   for (const sql of indiciAggiuntivi) {
     try {

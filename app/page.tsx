@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useDebounce } from "@/lib/useDebounce";
 import { usePolling } from "@/lib/usePolling";
 import { caricaApi, datoImmediato } from "@/lib/api-cache";
@@ -15,7 +16,7 @@ import PannelloTicket from "@/components/dashboard/PannelloTicket";
 import PannelloCalendarioDashboard from "@/components/dashboard/PannelloCalendarioDashboard";
 import PannelloInbox from "@/components/dashboard/PannelloInbox";
 import PannelloTask from "@/components/dashboard/PannelloTask";
-import { PlusIcon, RefreshIcon } from "@/components/icons";
+import { EyeIcon, PlusIcon, RefreshIcon } from "@/components/icons";
 
 const PAGE_SIZE = 6;
 
@@ -144,6 +145,21 @@ export default function Dashboard() {
     loadDashboard();
   }, [loadDashboard]);
 
+  // Da /direzione "Nuovo ticket" arriva come /?nuovo=1: apre il modale una
+  // volta e ripulisce l'URL, cosi' un refresh non lo riapre.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("nuovo") !== "1") return;
+    setShowNuovoTicket(true);
+    params.delete("nuovo");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${qs ? `?${qs}` : ""}`
+    );
+  }, []);
+
   // Default "solo miei" per gli operatori: l'admin vede tutti. Non si blocca
   // la lista in attesa del ruolo: i ticket partono subito con "Tutti" e, se il
   // ruolo e' operatore, il filtro passa a "I miei" appena arriva. Il ref
@@ -263,6 +279,15 @@ export default function Dashboard() {
       <AppHeader
         azioni={
           <>
+            {isAdmin && (
+              <Link
+                href="/direzione"
+                className="flex items-center gap-1.5 rounded-full border border-crema-contorno bg-white px-4 py-2 text-sm font-semibold text-inchiostro transition-colors duration-200 hover:bg-crema-scuro"
+              >
+                <EyeIcon className="h-3.5 w-3.5" />
+                Direzione
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => setShowNuovoTicket(true)}

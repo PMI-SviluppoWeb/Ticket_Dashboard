@@ -8,7 +8,8 @@ import { redirectSicuro } from "@/lib/redirect";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = redirectSicuro(searchParams.get("redirect"));
+  const redirectParam = searchParams.get("redirect");
+  const redirect = redirectSicuro(redirectParam);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -35,7 +36,15 @@ function LoginForm() {
         return;
       }
 
-      window.location.href = redirect;
+      // Senza un redirect esplicito l'admin atterra su Direzione (vista
+      // "oggi"), gli operatori sulla dashboard operativa.
+      const ruolo = (data as { operator?: { ruolo?: string } }).operator?.ruolo;
+      const destinazione = redirectParam
+        ? redirect
+        : ruolo === "admin"
+          ? "/direzione"
+          : "/";
+      window.location.href = destinazione;
     } catch {
       setError("Errore di connessione. Riprova.");
     } finally {
