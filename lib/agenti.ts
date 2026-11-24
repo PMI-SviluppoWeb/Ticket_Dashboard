@@ -20,8 +20,12 @@ import "server-only";
 
 import type {
   Agente,
+  AgenteAssegnazione,
+  AgenteAttivita,
+  AgenteConversazione,
   AgenteEsecuzione,
   AgenteInput,
+  AgentePerOperatore,
   ProviderAgente,
   RuoloAgente,
   VoceTraccia,
@@ -108,6 +112,34 @@ export async function listaAgenti(opts?: {
   return (rows as unknown as AgenteRow[]).map(aTipo);
 }
 
+// Agenti visibili a un operatore, con lo stato "pinnato" della sua barra
+// rapida. Regola: i PROPRI agenti personali sempre; gli agenti di libreria a
+// meno che un'assegnazione esplicita non li abbia disabilitati per lui.
+const SELECT_AGENTI_OPERATORE = `SELECT a.id, a.nome, a.descrizione, a.ruolo,
+  a.modello, a.system_prompt, a.strumenti, a.provider, a.attivo, a.creato_da,
+  a.proprietario_id, a.visibilita, a.data_creazione, a.data_aggiornamento,
+  COALESCE(s.pinnato, 0) AS pinnato
+  FROM agenti a
+  LEFT JOIN agenti_assegnazioni s
+    ON s.agente_id = a.id AND s.operatore_id = @operatore_id`;
+
+export async function listaAgentiPerOperatore(
+  operatoreId: string
+): Promise<AgentePerOperatore[]> {
+  const rows = await db
+    .prepare(
+      `${SELECT_AGENTI_OPERATORE}
+       WHERE (a.visibilita = 'personale' AND a.proprietario_id = @operatore_id)
+          OR (a.visibilita = 'libreria' AND COALESCE(s.abilitato, 1) = 1)
+       ORDER BY COALESCE(s.pinnato, 0) DESC, a.nome`
+    )
+    .all({ operatore_id: operatoreId });
+  return (rows as unknown as Array<AgenteRow & { pinnato: number }>).map((r) => ({
+    ...aTipo(r),
+    pinnato: Number(r.pinnato) === 1,
+  }));
+}
+
 export async function getAgente(id: string): Promise<Agente | null> {
   const row = await db.prepare(`${SELECT_AGENTI} WHERE id = ?`).get(id);
   return row ? aTipo(row as unknown as AgenteRow) : null;
@@ -124,14 +156,25 @@ export function puoGestireAgente(
   return agente.visibilita === "personale" && agente.proprietario_id === operatore.id;
 }
 
-// Un agente e' eseguibile/visibile se e' di libreria oppure e' il proprio.
-export function puoUsareAgente(
+// Un agente e' eseguibile/visibile se e' il proprio, se e' di libreria e non
+// e' stato disabilitato per questo operatore, oppure se l'operatore e' admin.
+export async function puoUsareAgente(
   agente: Agente | null,
   operatore: { id: string; ruolo: string }
-): boolean {
+): Promise<boolean> {
   if (!agente) return false;
   if (operatore.ruolo === "admin") return true;
-  return agente.visibilita === "libreria" || agente.proprietario_id === operatore.id;
+  if (agente.proprietario_id === operatore.id) return true;
+  if (agente.visibilita !== "libreria") return false;
+  const assegnazione = await db
+    .prepare(
+      "SELECT abilitato FROM agenti_assegnazioni WHERE agente_id = ? AND operatore_id = ?"
+    )
+    .get([agente.id, operatore.id]);
+  // Nessuna riga = libreria visibile a tutti (default); una riga esplicita
+  // con abilitato = 0 la nasconde a questo operatore.
+  if (!assegnazione) return true;
+  return Number(assegnazione.abilitato) === 1;
 }
 
 export type EsitoSalvataggioAgente =
@@ -279,6 +322,10 @@ interface EsecuzioneRow {
   operatore_id: string | null;
   contesto: string | null;
   traccia: string | null;
+  conversazione_id: string | null;
+  provider: string | null;
+  avviata_da: string | null;
+  parent_id: string | null;
   data_creazione: string;
 }
 
@@ -307,24 +354,303 @@ function aTipoEsecuzione(r: EsecuzioneRow): AgenteEsecuzione {
     operatore_id: r.operatore_id,
     contesto: parseJson<Record<string, unknown>>(r.contesto),
     traccia: parseJson<VoceTraccia[]>(r.traccia),
+    conversazione_id: r.conversazione_id ?? null,
+    provider: r.provider ?? null,
+    avviata_da:
+      r.avviata_da === "trigger" || r.avviata_da === "sistema"
+        ? r.avviata_da
+        : "operatore",
+    parent_id: r.parent_id ?? null,
     data_creazione: r.data_creazione,
   };
 }
 
 const SELECT_ESECUZIONI = `SELECT id, agente_id, input_utente, output, stato, errore,
   modello, prompt_tokens, completion_tokens, durata_ms, operatore_id, contesto,
-  traccia, data_creazione FROM agenti_esecuzioni`;
+  traccia, conversazione_id, provider, avviata_da, parent_id, data_creazione
+  FROM agenti_esecuzioni`;
 
 export async function listaEsecuzioni(
   agenteId: string,
-  limit = 50
+  limit = 50,
+  conversazioneId?: string
 ): Promise<AgenteEsecuzione[]> {
+  const rows = conversazioneId
+    ? await db
+        .prepare(
+          `${SELECT_ESECUZIONI} WHERE agente_id = ? AND conversazione_id = ?
+           ORDER BY data_creazione ASC LIMIT ?`
+        )
+        .all([agenteId, conversazioneId, limit])
+    : await db
+        .prepare(
+          `${SELECT_ESECUZIONI} WHERE agente_id = ? ORDER BY data_creazione DESC LIMIT ?`
+        )
+        .all([agenteId, limit]);
+  return (rows as unknown as EsecuzioneRow[]).map(aTipoEsecuzione);
+}
+
+// ---------------------------------------------------------------------------
+// Monitor: tutte le esecuzioni (proprie, oppure tutte per l'admin)
+// ---------------------------------------------------------------------------
+export async function listaAttivitaAgenti(opts?: {
+  operatoreId?: string;
+  agenteId?: string;
+  stato?: string;
+  limit?: number;
+}): Promise<AgenteAttivita[]> {
+  const where: string[] = [];
+  const params: Record<string, string | number> = {};
+  if (opts?.operatoreId) {
+    where.push("e.operatore_id = @operatore_id");
+    params.operatore_id = opts.operatoreId;
+  }
+  if (opts?.agenteId) {
+    where.push("e.agente_id = @agente_id");
+    params.agente_id = opts.agenteId;
+  }
+  if (opts?.stato && ["in_corso", "completata", "errore"].includes(opts.stato)) {
+    where.push("e.stato = @stato");
+    params.stato = opts.stato;
+  }
+  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+  params.limit = limit;
   const rows = await db
     .prepare(
-      `${SELECT_ESECUZIONI} WHERE agente_id = ? ORDER BY data_creazione DESC LIMIT ?`
+      `SELECT e.id, e.agente_id, e.input_utente, e.output, e.stato, e.errore,
+        e.modello, e.prompt_tokens, e.completion_tokens, e.durata_ms,
+        e.operatore_id, e.contesto, e.traccia, e.conversazione_id, e.provider,
+        e.avviata_da, e.parent_id, e.data_creazione,
+        a.nome AS agente_nome, o.nome AS operatore_nome
+       FROM agenti_esecuzioni e
+       LEFT JOIN agenti a ON a.id = e.agente_id
+       LEFT JOIN operatori o ON o.id = e.operatore_id
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY e.data_creazione DESC LIMIT @limit`
     )
-    .all([agenteId, limit]);
-  return (rows as unknown as EsecuzioneRow[]).map(aTipoEsecuzione);
+    .all(params);
+  return (rows as unknown as Array<
+    EsecuzioneRow & { agente_nome: string | null; operatore_nome: string | null }
+  >).map((r) => ({
+    ...aTipoEsecuzione(r),
+    agente_nome: r.agente_nome ?? null,
+    operatore_nome: r.operatore_nome ?? null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Conversazioni Copilot
+// ---------------------------------------------------------------------------
+interface ConversazioneRow {
+  id: string;
+  agente_id: string;
+  operatore_id: string;
+  titolo: string | null;
+  contesto: string | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+function aTipoConversazione(r: ConversazioneRow): AgenteConversazione {
+  return {
+    id: r.id,
+    agente_id: r.agente_id,
+    operatore_id: r.operatore_id,
+    titolo: r.titolo,
+    contesto: parseJson<Record<string, unknown>>(r.contesto),
+    data_creazione: r.data_creazione,
+    data_aggiornamento: r.data_aggiornamento,
+  };
+}
+
+const SELECT_CONVERSAZIONI = `SELECT id, agente_id, operatore_id, titolo, contesto,
+  data_creazione, data_aggiornamento FROM agenti_conversazioni`;
+
+export async function creaConversazione(opts: {
+  agenteId: string;
+  operatoreId: string;
+  titolo?: string;
+  contesto?: Record<string, unknown>;
+}): Promise<AgenteConversazione> {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const titolo = (opts.titolo ?? "").trim().slice(0, 200) || null;
+  await db
+    .prepare(
+      `INSERT INTO agenti_conversazioni
+        (id, agente_id, operatore_id, titolo, contesto, data_creazione, data_aggiornamento)
+       VALUES (@id, @agente_id, @operatore_id, @titolo, @contesto, @now, @now)`
+    )
+    .run({
+      id,
+      agente_id: opts.agenteId,
+      operatore_id: opts.operatoreId,
+      titolo,
+      contesto: opts.contesto ? JSON.stringify(opts.contesto) : null,
+      now,
+    });
+  const conversazione = await getConversazione(id);
+  if (!conversazione) throw new Error("Conversazione non creata.");
+  return conversazione;
+}
+
+export async function getConversazione(
+  id: string
+): Promise<AgenteConversazione | null> {
+  const row = await db.prepare(`${SELECT_CONVERSAZIONI} WHERE id = ?`).get(id);
+  return row ? aTipoConversazione(row as unknown as ConversazioneRow) : null;
+}
+
+export async function listaConversazioni(opts: {
+  operatoreId: string;
+  agenteId?: string;
+  limit?: number;
+}): Promise<AgenteConversazione[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+  const rows = opts.agenteId
+    ? await db
+        .prepare(
+          `${SELECT_CONVERSAZIONI} WHERE operatore_id = ? AND agente_id = ?
+           ORDER BY data_aggiornamento DESC LIMIT ?`
+        )
+        .all([opts.operatoreId, opts.agenteId, limit])
+    : await db
+        .prepare(
+          `${SELECT_CONVERSAZIONI} WHERE operatore_id = ?
+           ORDER BY data_aggiornamento DESC LIMIT ?`
+        )
+        .all([opts.operatoreId, limit]);
+  return (rows as unknown as ConversazioneRow[]).map(aTipoConversazione);
+}
+
+export async function toccaConversazione(
+  id: string,
+  titolo?: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  if (titolo !== undefined) {
+    await db
+      .prepare(
+        `UPDATE agenti_conversazioni
+         SET data_aggiornamento = @now,
+             titolo = COALESCE(NULLIF(titolo, ''), @titolo)
+         WHERE id = @id`
+      )
+      .run({ id, now, titolo: titolo.slice(0, 200) || null });
+    return;
+  }
+  await db
+    .prepare("UPDATE agenti_conversazioni SET data_aggiornamento = @now WHERE id = @id")
+    .run({ id, now });
+}
+
+export async function eliminaConversazione(id: string): Promise<void> {
+  await db.prepare("DELETE FROM agenti_conversazioni WHERE id = ?").run(id);
+}
+
+// ---------------------------------------------------------------------------
+// Assegnazioni (agenti di libreria -> operatori)
+// ---------------------------------------------------------------------------
+interface AssegnazioneRow {
+  id: string;
+  agente_id: string;
+  operatore_id: string;
+  abilitato: number;
+  pinnato: number;
+  ordine: number;
+  data_creazione: string;
+}
+
+function aTipoAssegnazione(r: AssegnazioneRow): AgenteAssegnazione {
+  return {
+    id: r.id,
+    agente_id: r.agente_id,
+    operatore_id: r.operatore_id,
+    abilitato: Number(r.abilitato) === 1,
+    pinnato: Number(r.pinnato) === 1,
+    ordine: Number(r.ordine) || 0,
+    data_creazione: r.data_creazione,
+  };
+}
+
+export async function listaAssegnazioni(
+  agenteId: string
+): Promise<AgenteAssegnazione[]> {
+  const rows = await db
+    .prepare(
+      `SELECT id, agente_id, operatore_id, abilitato, pinnato, ordine,
+        data_creazione FROM agenti_assegnazioni WHERE agente_id = ?
+       ORDER BY operatore_id`
+    )
+    .all(agenteId);
+  return (rows as unknown as AssegnazioneRow[]).map(aTipoAssegnazione);
+}
+
+// Upsert parziale: i campi non passati mantengono il valore esistente (o il
+// default alla prima assegnazione).
+export async function impostaAssegnazione(opts: {
+  agenteId: string;
+  operatoreId: string;
+  abilitato?: boolean;
+  pinnato?: boolean;
+  ordine?: number;
+}): Promise<AgenteAssegnazione> {
+  const esistente = await db
+    .prepare(
+      "SELECT id, agente_id, operatore_id, abilitato, pinnato, ordine, data_creazione FROM agenti_assegnazioni WHERE agente_id = ? AND operatore_id = ?"
+    )
+    .get([opts.agenteId, opts.operatoreId]);
+
+  const now = new Date().toISOString();
+  if (!esistente) {
+    const id = crypto.randomUUID();
+    await db
+      .prepare(
+        `INSERT INTO agenti_assegnazioni
+          (id, agente_id, operatore_id, abilitato, pinnato, ordine, data_creazione)
+         VALUES (@id, @agente_id, @operatore_id, @abilitato, @pinnato, @ordine, @now)`
+      )
+      .run({
+        id,
+        agente_id: opts.agenteId,
+        operatore_id: opts.operatoreId,
+        abilitato: opts.abilitato === false ? 0 : 1,
+        pinnato: opts.pinnato ? 1 : 0,
+        ordine: opts.ordine ?? 0,
+        now,
+      });
+  } else {
+    const r = esistente as unknown as AssegnazioneRow;
+    await db
+      .prepare(
+        `UPDATE agenti_assegnazioni
+         SET abilitato = @abilitato, pinnato = @pinnato, ordine = @ordine
+         WHERE id = @id`
+      )
+      .run({
+        id: r.id,
+        abilitato: opts.abilitato === undefined ? Number(r.abilitato) : opts.abilitato ? 1 : 0,
+        pinnato: opts.pinnato === undefined ? Number(r.pinnato) : opts.pinnato ? 1 : 0,
+        ordine: opts.ordine ?? Number(r.ordine) ?? 0,
+      });
+  }
+
+  const riga = await db
+    .prepare(
+      "SELECT id, agente_id, operatore_id, abilitato, pinnato, ordine, data_creazione FROM agenti_assegnazioni WHERE agente_id = ? AND operatore_id = ?"
+    )
+    .get([opts.agenteId, opts.operatoreId]);
+  if (!riga) throw new Error("Assegnazione non salvata.");
+  return aTipoAssegnazione(riga as unknown as AssegnazioneRow);
+}
+
+export async function rimuoviAssegnazione(
+  agenteId: string,
+  operatoreId: string
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM agenti_assegnazioni WHERE agente_id = ? AND operatore_id = ?")
+    .run([agenteId, operatoreId]);
 }
 
 export type EsitoEsecuzione =
@@ -350,6 +676,9 @@ export async function eseguiAgente(opts: {
   input: string;
   contesto?: Record<string, unknown>;
   operatoreId?: string;
+  // Thread Copilot a cui agganciare il turno (opzionale: le esecuzioni di
+  // prova dalla configurazione restano senza conversazione).
+  conversazioneId?: string;
 }): Promise<EsitoEsecuzione> {
   const agente = await getAgente(opts.agenteId);
   if (!agente) return { ok: false, error: "Agente non trovato." };
@@ -390,9 +719,9 @@ export async function eseguiAgente(opts: {
   await db
     .prepare(
       `INSERT INTO agenti_esecuzioni (id, agente_id, input_utente, stato, modello,
-        operatore_id, contesto, data_creazione)
+        operatore_id, contesto, conversazione_id, provider, avviata_da, data_creazione)
        VALUES (@id, @agente_id, @input_utente, 'in_corso', @modello,
-        @operatore_id, @contesto, @now)`
+        @operatore_id, @contesto, @conversazione_id, @provider, 'operatore', @now)`
     )
     .run({
       id,
@@ -401,6 +730,8 @@ export async function eseguiAgente(opts: {
       modello: agente.modello,
       operatore_id: opts.operatoreId ?? null,
       contesto: opts.contesto ? JSON.stringify(opts.contesto) : null,
+      conversazione_id: opts.conversazioneId ?? null,
+      provider: providerScelto,
       now,
     });
 
@@ -430,6 +761,12 @@ export async function eseguiAgente(opts: {
         durata_ms: Date.now() - inizio,
         traccia: dati.traccia ? JSON.stringify(dati.traccia) : null,
       });
+    // Il thread resta in cima alla lista conversazioni a ogni turno concluso.
+    if (opts.conversazioneId) {
+      await toccaConversazione(opts.conversazioneId, input.slice(0, 80)).catch(
+        () => undefined
+      );
+    }
   };
 
   try {

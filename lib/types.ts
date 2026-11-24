@@ -160,6 +160,64 @@ export interface TicketListResult {
   paginaSize: number;
 }
 
+// ---------------------------------------------------------------------------
+// Rapportini di chiusura
+// ---------------------------------------------------------------------------
+
+export type StatoRapportino = "bozza" | "confermato" | "esportato" | "errore";
+
+// Dettaglio ore per operatore (snapshot al momento della generazione).
+export interface RapportinoVoce {
+  operatore: string;
+  minuti: number;
+  voci: number;
+}
+
+export interface Rapportino {
+  id: string;
+  ticket_id: string;
+  cliente_id: string | null;
+  numero: string;
+  stato: StatoRapportino;
+  data_creazione: string;
+  data_aggiornamento: string;
+  data_chiusura: string | null;
+  operatore_id: string | null;
+  operatore: string | null;
+  // Snapshot dei dati cliente al momento della generazione.
+  cliente_ragione_sociale: string;
+  cliente_partita_iva: string | null;
+  cliente_indirizzo: string | null;
+  cliente_citta: string | null;
+  cliente_provincia: string | null;
+  cliente_cap: string | null;
+  cliente_email: string | null;
+  cliente_telefono: string | null;
+  // Snapshot del ticket.
+  ticket_numero: string;
+  modulo_software: string | null;
+  sommario: string | null;
+  descrizione: string | null;
+  // Contenuto editabile.
+  attivita: string | null;
+  note_aggiuntive: string | null;
+  minuti_totali: number;
+  voci: RapportinoVoce[];
+  // Invio all'ERP Arca (non ancora configurato).
+  arca_stato: string;
+  arca_riferimento: string | null;
+  arca_inviato_il: string | null;
+  arca_errore: string | null;
+  creato_da: string | null;
+}
+
+export interface RapportinoInput {
+  attivita?: string | null;
+  note_aggiuntive?: string | null;
+  minuti_totali?: number;
+  stato?: "bozza" | "confermato";
+}
+
 export interface KnowledgeLink {
   url: string;
   title: string;
@@ -788,12 +846,53 @@ export interface AgenteEsecuzione {
   contesto: Record<string, unknown> | null;
   // Trace del loop strumenti (null per le esecuzioni conversazionali).
   traccia: VoceTraccia[] | null;
+  // Thread Copilot a cui appartiene il turno e backend effettivo usato.
+  conversazione_id: string | null;
+  provider: string | null;
+  avviata_da: "operatore" | "trigger" | "sistema";
+  parent_id: string | null;
   data_creazione: string;
 }
 
 export interface EsecuzioneAgenteInput {
   input: string;
   contesto?: Record<string, unknown>;
+}
+
+// Agente con il flag di "pinnato" per l'operatore corrente (barra rapida del
+// Copilot). Per gli agenti personali il flag e' sempre editabile; per quelli
+// di libreria dipende dalla riga in agenti_assegnazioni.
+export interface AgentePerOperatore extends Agente {
+  pinnato: boolean;
+}
+
+// Riga di assegnazione di un agente di libreria a un operatore.
+export interface AgenteAssegnazione {
+  id: string;
+  agente_id: string;
+  operatore_id: string;
+  abilitato: boolean;
+  pinnato: boolean;
+  ordine: number;
+  data_creazione: string;
+}
+
+// Thread del Copilot (una chat per agente + operatore).
+export interface AgenteConversazione {
+  id: string;
+  agente_id: string;
+  operatore_id: string;
+  titolo: string | null;
+  contesto: Record<string, unknown> | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+}
+
+// Riga del monitor "Attività agenti": esecuzione arricchita con i nomi per la
+// timeline (evita una seconda query in UI).
+export interface AgenteAttivita extends AgenteEsecuzione {
+  agente_nome: string | null;
+  operatore_nome: string | null;
 }
 
 export type EmailIntent =

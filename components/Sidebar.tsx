@@ -63,7 +63,7 @@ export default function Sidebar() {
   // 240px: lo spazio torna al contenuto e la navigazione diventa un oggetto
   // unico, una pillola bianca sul canvas, invece di un pannello.
   return (
-    <aside className="hidden w-[84px] shrink-0 flex-col items-center gap-6 py-4 md:flex">
+    <aside className="hidden w-[84px] shrink-0 flex-col items-center gap-6 py-4 print:hidden md:flex">
       <Link href="/" className={`${cerchio} bg-inchiostro text-lime`}>
         <HeadsetIcon className="h-5 w-5" />
         <span className={tooltip}>Support Desk</span>

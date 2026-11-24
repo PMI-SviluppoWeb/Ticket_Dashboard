@@ -1,11 +1,13 @@
 import type { ComponentType } from "react";
 import {
   BarChartIcon,
+  BookIcon,
   CalendarIcon,
   FolderIcon,
   GridIcon,
   MailIcon,
   SettingsIcon,
+  SparklesIcon,
 } from "@/components/icons";
 
 // ===========================================================================
@@ -70,6 +72,29 @@ export const AREE: NavArea[] = [
     gruppo: "lavoro",
     children: [{ href: "/progetti", label: "Progetti" }],
     calda: ["/api/clienti"],
+  },
+  {
+    // Rapportini di chiusura: operativi, quindi visibili a tutti gli operatori.
+    id: "rapportini",
+    label: "Rapportini",
+    icon: BookIcon,
+    href: "/rapportini",
+    gruppo: "lavoro",
+    children: [{ href: "/rapportini", label: "Rapportini" }],
+  },
+  {
+    // Area AI: disponibile a TUTTI gli operatori (non adminOnly). La
+    // configurazione degli agenti di libreria resta in /admin/agenti.
+    id: "ai",
+    label: "AI",
+    icon: SparklesIcon,
+    href: "/agenti",
+    gruppo: "lavoro",
+    children: [
+      { href: "/agenti", label: "I miei agenti", exact: true },
+      { href: "/agenti/attivita", label: "Attività" },
+    ],
+    calda: ["/api/agenti"],
   },
   {
     id: "email",

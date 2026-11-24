@@ -629,6 +629,10 @@ export async function deleteTicket(
     { sql: `DELETE FROM tickets_storico_stati WHERE ticket_id = @id`, params: { id } },
     { sql: `DELETE FROM progetti_tickets WHERE ticket_id = @id`, params: { id } },
     { sql: `DELETE FROM notifications WHERE ticket_id = @id`, params: { id } },
+    // Il rapportino nasce dal ticket: senza il ticket non ha piu' il suo
+    // riferimento operativo (i dati cliente restano comunque uno snapshot,
+    // ma l'eliminazione definitiva del ticket elimina anche il documento).
+    { sql: `DELETE FROM rapportini WHERE ticket_id = @id`, params: { id } },
     // La posta in arrivo e' un registro storico: si conserva la mail, si
     // azzera solo il collegamento al ticket che non esiste piu'.
     { sql: `UPDATE email_inbox SET ticket_id = NULL WHERE ticket_id = @id`, params: { id } },

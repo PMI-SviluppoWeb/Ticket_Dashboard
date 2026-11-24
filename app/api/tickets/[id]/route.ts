@@ -11,6 +11,7 @@ import { emailAssegnazione, emailChiusura } from "@/lib/email-templates";
 import { logEmail } from "@/lib/email-log";
 import { completaContatti, emailValida, EMAIL_PLACEHOLDER } from "@/lib/contatti";
 import { casellaPerTicket } from "@/lib/caselle";
+import { generaRapportinoDaTicket } from "@/lib/rapportini";
 import type { Priorita, StatoTicket, Ticket, TicketUpdate, TechnicalNote } from "@/lib/types";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
@@ -126,6 +127,26 @@ export async function PATCH(
   });
   if (!ticket) {
     return NextResponse.json({ error: "Ticket non trovato." }, { status: 404 });
+  }
+
+  // Rapportino di chiusura: si genera quando il ticket passa a CHIUSO e si
+  // aggiorna se l'operatore corregge le ore di un ticket gia' chiuso (il
+  // tempo effettivo si inserisce spesso DOPO la chiusura). Non deve mai far
+  // fallire il cambio di stato: un errore resta nel log e il ticket resta
+  // chiuso correttamente.
+  const chiusuraOra =
+    body.stato === "CHIUSO" && existingTicket.stato !== "CHIUSO";
+  const oreModificate =
+    ticket.stato === "CHIUSO" && body.tempo_effettivo_minuti !== undefined;
+  if (chiusuraOra || oreModificate) {
+    try {
+      await generaRapportinoDaTicket(ticket.id, {
+        operatoreId: operator.id,
+        operatore: operator.nome,
+      });
+    } catch (err) {
+      console.error("Rapportino non generato:", ticket.id, err);
+    }
   }
 
   // L'email e' un effetto collaterale, non parte della risposta: l'SMTP puo'

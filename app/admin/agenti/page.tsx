@@ -12,10 +12,12 @@ import {
   SendIcon,
   SparklesIcon,
   TrashIcon,
+  UserPlusIcon,
 } from "@/components/icons";
 import PageHeader from "@/components/PageHeader";
 import AreaTabs from "@/components/AreaTabs";
 import SectionBar from "@/components/SectionBar";
+import AssegnazioniPanel from "@/components/agenti/AssegnazioniPanel";
 import { useOperatore } from "@/lib/operatore-client";
 import {
   GRUPPI_STRUMENTI,
@@ -41,6 +43,7 @@ const EMPTY_FORM: FormData = {
   strumenti: [],
   provider: "auto",
   attivo: true,
+  visibilita: "libreria",
 };
 
 const RUOLI: Array<{ valore: RuoloAgente; label: string; esempio: string }> = [
@@ -113,8 +116,18 @@ export default function AgentiPage() {
   const [storico, setStorico] = useState<AgenteEsecuzione[]>([]);
   const [storicoLoading, setStoricoLoading] = useState(false);
 
+  // Suddivisione della supervisione: i miei agenti, la libreria, oppure tutti.
+  const [tab, setTab] = useState<"miei" | "libreria" | "tutti">("tutti");
+  const [assegna, setAssegna] = useState<Agente | null>(null);
+
   const { operatore: sessione, caricamento: caricamentoSessione } = useOperatore();
   const isAdmin = sessione?.ruolo === "admin";
+
+  const agentiFiltrati = agenti.filter((a) => {
+    if (tab === "tutti") return true;
+    if (tab === "libreria") return a.visibilita === "libreria";
+    return Boolean(a.proprietario_id) && a.proprietario_id === sessione?.id;
+  });
 
   const fetchAgenti = useCallback(async () => {
     const seq = ++seqRef.current;
@@ -176,6 +189,7 @@ export default function AgentiPage() {
       strumenti: a.strumenti,
       provider: a.provider,
       attivo: a.attivo,
+      visibilita: a.visibilita ?? "libreria",
     });
     setGruppiSel(gruppiDaStrumenti(a.strumenti));
     setEditingId(a.id);
@@ -309,6 +323,29 @@ export default function AgentiPage() {
         />
 
         <AreaTabs areaId="admin" />
+
+        <div className="mb-4 flex w-fit flex-wrap items-center gap-1 rounded-full border border-crema-contorno bg-white p-1">
+          {(
+            [
+              { id: "miei", label: "I miei" },
+              { id: "libreria", label: "Libreria" },
+              { id: "tutti", label: "Tutti" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              aria-pressed={tab === t.id}
+              className={`cursor-pointer rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-200 ${
+                tab === t.id
+                  ? "bg-inchiostro text-white"
+                  : "text-caldo-testo hover:bg-crema-scuro hover:text-inchiostro"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg p-3 text-sm text-stato-urgenza-testo">
@@ -465,6 +502,24 @@ export default function AgentiPage() {
                   </p>
                 </div>
                 <div>
+                  <label className="mb-1 block text-sm font-medium text-caldo-testo">
+                    Visibilità
+                  </label>
+                  <select
+                    value={form.visibilita ?? "libreria"}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        visibilita: e.target.value as "libreria" | "personale",
+                      })
+                    }
+                    className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+                  >
+                    <option value="libreria">Libreria (condivisa)</option>
+                    <option value="personale">Personale (solo proprietario)</option>
+                  </select>
+                </div>
+                <div>
                   <label className="mb-1 block text-sm font-medium text-caldo-testo">Modello</label>
                   <input
                     type="text"
@@ -512,14 +567,19 @@ export default function AgentiPage() {
         )}
 
         <div className="overflow-hidden rounded-card border border-crema-contorno bg-white">
-          <SectionBar titolo="Agenti configurati" icona={SparklesIcon} conteggio={agenti.length} />
+          <SectionBar
+            titolo="Agenti configurati"
+            icona={SparklesIcon}
+            conteggio={agentiFiltrati.length}
+          />
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <LoaderIcon className="h-6 w-6 animate-spin text-inchiostro" />
             </div>
-          ) : agenti.length === 0 ? (
+          ) : agentiFiltrati.length === 0 ? (
             <div className="py-12 text-center text-sm text-caldo-testo">
-              Nessun agente ancora. Creane uno per iniziare a usare l&apos;AI nella tua attività.
+              Nessun agente in questa vista. Creane uno per iniziare a usare
+              l&apos;AI nella tua attività.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -528,94 +588,132 @@ export default function AgentiPage() {
                   <tr className="border-b border-crema-bordo bg-crema-scuro">
                     <th className="px-5 py-3 font-medium text-caldo-testo">Nome</th>
                     <th className="px-5 py-3 font-medium text-caldo-testo">Ruolo</th>
-                    <th className="px-5 py-3 font-medium text-caldo-testo">Modello</th>
+                    <th className="px-5 py-3 font-medium text-caldo-testo">Visibilità</th>
                     <th className="px-5 py-3 font-medium text-caldo-testo">Stato</th>
                     <th className="px-5 py-3 text-right font-medium text-caldo-testo">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {agenti.map((a) => (
-                    <tr
-                      key={a.id}
-                      className="border-b border-crema-bordo transition-colors duration-200 last:border-0 hover:bg-crema-scuro"
-                    >
-                      <td className="px-5 py-3">
-                        <span className="flex items-center gap-2 font-medium text-inchiostro">
-                          {a.nome}
-                          {a.strumenti.length > 0 && (
-                            <span className="inline-flex items-center rounded-full border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 text-[11px] font-medium text-stato-ok-testo">
-                              dati app
-                            </span>
+                  {agentiFiltrati.map((a) => {
+                    const mio = Boolean(a.proprietario_id) && a.proprietario_id === sessione?.id;
+                    return (
+                      <tr
+                        key={a.id}
+                        className="border-b border-crema-bordo transition-colors duration-200 last:border-0 hover:bg-crema-scuro"
+                      >
+                        <td className="px-5 py-3">
+                          <span className="flex flex-wrap items-center gap-2 font-medium text-inchiostro">
+                            {a.nome}
+                            {a.strumenti.length > 0 && (
+                              <span className="inline-flex items-center rounded-full border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 text-[11px] font-medium text-stato-ok-testo">
+                                dati app
+                              </span>
+                            )}
+                            {prova?.id === a.id && (
+                              <span className="inline-flex items-center rounded-full border border-stato-info-bordo bg-stato-info-bg px-2 py-0.5 text-[11px] font-medium text-stato-info-testo">
+                                In prova
+                              </span>
+                            )}
+                          </span>
+                          {a.descrizione && (
+                            <p className="mt-0.5 line-clamp-1 text-xs text-caldo-testo">{a.descrizione}</p>
                           )}
-                          {prova?.id === a.id && (
-                            <span className="inline-flex items-center rounded-full border border-stato-info-bordo bg-stato-info-bg px-2 py-0.5 text-[11px] font-medium text-stato-info-testo">
-                              In prova
-                            </span>
-                          )}
-                        </span>
-                        {a.descrizione && (
-                          <p className="mt-0.5 line-clamp-1 text-xs text-caldo-testo">{a.descrizione}</p>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-caldo-testo">
-                        {RUOLO_LABEL[a.ruolo] ?? a.ruolo}
-                      </td>
-                      <td className="px-5 py-3 font-mono text-xs text-caldo-testo">{a.modello}</td>
-                      <td className="px-5 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
-                            a.attivo
-                              ? "border-stato-ok-bordo bg-stato-ok-bg text-stato-ok-testo"
-                              : "border-stato-neutro-bordo bg-stato-neutro-bg text-stato-neutro-testo"
-                          }`}
-                        >
-                          {a.attivo ? "Attivo" : "Disattivato"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => apriProva(a)}
-                            className="cursor-pointer rounded-control border border-crema-contorno px-2 py-1.5 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
-                            title="Prova l'agente"
+                          <p className="mt-0.5 font-mono text-[10px] text-caldo-testo">
+                            {a.modello || "default di sistema"}
+                          </p>
+                        </td>
+                        <td className="px-5 py-3 text-caldo-testo">
+                          {RUOLO_LABEL[a.ruolo] ?? a.ruolo}
+                        </td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                              a.visibilita === "libreria"
+                                ? "border-stato-info-bordo bg-stato-info-bg text-stato-info-testo"
+                                : "border-crema-contorno bg-crema-scuro text-caldo-testo"
+                            }`}
                           >
-                            <SendIcon className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleEdit(a)}
-                            className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
-                            title="Modifica"
-                            aria-label={`Modifica ${a.nome}`}
+                            {a.visibilita === "libreria" ? "Libreria" : "Personale"}
+                          </span>
+                          <p className="mt-1 text-[10px] text-caldo-testo">
+                            {mio ? "Tuo" : a.proprietario_id ? "Di un altro operatore" : "—"}
+                          </p>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                              a.attivo
+                                ? "border-stato-ok-bordo bg-stato-ok-bg text-stato-ok-testo"
+                                : "border-stato-neutro-bordo bg-stato-neutro-bg text-stato-neutro-testo"
+                            }`}
                           >
-                            <EditIcon className="h-4 w-4" />
-                          </button>
-                          {confirmDelete === a.id ? (
+                            {a.attivo ? "Attivo" : "Disattivato"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {a.visibilita === "libreria" && (
+                              <button
+                                onClick={() => setAssegna(a)}
+                                className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
+                                title="Assegna operatori"
+                                aria-label={`Assegna ${a.nome}`}
+                              >
+                                <UserPlusIcon className="h-4 w-4" />
+                              </button>
+                            )}
                             <button
-                              onClick={() => handleDelete(a.id)}
-                              className="cursor-pointer rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-2 py-1.5 text-xs font-semibold text-stato-urgenza-testo"
-                              title="Conferma eliminazione"
+                              onClick={() => apriProva(a)}
+                              className="cursor-pointer rounded-control border border-crema-contorno px-2 py-1.5 text-xs font-medium text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
+                              title="Prova l'agente"
                             >
-                              Conferma
+                              <SendIcon className="h-3.5 w-3.5" />
                             </button>
-                          ) : (
                             <button
-                              onClick={() => setConfirmDelete(a.id)}
-                              className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-urgenza-bordo hover:bg-stato-urgenza-bg hover:text-stato-urgenza-testo"
-                              title="Elimina"
-                              aria-label={`Elimina ${a.nome}`}
+                              onClick={() => handleEdit(a)}
+                              className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-info-bordo hover:bg-stato-info-bg hover:text-stato-info-testo"
+                              title="Modifica"
+                              aria-label={`Modifica ${a.nome}`}
                             >
-                              <TrashIcon className="h-4 w-4" />
+                              <EditIcon className="h-4 w-4" />
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {confirmDelete === a.id ? (
+                              <button
+                                onClick={() => handleDelete(a.id)}
+                                className="cursor-pointer rounded-control border border-stato-urgenza-bordo bg-stato-urgenza-bg px-2 py-1.5 text-xs font-semibold text-stato-urgenza-testo"
+                                title="Conferma eliminazione"
+                              >
+                                Conferma
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDelete(a.id)}
+                                className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-urgenza-bordo hover:bg-stato-urgenza-bg hover:text-stato-urgenza-testo"
+                                title="Elimina"
+                                aria-label={`Elimina ${a.nome}`}
+                              >
+                                <TrashIcon className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+
+        {assegna && (
+          <div className="mt-6">
+            <AssegnazioniPanel
+              agente={assegna}
+              onChiudi={() => setAssegna(null)}
+            />
+          </div>
+        )}
 
         {/* --- Pannello di prova + storico esecuzioni -------------------- */}
         {prova && (

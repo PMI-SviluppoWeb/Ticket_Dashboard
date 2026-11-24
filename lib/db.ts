@@ -531,6 +531,89 @@ CREATE TABLE IF NOT EXISTS allegati_messaggi (
 
 CREATE INDEX IF NOT EXISTS idx_allegati_messaggi_messaggio ON allegati_messaggi (messaggio_id);
 CREATE INDEX IF NOT EXISTS idx_allegati_messaggi_ticket    ON allegati_messaggi (ticket_id);
+
+-- Assegnazione degli agenti di libreria agli operatori. Un agente di libreria
+-- e' visibile a tutti gli operatori per default. Una riga con abilitato = 0 lo
+-- nasconde a QUELL'operatore, mentre pinnato = 1 lo porta nella barra rapida
+-- del Copilot. Gli agenti personali non richiedono assegnazione.
+CREATE TABLE IF NOT EXISTS agenti_assegnazioni (
+  id             TEXT PRIMARY KEY,
+  agente_id      TEXT NOT NULL,
+  operatore_id   TEXT NOT NULL,
+  abilitato      INTEGER NOT NULL DEFAULT 1 CHECK (abilitato IN (0,1)),
+  pinnato        INTEGER NOT NULL DEFAULT 0 CHECK (pinnato IN (0,1)),
+  ordine         INTEGER NOT NULL DEFAULT 0,
+  data_creazione TEXT NOT NULL,
+  UNIQUE (agente_id, operatore_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agenti_assegnazioni_operatore
+  ON agenti_assegnazioni (operatore_id, abilitato);
+CREATE INDEX IF NOT EXISTS idx_agenti_assegnazioni_agente
+  ON agenti_assegnazioni (agente_id);
+
+-- Conversazioni del Copilot: un thread per agente + operatore. Il log delle
+-- singole esecuzioni resta in agenti_esecuzioni (conversazione_id le collega),
+-- quindi qui si conservano solo titolo e contesto iniziale.
+CREATE TABLE IF NOT EXISTS agenti_conversazioni (
+  id                 TEXT PRIMARY KEY,
+  agente_id          TEXT NOT NULL,
+  operatore_id       TEXT NOT NULL,
+  titolo             TEXT,
+  contesto           TEXT,
+  data_creazione     TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agenti_conversazioni_operatore
+  ON agenti_conversazioni (operatore_id, data_aggiornamento DESC);
+CREATE INDEX IF NOT EXISTS idx_agenti_conversazioni_agente
+  ON agenti_conversazioni (agente_id);
+
+-- Rapportini di chiusura ticket: un documento per ticket, generato alla
+-- chiusura con ore, note e dati cliente. I dati del cliente sono uno SNAPSHOT
+-- (non un join): il rapportino deve restare identico anche se l'anagrafica
+-- cambia. "voci" e' il dettaglio ore per operatore in JSON. Le colonne arca_*
+-- preparano l'invio all'ERP, per ora non configurato.
+CREATE TABLE IF NOT EXISTS rapportini (
+  id                      TEXT PRIMARY KEY,
+  ticket_id               TEXT NOT NULL UNIQUE,
+  cliente_id              TEXT,
+  numero                  TEXT NOT NULL,
+  stato                   TEXT NOT NULL DEFAULT 'bozza'
+                          CHECK (stato IN ('bozza','confermato','esportato','errore')),
+  data_creazione          TEXT NOT NULL,
+  data_aggiornamento      TEXT NOT NULL,
+  data_chiusura           TEXT,
+  operatore_id            TEXT,
+  operatore               TEXT,
+  cliente_ragione_sociale TEXT NOT NULL,
+  cliente_partita_iva     TEXT,
+  cliente_indirizzo       TEXT,
+  cliente_citta           TEXT,
+  cliente_provincia       TEXT,
+  cliente_cap             TEXT,
+  cliente_email           TEXT,
+  cliente_telefono        TEXT,
+  ticket_numero           TEXT NOT NULL,
+  modulo_software         TEXT,
+  sommario                TEXT,
+  descrizione             TEXT,
+  attivita                TEXT,
+  note_aggiuntive         TEXT,
+  minuti_totali           INTEGER NOT NULL DEFAULT 0,
+  voci                    TEXT NOT NULL DEFAULT '[]',
+  arca_stato              TEXT NOT NULL DEFAULT 'da_configurare',
+  arca_riferimento        TEXT,
+  arca_inviato_il         TEXT,
+  arca_errore             TEXT,
+  creato_da               TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_rapportini_stato
+  ON rapportini (stato, data_creazione DESC);
+CREATE INDEX IF NOT EXISTS idx_rapportini_cliente
+  ON rapportini (cliente_id, data_creazione DESC);
 `;
 
 // NOTA sui due vincoli dello SCHEMA (che viene splittato su ";"):
@@ -667,6 +750,14 @@ async function initSchema(): Promise<void> {
     "ALTER TABLE agenti ADD COLUMN proprietario_id TEXT",
     "ALTER TABLE agenti ADD COLUMN visibilita TEXT NOT NULL DEFAULT 'libreria'",
     "ALTER TABLE agenti_esecuzioni ADD COLUMN costo_stimato REAL",
+    // --- Fase 5: conversazioni Copilot e tracciamento dell'origine del run ---
+    // conversazione_id collega i turni dello stesso thread; provider e
+    // avviata_da rendono leggibile il monitor (chi ha avviato e con quale
+    // backend), parent_id resta per le esecuzioni figlie (trigger/schedule).
+    "ALTER TABLE agenti_esecuzioni ADD COLUMN conversazione_id TEXT",
+    "ALTER TABLE agenti_esecuzioni ADD COLUMN provider TEXT",
+    "ALTER TABLE agenti_esecuzioni ADD COLUMN avviata_da TEXT NOT NULL DEFAULT 'operatore'",
+    "ALTER TABLE agenti_esecuzioni ADD COLUMN parent_id TEXT",
   ];
   for (const sql of colonneAggiuntive) {
     try {
@@ -695,6 +786,9 @@ async function initSchema(): Promise<void> {
     // Task personali/team: filtro per assegnatario e stato, ordine per data.
     "CREATE INDEX IF NOT EXISTS idx_attivita_assegnatario ON attivita (assegnatario, stato, data_scadenza)",
     "CREATE INDEX IF NOT EXISTS idx_attivita_stato_scadenza ON attivita (stato, data_scadenza)",
+    // Monitor agenti: thread di una conversazione e timeline per operatore.
+    "CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_conversazione ON agenti_esecuzioni (conversazione_id, data_creazione)",
+    "CREATE INDEX IF NOT EXISTS idx_agenti_esecuzioni_operatore ON agenti_esecuzioni (operatore_id, data_creazione DESC)",
   ];
   for (const sql of indiciAggiuntivi) {
     try {

@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import type {
   Allegato,
   Cliente,
   EmailLog,
   Priorita,
+  Rapportino,
   RuoloMessaggio,
   StatoTicket,
   TechnicalNote,
@@ -40,6 +42,11 @@ import {
   SendIcon,
 } from "@/components/icons";
 import TimerBersaglio from "@/components/TimerBersaglio";
+import {
+  RAPPORTINO_STATO_CLASSE,
+  RAPPORTINO_STATO_LABEL,
+  formatMinuti,
+} from "@/components/rapportini/formato";
 import { useOperatore } from "@/lib/operatore-client";
 import { caricaApi } from "@/lib/api-cache";
 import { EMAIL_PLACEHOLDER } from "@/lib/contatti";
@@ -100,6 +107,8 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
+
+
 export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
@@ -151,6 +160,11 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   const [tempoEffettivo, setTempoEffettivo] = useState("");
   const [savingTempo, setSavingTempo] = useState(false);
 
+  // Rapportino di chiusura: letto dal server (nasce alla chiusura del ticket).
+  const [rapportino, setRapportino] = useState<Rapportino | null>(null);
+  const [rapportinoLoading, setRapportinoLoading] = useState(false);
+  const [generandoRapportino, setGenerandoRapportino] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/tickets/${id}`);
@@ -183,6 +197,24 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     } catch { /* */ }
   }, []);
 
+  const loadRapportino = useCallback(async () => {
+    setRapportinoLoading(true);
+    try {
+      const res = await fetch(
+        `/api/rapportini?ticket_id=${encodeURIComponent(id)}`,
+        { cache: "no-store" }
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { rapportini?: Rapportino[] };
+        setRapportino(data.rapportini?.[0] ?? null);
+      }
+    } catch {
+      /* il rapportino e' secondario rispetto al ticket */
+    } finally {
+      setRapportinoLoading(false);
+    }
+  }, [id]);
+
   // L'operatore della sessione arriva dalla cache condivisa: niente seconda
   // richiesta a /api/auth/me per la stessa pagina.
   const { operatore: sessione } = useOperatore();
@@ -192,6 +224,14 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
     load();
     loadOperatori();
   }, [load, loadOperatori]);
+
+  useEffect(() => {
+    if (ticket?.stato === "CHIUSO") {
+      void loadRapportino();
+    } else {
+      setRapportino(null);
+    }
+  }, [ticket?.stato, loadRapportino]);
 
   const loadEmailLog = useCallback(async () => {
     try {
@@ -396,10 +436,12 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       }
       if (minutiTotali <= 0) return;
       await updateTicket({ tempo_effettivo_minuti: minutiTotali } as Partial<Ticket>);
+      // Il PATCH rigenera il rapportino (se in bozza) con le nuove ore.
+      await loadRapportino();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
-  }, [tempoEffettivo, run, updateTicket]);
+  }, [tempoEffettivo, run, updateTicket, loadRapportino]);
 
   const handleCloseTicket = useCallback(() => {
     void run(async () => {
@@ -408,6 +450,29 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
       setConfirmClose(false);
     });
   }, [run, updateTicket]);
+
+  const generaRapportino = useCallback(() => {
+    void run(async () => {
+      setGenerandoRapportino(true);
+      try {
+        const res = await fetch("/api/rapportini", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticketId: id }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          rapportino?: Rapportino;
+          error?: string;
+        };
+        if (!res.ok || !data.rapportino) {
+          throw new Error(data.error ?? "Errore nella generazione del rapportino.");
+        }
+        setRapportino(data.rapportino);
+      } finally {
+        setGenerandoRapportino(false);
+      }
+    });
+  }, [run, id]);
 
   const elimina = useCallback(() => {
     void run(async () => {
@@ -625,7 +690,7 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
   return (
     <div className="flex h-full flex-col bg-crema">
       {/* Main Content */}
-      <main className="flex-1 space-y-6 overflow-y-auto px-6 py-6 lg:px-8">
+      <main className="flex-1 space-y-6 overflow-y-auto px-6 py-6 print:h-auto print:overflow-visible lg:px-8">
         {/* Error banner — l'errore e' un ticket che richiede attenzione, quindi
             famiglia urgenza (come la priorita' ALTA), non `pericolo`: quello e'
             riservato alle azioni irreversibili. */}
@@ -1600,6 +1665,112 @@ export default function TicketPage({ id, onBack, onDeleted }: TicketPageProps) {
                 )}
               </div>
             </section>
+
+            {/* 3b. Rapportino di chiusura */}
+            {(isClosed || rapportino) && (
+              <section className="space-y-3.5 rounded-panel border border-crema-contorno bg-white p-5">
+                <div className="flex items-center justify-between border-b border-crema-bordo pb-2">
+                  <div className="flex items-center gap-2">
+                    <BookIcon className="h-4 w-4 text-caldo-testo" />
+                    <h2 className="text-sm font-bold text-inchiostro">Rapportino</h2>
+                  </div>
+                  {rapportino && (
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        RAPPORTINO_STATO_CLASSE[rapportino.stato] ??
+                        RAPPORTINO_STATO_CLASSE.bozza
+                      }`}
+                    >
+                      {RAPPORTINO_STATO_LABEL[rapportino.stato] ?? rapportino.stato}
+                    </span>
+                  )}
+                </div>
+
+                {rapportinoLoading ? (
+                  <div className="flex justify-center py-4">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-inchiostro border-t-transparent" />
+                  </div>
+                ) : rapportino ? (
+                  <>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-caldo-testo">Numero</span>
+                        <span className="tabular font-semibold text-inchiostro">
+                          {rapportino.numero}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-caldo-testo">Cliente</span>
+                        <span className="truncate font-semibold text-inchiostro">
+                          {rapportino.cliente_ragione_sociale}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-caldo-testo">Ore lavorate</span>
+                        <span className="tabular rounded border border-stato-ok-bordo bg-stato-ok-bg px-2 py-0.5 font-bold text-stato-ok-testo">
+                          {formatMinuti(rapportino.minuti_totali)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {rapportino.voci.length > 0 && (
+                      <ul className="space-y-0.5 text-[11px] text-caldo-testo">
+                        {rapportino.voci.map((v) => (
+                          <li key={v.operatore} className="flex items-center justify-between">
+                            <span>{v.operatore}</span>
+                            <span className="tabular">{formatMinuti(v.minuti)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {rapportino.note_aggiuntive && (
+                      <p className="whitespace-pre-wrap rounded-control border border-crema-contorno bg-crema-scuro p-2 text-[11px] leading-relaxed text-inchiostro">
+                        {rapportino.note_aggiuntive}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/rapportini/${rapportino.id}`}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-control bg-inchiostro px-3 py-1.5 text-[11px] font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo"
+                      >
+                        Apri rapportino
+                      </Link>
+                      {rapportino.stato === "bozza" && (
+                        <button
+                          type="button"
+                          onClick={generaRapportino}
+                          disabled={generandoRapportino || saving}
+                          className="cursor-pointer rounded-control border border-crema-contorno px-2.5 py-1.5 text-[11px] font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {generandoRapportino ? "Rigenero…" : "Rigenera dai dati"}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-caldo-testo">
+                      Nessun rapportino ancora: viene creato alla chiusura con
+                      ore, note e dati cliente.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={generaRapportino}
+                      disabled={generandoRapportino || saving}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-control bg-inchiostro px-3 py-1.5 text-[11px] font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {generandoRapportino ? "Genero…" : "Genera rapportino"}
+                    </button>
+                  </>
+                )}
+
+                <p className="text-[10px] text-caldo-testo">
+                  Invio ad Arca: da configurare.
+                </p>
+              </section>
+            )}
 
             {/* 4. Email Log Card */}
             <section className="space-y-3 rounded-panel border border-crema-contorno bg-white p-5">

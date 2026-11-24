@@ -109,7 +109,7 @@ export default function MobileTabBar() {
 
       <nav
         aria-label="Navigazione mobile"
-        className="fixed inset-x-0 bottom-0 z-50 flex items-stretch gap-1 border-t border-crema-contorno bg-white px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 shadow-soft md:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 flex items-stretch gap-1 border-t border-crema-contorno bg-white px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 shadow-soft print:hidden md:hidden"
       >
         {primari.map(voce)}
         <button

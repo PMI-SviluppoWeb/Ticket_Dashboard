@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { creaAgente, listaAgenti } from "@/lib/agenti";
+import { creaAgente, listaAgenti, listaAgentiPerOperatore } from "@/lib/agenti";
 import { providerAttivo } from "@/lib/ai-provider";
 import { richiediOperatore } from "@/lib/auth";
 import type { AgenteInput } from "@/lib/types";
@@ -12,10 +12,15 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.risposta;
 
   try {
+    // L'admin vede tutto (configurazione e supervisione); l'operatore vede i
+    // propri agenti personali e la libreria non disabilitata per lui, con il
+    // flag `pinnato` usato dalla barra rapida del Copilot. `?vista=miei`
+    // forza la vista personale anche per l'admin (pagina /agenti).
+    const vistaMiei = new URL(request.url).searchParams.get("vista") === "miei";
     const agenti =
-      auth.operatore.ruolo === "admin"
+      auth.operatore.ruolo === "admin" && !vistaMiei
         ? await listaAgenti()
-        : await listaAgenti({ operatoreId: auth.operatore.id });
+        : await listaAgentiPerOperatore(auth.operatore.id);
     return NextResponse.json({ agenti, provider: providerAttivo() });
   } catch (err) {
     console.error("GET /api/agenti", err);

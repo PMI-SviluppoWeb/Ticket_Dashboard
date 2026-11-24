@@ -13,14 +13,16 @@ export async function GET(
   if (!auth.ok) return auth.risposta;
 
   const agente = await getAgente(params.id);
-  if (!puoUsareAgente(agente, auth.operatore)) {
+  if (!(await puoUsareAgente(agente, auth.operatore))) {
     return NextResponse.json({ error: "Agente non trovato." }, { status: 404 });
   }
 
   try {
-    const limitRaw = new URL(request.url).searchParams.get("limit");
+    const { searchParams } = new URL(request.url);
+    const limitRaw = searchParams.get("limit");
     const limit = limitRaw ? Math.min(Math.max(parseInt(limitRaw, 10) || 50, 1), 200) : 50;
-    const esecuzioni = await listaEsecuzioni(params.id, limit);
+    const conversazioneId = searchParams.get("conversazione_id") ?? undefined;
+    const esecuzioni = await listaEsecuzioni(params.id, limit, conversazioneId);
     return NextResponse.json({ esecuzioni });
   } catch (err) {
     console.error("GET /api/agenti/[id]/esecuzioni", err);

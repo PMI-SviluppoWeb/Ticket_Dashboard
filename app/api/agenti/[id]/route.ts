@@ -20,7 +20,7 @@ export async function GET(
   if (!auth.ok) return auth.risposta;
 
   const agente = await getAgente(params.id);
-  if (!puoUsareAgente(agente, auth.operatore)) {
+  if (!(await puoUsareAgente(agente, auth.operatore))) {
     return NextResponse.json({ error: "Agente non trovato." }, { status: 404 });
   }
   return NextResponse.json({ agente });
