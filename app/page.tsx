@@ -212,6 +212,12 @@ export default function Dashboard() {
     loadDashboard(true);
   }, [loadList, loadDashboard]);
 
+  // Dopo completa/modifica/elimina di una task: la lista delle task e i
+  // conteggi della sintesi arrivano dalla stessa risposta della dashboard.
+  const aggiornaTask = useCallback(() => {
+    loadDashboard(true);
+  }, [loadDashboard]);
+
   // Prendi/rilascia dalla lista: la riga cambia SUBITO (stato e assegnatario)
   // e il PATCH parte in background. Al ritorno si riallinea con il server;
   // in errore si ricarica per ripristinare il dato vero.
@@ -339,6 +345,8 @@ export default function Dashboard() {
             task={dashboard?.mie_task ?? []}
             caricamento={caricamentoSintesi}
             isAdmin={isAdmin}
+            operatori={operatori}
+            onModificata={aggiornaTask}
           />
         </div>
       </main>
