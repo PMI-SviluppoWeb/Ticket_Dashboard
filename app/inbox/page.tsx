@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useOperatore } from "@/lib/operatore-client";
 import PageHeader from "@/components/PageHeader";
 import AreaTabs from "@/components/AreaTabs";
-import { LoaderIcon, MailIcon, RefreshIcon } from "@/components/icons";
+import InboxDettaglio, { type DettaglioInbox } from "@/components/InboxDettaglio";
+import { EyeIcon, LoaderIcon, MailIcon, RefreshIcon } from "@/components/icons";
 
 interface InboxRiga {
   id: string;
@@ -63,6 +64,12 @@ export default function InboxPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [aggancia, setAggancia] = useState<{ id: string; valore: string } | null>(null);
 
+  // Dettaglio del messaggio completo: si apre subito con i dati della lista e
+  // poi carica corpo e metadati da /api/inbox/[id].
+  const [dettaglioRiga, setDettaglioRiga] = useState<InboxRiga | null>(null);
+  const [dettaglio, setDettaglio] = useState<DettaglioInbox | null>(null);
+  const [caricandoDettaglio, setCaricandoDettaglio] = useState(false);
+
   const carica = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -97,14 +104,35 @@ export default function InboxPage() {
         if (!res.ok) throw new Error((data as { error?: string }).error ?? "Operazione non riuscita.");
         setAggancia(null);
         await carica();
+        return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Operazione non riuscita.");
+        return false;
       } finally {
         setBusyId(null);
       }
     },
     [carica]
   );
+
+  const apriDettaglio = useCallback(async (riga: InboxRiga) => {
+    setDettaglioRiga(riga);
+    setDettaglio(null);
+    setCaricandoDettaglio(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/inbox/${riga.id}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? "Errore nel caricamento dell'email.");
+      }
+      setDettaglio((data as { email: DettaglioInbox }).email);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore nel caricamento dell'email.");
+    } finally {
+      setCaricandoDettaglio(false);
+    }
+  }, []);
 
   if (caricamento) {
     return (
@@ -201,7 +229,11 @@ export default function InboxPage() {
               const badge = statoRiga(r);
               const occupato = busyId === r.id;
               return (
-                <article key={r.id} className="rounded-card border border-crema-contorno bg-white p-4">
+                <article
+                  key={r.id}
+                  className="cursor-pointer rounded-card border border-crema-contorno bg-white p-4 transition-colors duration-200 hover:border-inchiostro/30"
+                  onClick={() => void apriDettaglio(r)}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-inchiostro">{r.subject}</p>
@@ -238,7 +270,19 @@ export default function InboxPage() {
                     </p>
                   )}
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <div
+                    className="mt-3 flex flex-wrap items-center gap-2 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void apriDettaglio(r)}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-control border border-crema-contorno px-2.5 py-1 font-medium text-caldo-testo transition-colors duration-200 hover:bg-crema-scuro hover:text-inchiostro"
+                    >
+                      <EyeIcon className="h-3.5 w-3.5" />
+                      Apri
+                    </button>
+
                     {r.numero_ticket && r.ticket_id && (
                       <Link
                         href={`/tickets/${r.ticket_id}`}
@@ -298,6 +342,7 @@ export default function InboxPage() {
                   {aggancia?.id === r.id && (
                     <form
                       className="mt-3 flex flex-wrap items-center gap-2"
+                      onClick={(e) => e.stopPropagation()}
                       onSubmit={(e) => {
                         e.preventDefault();
                         if (aggancia.valore.trim()) {
@@ -327,6 +372,23 @@ export default function InboxPage() {
           </div>
         )}
       </div>
+
+      <InboxDettaglio
+        riga={dettaglioRiga}
+        dettaglio={dettaglio}
+        caricando={caricandoDettaglio}
+        errore={error}
+        busy={dettaglioRiga ? busyId === dettaglioRiga.id : false}
+        onClose={() => {
+          setDettaglioRiga(null);
+          setDettaglio(null);
+        }}
+        onAzione={(azione, ticketId) =>
+          dettaglioRiga
+            ? eseguiAzione(dettaglioRiga.id, azione, ticketId)
+            : Promise.resolve(false)
+        }
+      />
     </div>
   );
 }
