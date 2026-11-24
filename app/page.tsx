@@ -302,13 +302,13 @@ export default function Dashboard() {
           </p>
         )}
 
-        {/* Cruscotto 2x2: su desktop le due righe si dividono l'altezza
-            residua e ogni pannello scorre da solo; su mobile si impilano. Le
-            altezze minime garantiscono che il contenuto non si schiacci su
-            laptop bassi (in quel caso scorre la pagina). */}
-        <div className="mt-4 grid flex-1 grid-cols-1 gap-4 lg:grid-cols-12 lg:grid-rows-[minmax(380px,1.1fr)_minmax(300px,0.9fr)]">
+        {/* Cruscotto 2x2: le righe sono alte quanto il contenuto, non si
+            dividono piu' l'altezza residua. Ogni pannello ha un tetto massimo
+            (l'altezza disponibile) e scorre internamente solo se lo supera.
+            Su mobile si impilano. */}
+        <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
           <PannelloTicket
-            className="h-[68vh] max-h-[620px] lg:col-span-7 lg:row-start-1 lg:h-auto lg:max-h-none"
+            className="max-h-[68vh] lg:col-span-7 lg:row-start-1 lg:max-h-[calc(100dvh-16rem)]"
             tickets={tickets}
             totale={totale}
             pagina={pagina}
@@ -326,14 +326,14 @@ export default function Dashboard() {
             currentOperator={currentOperator}
           />
 
-          <PannelloCalendarioDashboard className="h-[72vh] max-h-[640px] lg:col-span-5 lg:row-start-1 lg:h-auto lg:max-h-none" />
+          <PannelloCalendarioDashboard className="max-h-[72vh] lg:col-span-5 lg:row-start-1 lg:max-h-[calc(100dvh-16rem)]" />
 
           {isAdmin && (
-            <PannelloInbox className="h-[60vh] max-h-[520px] lg:col-span-7 lg:row-start-2 lg:h-auto lg:max-h-none" />
+            <PannelloInbox className="max-h-[60vh] lg:col-span-7 lg:row-start-2 lg:max-h-[calc(100dvh-16rem)]" />
           )}
 
           <PannelloTask
-            className={`h-[60vh] max-h-[520px] lg:row-start-2 lg:h-auto lg:max-h-none ${
+            className={`max-h-[60vh] lg:row-start-2 lg:max-h-[calc(100dvh-16rem)] ${
               isAdmin ? "lg:col-span-5" : "lg:col-span-12"
             }`}
             task={dashboard?.mie_task ?? []}
