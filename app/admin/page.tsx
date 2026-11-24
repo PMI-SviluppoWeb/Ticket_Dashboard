@@ -10,6 +10,8 @@ import {
   LoaderIcon,
   LockClosedIcon,
   HeadsetIcon,
+  EyeIcon,
+  EyeSlashIcon,
 } from "@/components/icons";
 import PageHeader from "@/components/PageHeader";
 import AreaTabs from "@/components/AreaTabs";
@@ -476,16 +478,21 @@ export default function AdminPage() {
                               title={isActive ? "Disattiva" : "Riattiva"}
                               aria-label={isActive ? `Disattiva ${op.nome}` : `Riattiva ${op.nome}`}
                             >
-                              <TrashIcon className="h-4 w-4" />
+                              {isActive ? (
+                                <EyeSlashIcon className="h-4 w-4" />
+                              ) : (
+                                <EyeIcon className="h-4 w-4" />
+                              )}
                             </button>
                             {isActive && (
                               <button
                                 onClick={() => handlePermanentDelete(op.id)}
-                                className="cursor-pointer rounded-control border border-crema-contorno p-1.5 text-caldo-testo transition-colors duration-200 hover:border-stato-urgenza-bordo hover:bg-stato-urgenza-bg hover:text-stato-urgenza-testo"
+                                className="inline-flex cursor-pointer items-center gap-1.5 rounded-control border border-pericolo/30 bg-pericolo/10 px-2 py-1.5 text-[11px] font-semibold text-pericolo transition-colors duration-200 hover:bg-pericolo hover:text-white"
                                 title="Elimina definitivamente"
                                 aria-label={`Elimina definitivamente ${op.nome}`}
                               >
-                                <TrashIcon className="h-4 w-4" />
+                                <TrashIcon className="h-3.5 w-3.5" />
+                                Elimina
                               </button>
                             )}
                           </div>
