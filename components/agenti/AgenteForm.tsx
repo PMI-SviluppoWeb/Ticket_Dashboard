@@ -32,6 +32,8 @@ export default function AgenteForm({ agente, onSalvato, onAnnulla }: Props) {
     ruolo: agente?.ruolo ?? "assistente",
     modello: agente?.modello ?? "",
     system_prompt: agente?.system_prompt ?? "",
+    istruzioni_default: agente?.istruzioni_default ?? "",
+    messaggio_iniziale: agente?.messaggio_iniziale ?? "",
     strumenti: agente?.strumenti ?? [],
     provider: agente?.provider ?? "auto",
     attivo: agente?.attivo ?? true,
@@ -119,7 +121,7 @@ export default function AgenteForm({ agente, onSalvato, onAnnulla }: Props) {
         </div>
         <div className="sm:col-span-2">
           <label className="mb-1 block text-xs font-medium text-caldo-testo">
-            Prompt di sistema *
+            Prompt di comportamento (come deve rispondere) *
           </label>
           <textarea
             required
@@ -128,6 +130,36 @@ export default function AgenteForm({ agente, onSalvato, onAnnulla }: Props) {
             onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
             className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
             placeholder={"Sei un assistente di supporto tecnico...\nRispondi sempre in italiano, in modo conciso."}
+          />
+          <p className="mt-1 text-[11px] text-caldo-testo">
+            Identità, tono e vincoli: come l&apos;agente deve comportarsi.
+          </p>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-xs font-medium text-caldo-testo">
+            Istruzioni di default (cosa deve fare)
+          </label>
+          <textarea
+            rows={4}
+            value={form.istruzioni_default ?? ""}
+            onChange={(e) => setForm({ ...form, istruzioni_default: e.target.value })}
+            className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+            placeholder={"Compito predefinito, es. riassumere il ticket, proporre una risposta, elencare i prossimi passi..."}
+          />
+          <p className="mt-1 text-[11px] text-caldo-testo">
+            Accodate al prompt a ogni esecuzione. Modificabili in qualsiasi momento.
+          </p>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-xs font-medium text-caldo-testo">
+            Messaggio iniziale nel Copilot
+          </label>
+          <textarea
+            rows={2}
+            value={form.messaggio_iniziale ?? ""}
+            onChange={(e) => setForm({ ...form, messaggio_iniziale: e.target.value })}
+            className="w-full rounded-control border border-crema-contorno px-3 py-2 text-sm text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
+            placeholder="Testo mostrato prima del primo turno (opzionale)"
           />
         </div>
         <div className="sm:col-span-2">

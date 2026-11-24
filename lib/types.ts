@@ -796,7 +796,12 @@ export interface Agente {
   descrizione: string | null;
   ruolo: RuoloAgente;
   modello: string;
+  // COME deve comportarsi l'agente (identità, tono, vincoli).
   system_prompt: string;
+  // COSA deve fare di default: accodato al prompt a ogni esecuzione.
+  istruzioni_default: string | null;
+  // Testo mostrato nel Copilot prima del primo turno (opzionale).
+  messaggio_iniziale: string | null;
   // Nomi degli strumenti attivi (es. ["cerca_ticket","get_ticket"]).
   strumenti: string[];
   provider: ProviderAgente;
@@ -814,6 +819,8 @@ export interface AgenteInput {
   ruolo?: RuoloAgente;
   modello?: string;
   system_prompt: string;
+  istruzioni_default?: string | null;
+  messaggio_iniziale?: string | null;
   strumenti?: string[];
   provider?: ProviderAgente;
   attivo?: boolean;

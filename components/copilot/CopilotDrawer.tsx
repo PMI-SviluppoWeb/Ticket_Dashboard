@@ -158,8 +158,26 @@ export default function CopilotDrawer() {
                 </>
               ) : (
                 <>
-                  Scrivi una richiesta a <strong className="text-inchiostro">{agenteSel?.nome}</strong>.
-                  La conversazione resta aperta mentre navighi l&apos;app.
+                  {agenteSel?.messaggio_iniziale ? (
+                    <p className="whitespace-pre-wrap">{agenteSel.messaggio_iniziale}</p>
+                  ) : (
+                    <>
+                      Scrivi una richiesta a{" "}
+                      <strong className="text-inchiostro">{agenteSel?.nome}</strong>.
+                      La conversazione resta aperta mentre navighi l&apos;app.
+                    </>
+                  )}
+                  {agenteSel?.istruzioni_default?.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => void invia("Esegui il compito di default.")}
+                      disabled={inCorso || !agenteSel.attivo}
+                      className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-control bg-inchiostro px-3 py-1.5 text-[11px] font-semibold text-white transition-colors duration-200 hover:bg-inchiostro-profondo disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <SparklesIcon className="h-3.5 w-3.5" />
+                      Esegui il compito di default
+                    </button>
+                  ) : null}
                 </>
               )}
             </div>

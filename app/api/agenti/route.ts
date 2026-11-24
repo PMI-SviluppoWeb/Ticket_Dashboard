@@ -50,6 +50,10 @@ export async function POST(request: Request) {
         ruolo: body.ruolo,
         modello: typeof body.modello === "string" ? body.modello : undefined,
         system_prompt: String(body.system_prompt ?? ""),
+        istruzioni_default:
+          typeof body.istruzioni_default === "string" ? body.istruzioni_default : undefined,
+        messaggio_iniziale:
+          typeof body.messaggio_iniziale === "string" ? body.messaggio_iniziale : undefined,
         strumenti: Array.isArray(body.strumenti)
           ? body.strumenti.filter((s): s is string => typeof s === "string")
           : undefined,

@@ -369,6 +369,12 @@ CREATE TABLE IF NOT EXISTS agenti (
                    CHECK (ruolo IN ('assistente','contenuti','clienti','custom')),
   modello          TEXT NOT NULL DEFAULT '',
   system_prompt    TEXT NOT NULL,
+  -- Istruzioni operative predefinite ("cosa deve fare"): il comportamento
+  -- (system_prompt) dice COME rispondere, queste dicono COSA fare quando
+  -- l'operatore non specifica altro. Sono accodate al prompt a ogni esecuzione.
+  istruzioni_default TEXT,
+  -- Messaggio mostrato nel Copilot prima del primo turno (benvenuto/istruzioni).
+  messaggio_iniziale TEXT,
   -- JSON array di nomi strumenti (lib/agenti-tools.ts). Se vuoto l'agente e'
   -- solo conversazionale; se non vuoto l'esecuzione usa il loop strumenti
   -- IN-APP (query eseguite dalla nostra app sul nostro DB) e forza OpenRouter.
@@ -758,6 +764,9 @@ async function initSchema(): Promise<void> {
     "ALTER TABLE agenti_esecuzioni ADD COLUMN provider TEXT",
     "ALTER TABLE agenti_esecuzioni ADD COLUMN avviata_da TEXT NOT NULL DEFAULT 'operatore'",
     "ALTER TABLE agenti_esecuzioni ADD COLUMN parent_id TEXT",
+    // --- Fase 6: configurazione dell'agente modificabile in ogni momento ---
+    "ALTER TABLE agenti ADD COLUMN istruzioni_default TEXT",
+    "ALTER TABLE agenti ADD COLUMN messaggio_iniziale TEXT",
   ];
   for (const sql of colonneAggiuntive) {
     try {

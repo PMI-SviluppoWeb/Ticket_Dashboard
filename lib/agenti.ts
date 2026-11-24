@@ -44,6 +44,8 @@ interface AgenteRow {
   ruolo: string;
   modello: string;
   system_prompt: string;
+  istruzioni_default: string | null;
+  messaggio_iniziale: string | null;
   strumenti: string;
   provider: string | null;
   attivo: number;
@@ -72,6 +74,8 @@ function aTipo(r: AgenteRow): Agente {
     ruolo: (RUOLI_VALIDI.includes(r.ruolo as RuoloAgente) ? r.ruolo : "custom") as RuoloAgente,
     modello: r.modello,
     system_prompt: r.system_prompt,
+    istruzioni_default: r.istruzioni_default,
+    messaggio_iniziale: r.messaggio_iniziale,
     strumenti,
     provider: (
       r.provider && PROVIDER_VALIDI.includes(r.provider as ProviderAgente)
@@ -88,8 +92,8 @@ function aTipo(r: AgenteRow): Agente {
 }
 
 const SELECT_AGENTI = `SELECT id, nome, descrizione, ruolo, modello, system_prompt,
-  strumenti, provider, attivo, creato_da, proprietario_id, visibilita,
-  data_creazione, data_aggiornamento FROM agenti`;
+  istruzioni_default, messaggio_iniziale, strumenti, provider, attivo, creato_da,
+  proprietario_id, visibilita, data_creazione, data_aggiornamento FROM agenti`;
 
 // ---------------------------------------------------------------------------
 // CRUD
@@ -116,8 +120,9 @@ export async function listaAgenti(opts?: {
 // rapida. Regola: i PROPRI agenti personali sempre; gli agenti di libreria a
 // meno che un'assegnazione esplicita non li abbia disabilitati per lui.
 const SELECT_AGENTI_OPERATORE = `SELECT a.id, a.nome, a.descrizione, a.ruolo,
-  a.modello, a.system_prompt, a.strumenti, a.provider, a.attivo, a.creato_da,
-  a.proprietario_id, a.visibilita, a.data_creazione, a.data_aggiornamento,
+  a.modello, a.system_prompt, a.istruzioni_default, a.messaggio_iniziale,
+  a.strumenti, a.provider, a.attivo, a.creato_da, a.proprietario_id,
+  a.visibilita, a.data_creazione, a.data_aggiornamento,
   COALESCE(s.pinnato, 0) AS pinnato
   FROM agenti a
   LEFT JOIN agenti_assegnazioni s
@@ -208,6 +213,34 @@ function validaInput(input: Partial<AgenteInput>, parziale: boolean): string | n
   if (input.descrizione !== undefined && input.descrizione.length > 2000) {
     return "Descrizione troppo lunga.";
   }
+  if (input.istruzioni_default !== undefined) {
+    if (
+      input.istruzioni_default !== null &&
+      typeof input.istruzioni_default !== "string"
+    ) {
+      return "Istruzioni di default non valide.";
+    }
+    if (
+      typeof input.istruzioni_default === "string" &&
+      input.istruzioni_default.length > 20000
+    ) {
+      return "Istruzioni di default troppo lunghe.";
+    }
+  }
+  if (input.messaggio_iniziale !== undefined) {
+    if (
+      input.messaggio_iniziale !== null &&
+      typeof input.messaggio_iniziale !== "string"
+    ) {
+      return "Messaggio iniziale non valido.";
+    }
+    if (
+      typeof input.messaggio_iniziale === "string" &&
+      input.messaggio_iniziale.length > 2000
+    ) {
+      return "Messaggio iniziale troppo lungo.";
+    }
+  }
   if (input.strumenti !== undefined) {
     if (!Array.isArray(input.strumenti) || input.strumenti.some((s) => typeof s !== "string")) {
       return "Strumenti non validi.";
@@ -230,11 +263,11 @@ export async function creaAgente(
   await db
     .prepare(
       `INSERT INTO agenti (id, nome, descrizione, ruolo, modello, system_prompt,
-        strumenti, provider, attivo, creato_da, proprietario_id, visibilita,
-        data_creazione, data_aggiornamento)
+        istruzioni_default, messaggio_iniziale, strumenti, provider, attivo,
+        creato_da, proprietario_id, visibilita, data_creazione, data_aggiornamento)
        VALUES (@id, @nome, @descrizione, @ruolo, @modello, @system_prompt,
-        @strumenti, @provider, @attivo, @creato_da, @proprietario_id, @visibilita,
-        @now, @now)`
+        @istruzioni_default, @messaggio_iniziale, @strumenti, @provider, @attivo,
+        @creato_da, @proprietario_id, @visibilita, @now, @now)`
     )
     .run({
       id,
@@ -243,6 +276,8 @@ export async function creaAgente(
       ruolo: input.ruolo ?? "assistente",
       modello: input.modello?.trim() || MODELLO_DEFAULT,
       system_prompt: input.system_prompt.trim(),
+      istruzioni_default: input.istruzioni_default?.trim() || null,
+      messaggio_iniziale: input.messaggio_iniziale?.trim() || null,
       strumenti: JSON.stringify(input.strumenti ?? []),
       provider: input.provider ?? "auto",
       attivo: input.attivo === false ? 0 : 1,
@@ -280,6 +315,12 @@ export async function aggiornaAgente(
   if (input.ruolo !== undefined) assegna("ruolo", input.ruolo);
   if (input.modello !== undefined) assegna("modello", input.modello.trim() || MODELLO_DEFAULT);
   if (input.system_prompt !== undefined) assegna("system_prompt", input.system_prompt.trim());
+  if (input.istruzioni_default !== undefined) {
+    assegna("istruzioni_default", input.istruzioni_default?.trim() || null);
+  }
+  if (input.messaggio_iniziale !== undefined) {
+    assegna("messaggio_iniziale", input.messaggio_iniziale?.trim() || null);
+  }
   if (input.strumenti !== undefined) assegna("strumenti", JSON.stringify(input.strumenti));
   if (input.provider !== undefined) assegna("provider", input.provider);
   if (input.attivo !== undefined) assegna("attivo", input.attivo ? 1 : 0);
@@ -668,6 +709,20 @@ function risolviProvider(agente: Agente, strumentiAttivi: boolean): ProviderAI {
   return providerAttivo();
 }
 
+// Prompt effettivo: il comportamento (COME) e' il system_prompt; le istruzioni
+// di default (COSA) vengono accodate come sezione dedicata, cosi' l'operatore
+// puo' cambiarle in ogni momento senza riscrivere il prompt di identita'.
+function promptEffettivo(agente: Agente): string {
+  const base = agente.system_prompt.trim();
+  const def = (agente.istruzioni_default ?? "").trim();
+  if (!def) return base;
+  return `${base}
+
+## COMPITO DI DEFAULT
+Quando l'operatore non specifica diversamente, segui queste istruzioni:
+${def}`;
+}
+
 // Invoca l'agente sul backend risolto e logga l'esecuzione completa.
 // Sincrona per scelta (la struttura prevede un ritmo umano: la UI attende
 // e mostra l'output; l'eventuale coda asincrona arriverà con i tool lunghi).
@@ -780,7 +835,7 @@ export async function eseguiAgente(opts: {
       // Il modello chiede tool; le query le esegue la NOSTRA app sul
       // nostro DB; i risultati tornano al modello fino alla risposta.
       const messaggi: MessaggioChat[] = [
-        { role: "system", content: agente.system_prompt },
+        { role: "system", content: promptEffettivo(agente) },
         { role: "user", content: input },
       ];
       const voci: VoceTraccia[] = [];
@@ -792,7 +847,7 @@ export async function eseguiAgente(opts: {
         // DEVE produrre la risposta finale con i dati già raccolti.
         const forzatoFinale = turno > MAX_TURNI_STRUMENTI;
         const esito = await invocaModello({
-          systemPrompt: agente.system_prompt,
+          systemPrompt: promptEffettivo(agente),
           input,
           modello: agente.modello,
           provider: "openrouter",
@@ -852,7 +907,7 @@ export async function eseguiAgente(opts: {
     } else {
       // === CHIAMATA SEMPLICE (Hermes con memoria, o OpenRouter) ===========
       const esito = await invocaModello({
-        systemPrompt: agente.system_prompt,
+        systemPrompt: promptEffettivo(agente),
         input,
         modello: agente.modello,
         provider: providerScelto,
