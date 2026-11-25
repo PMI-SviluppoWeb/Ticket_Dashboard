@@ -16,7 +16,8 @@ commit: 81b3f92
 
 | Voce | Valore |
 | --- | --- |
-| Commit corrente | `81b3f92` |
+| Ultimo commit di codice | `81b3f92` |
+| HEAD al momento della generazione | `1b6b824` |
 | Data generazione | 2026-11-25 |
 | Grafo costruito al commit | `81b3f929` (2026-11-25) |
 | Grafo | 2655 nodi · 7390 archi · 127 community |

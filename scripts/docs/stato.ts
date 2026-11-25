@@ -32,7 +32,20 @@ function git(args: string[]): string {
   }
 }
 
-const COMMIT = git(["rev-parse", "--short", "HEAD"]) || "sconosciuto";
+const HEAD = git(["rev-parse", "--short", "HEAD"]) || "sconosciuto";
+const COMMIT =
+  git([
+    "log",
+    "-1",
+    "--format=%h",
+    "--",
+    "app",
+    "components",
+    "lib",
+    "middleware.ts",
+    "next.config.mjs",
+    "tailwind.config.ts",
+  ]) || HEAD;
 
 function relativo(assoluto: string): string {
   return relative(ROOT, assoluto).split(sep).join("/");
@@ -197,10 +210,8 @@ function distanzaCommit(sha: string): number {
     "app",
     "components",
     "lib",
-    "scripts",
     "middleware.ts",
     "next.config.mjs",
-    "package.json",
     "tailwind.config.ts",
   ]);
   const n = Number.parseInt(out || "0", 10);
@@ -296,7 +307,8 @@ const contenuto = [
   [
     "| Voce | Valore |",
     "| --- | --- |",
-    `| Commit corrente | \`${COMMIT}\` |`,
+    `| Ultimo commit di codice | \`${COMMIT}\` |`,
+    `| HEAD al momento della generazione | \`${HEAD}\` |`,
     `| Data generazione | ${OGGI} |`,
     `| Grafo costruito al commit | \`${grafo.commit}\` (${grafo.data}) |`,
     `| Grafo | ${grafo.nodi} nodi · ${grafo.archi} archi · ${grafo.community} community |`,

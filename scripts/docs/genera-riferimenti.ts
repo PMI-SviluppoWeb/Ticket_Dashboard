@@ -33,7 +33,21 @@ function commitCorrente(): string {
   }
 }
 
-const COMMIT = commitCorrente();
+// L'ultimo commit che ha toccato il CODICE. Un commit di sola documentazione
+// non deve far sembrare vecchi i riferimenti.
+function commitCodice(): string {
+  try {
+    const out = execSync(
+      "git log -1 --format=%h -- app components lib middleware.ts next.config.mjs tailwind.config.ts",
+      { cwd: ROOT, encoding: "utf8" }
+    ).trim();
+    return out || commitCorrente();
+  } catch {
+    return commitCorrente();
+  }
+}
+
+const COMMIT = commitCodice();
 
 function percorsoSicuro(rel: string): string {
   return join(ROOT, rel.split("/").join(sep));
