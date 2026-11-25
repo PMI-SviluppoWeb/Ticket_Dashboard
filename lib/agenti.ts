@@ -2,6 +2,16 @@ import { db } from "./db";
 import { invocaModello, providerAttivo, type MessaggioChat, type ProviderAI } from "./ai-provider";
 import { eseguiStrumento, strumentiPerAgente } from "./agenti-tools";
 import { TUTTI_STRUMENTI } from "./agenti-tools-def";
+import { getTicket } from "./tickets";
+import { getCliente } from "./clienti";
+import {
+  componiStoricoConversazione,
+  formattaContestoCliente,
+  formattaContestoTicket,
+  formattaContestoProgetto,
+  type EsecuzioneStorico,
+  type MessaggioStorico,
+} from "./agenti-contesto";
 import "server-only";
 
 // Accesso dati e invocazione degli agenti AI.
@@ -723,6 +733,60 @@ Quando l'operatore non specifica diversamente, segui queste istruzioni:
 ${def}`;
 }
 
+// Storico del thread Copilot. La conversazione e' la fonte di verita': senza
+// questo, ogni turno ripartirebbe da zero e il modello "dimenticherebbe" i
+// dati letti con i tool al turno precedente.
+async function caricaStoricoConversazione(
+  conversazioneId: string,
+  escludiId: string
+): Promise<MessaggioStorico[]> {
+  const rows = await db
+    .prepare(
+      `SELECT input_utente, output, errore, stato, data_creazione
+       FROM agenti_esecuzioni
+       WHERE conversazione_id = ? AND id != ?
+         AND stato IN ('completata','errore')
+       ORDER BY data_creazione ASC`
+    )
+    .all([conversazioneId, escludiId]);
+  return componiStoricoConversazione(rows as unknown as EsecuzioneStorico[]);
+}
+
+// Contesto della pagina (ticket/cliente/progetto) passato dal Copilot.
+// Viene trasformato in un blocco di sistema leggibile dal modello, cosi' non
+// deve chiedere all'operatore dati che l'app ha gia' sotto mano.
+async function costruisciContesto(
+  contesto: Record<string, unknown> | undefined
+): Promise<string> {
+  if (!contesto) return "";
+  const tipo = typeof contesto.tipo === "string" ? contesto.tipo : "";
+  const id = typeof contesto.id === "string" ? contesto.id : "";
+  if (!id) return "";
+
+  try {
+    if (tipo === "ticket") {
+      const ticket = await getTicket(id);
+      return ticket
+        ? formattaContestoTicket(ticket)
+        : `## CONTESTO CORRENTE
+Ticket id: ${id} (non caricato). Usa lo strumento get_ticket per leggerlo.`;
+    }
+    if (tipo === "cliente") {
+      const cliente = await getCliente(id);
+      return cliente
+        ? formattaContestoCliente(cliente)
+        : `## CONTESTO CORRENTE
+Cliente id: ${id} (non caricato). Usa lo strumento get_cliente per leggerlo.`;
+    }
+    if (tipo === "progetto") {
+      return formattaContestoProgetto(id);
+    }
+  } catch (err) {
+    console.error("Contesto agente non caricato:", err);
+  }
+  return "";
+}
+
 // Invoca l'agente sul backend risolto e logga l'esecuzione completa.
 // Sincrona per scelta (la struttura prevede un ritmo umano: la UI attende
 // e mostra l'output; l'eventuale coda asincrona arriverà con i tool lunghi).
@@ -790,6 +854,22 @@ export async function eseguiAgente(opts: {
       now,
     });
 
+  // Contesto e storico si calcolano DOPO l'INSERT: lo storico esclude
+  // l'esecuzione corrente (in_corso) per id.
+  const contestoPrompt = await costruisciContesto(opts.contesto);
+  const systemPrompt = contestoPrompt
+    ? `${promptEffettivo(agente)}\n\n${contestoPrompt}`
+    : promptEffettivo(agente);
+
+  let storico: MessaggioStorico[] = [];
+  if (providerScelto === "openrouter" && opts.conversazioneId) {
+    try {
+      storico = await caricaStoricoConversazione(opts.conversazioneId, id);
+    } catch (err) {
+      console.error("Storico conversazione non caricato:", err);
+    }
+  }
+
   const registra = async (dati: {
     stato: "completata" | "errore";
     output?: string | null;
@@ -835,7 +915,8 @@ export async function eseguiAgente(opts: {
       // Il modello chiede tool; le query le esegue la NOSTRA app sul
       // nostro DB; i risultati tornano al modello fino alla risposta.
       const messaggi: MessaggioChat[] = [
-        { role: "system", content: promptEffettivo(agente) },
+        { role: "system", content: systemPrompt },
+        ...storico.map((m) => ({ role: m.role, content: m.content })),
         { role: "user", content: input },
       ];
       const voci: VoceTraccia[] = [];
@@ -847,7 +928,7 @@ export async function eseguiAgente(opts: {
         // DEVE produrre la risposta finale con i dati già raccolti.
         const forzatoFinale = turno > MAX_TURNI_STRUMENTI;
         const esito = await invocaModello({
-          systemPrompt: promptEffettivo(agente),
+          systemPrompt,
           input,
           modello: agente.modello,
           provider: "openrouter",
@@ -906,11 +987,23 @@ export async function eseguiAgente(opts: {
       traccia = voci;
     } else {
       // === CHIAMATA SEMPLICE (Hermes con memoria, o OpenRouter) ===========
+      // OpenRouter e' stateless: lo storico va passato esplicitamente.
+      // Hermes ha gia' la sua sessione, quindi non riceve lo storico.
+      const messaggiStorico: MessaggioChat[] | undefined =
+        providerScelto === "openrouter"
+          ? [
+              { role: "system", content: systemPrompt },
+              ...storico.map((m) => ({ role: m.role, content: m.content })),
+              { role: "user", content: input },
+            ]
+          : undefined;
+
       const esito = await invocaModello({
-        systemPrompt: promptEffettivo(agente),
+        systemPrompt,
         input,
         modello: agente.modello,
         provider: providerScelto,
+        messaggi: messaggiStorico,
         // Sessione/chiave di memoria: solo Hermes li usa. La sessione e' PER
         // OPERATORE: due operatori non condividono la memoria dell'agente.
         sessionId: `ticket-${agente.id}-${opts.operatoreId ?? "anon"}`,
