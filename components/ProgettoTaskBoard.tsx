@@ -28,8 +28,7 @@ import TimerBersaglio from "@/components/TimerBersaglio";
 // stesse si rinominano/eliminano dalla testata. Lo stato delle task resta
 // indipendente dalla sezione: la sezione dice DOVE sta il lavoro, lo stato
 // dice QUANTO e' avanti. Tenerli separati evita due assi di colore sulla
-// stessa riga (la lezione del kanban progetti, dove le colonne sono lenti e
-// non stati).
+// stessa riga.
 //
 // Sezioni e spostamenti sono LOCALI (vedi lib/task-local.ts).
 // ---------------------------------------------------------------------------

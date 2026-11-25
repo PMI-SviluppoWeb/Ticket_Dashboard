@@ -525,8 +525,8 @@ export default function ProgettiPage() {
             setFiltroStato(e.target.value as StatoProgetto | "TUTTI");
             setPagina(1);
           }}
-          // Nel kanban le colonne sono gia' la lente sullo stato: il filtro
-          // si sommerebbe alle colonne e le svuoterebbe senza spiegazione.
+          // Nel kanban le colonne SONO gli stati: un filtro per stato
+          // lascerebbe le altre colonne vuote senza spiegazione.
           className={`${FILTRO_CLASS} ${vista === "kanban" ? "hidden" : ""}`}
         >
           <option value="TUTTI">Tutti gli stati</option>

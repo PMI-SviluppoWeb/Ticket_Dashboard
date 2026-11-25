@@ -94,6 +94,19 @@ export function ChevronRightIcon({ className }: IconProps) {
   );
 }
 
+export function GripVerticalIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <circle cx="9" cy="5" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="19" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="5" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="19" r="1.4" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function AlertTriangleIcon({ className }: IconProps) {
   return (
     <Svg className={className}>
