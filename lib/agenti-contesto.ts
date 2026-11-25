@@ -94,7 +94,7 @@ export function formattaContestoTicket(t: Ticket): string {
   return `## CONTESTO CORRENTE
 L'operatore sta lavorando su questo ticket. Usa questi dati come contesto della richiesta e NON chiedere informazioni già presenti qui.
 Ticket: ${t.numero}
-Cliente: ${t.cliente}
+Cliente: ${t.cliente}${t.cliente_id ? ` (id: ${t.cliente_id})` : ""}
 Contatto: ${compatta(t.contatto, 200)}${t.email ? ` · ${t.email}` : ""}
 Stato: ${t.stato} · Priorità: ${t.priorita} · Modulo: ${t.modulo_software}
 Sommario: ${compatta(t.sommario_problema, 500)}

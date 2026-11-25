@@ -130,6 +130,7 @@ export const AREE: NavArea[] = [
     children: [
       { href: "/agenti", label: "I miei agenti", exact: true },
       { href: "/agenti/attivita", label: "Attività" },
+      { href: "/agenti/proposte", label: "Proposte" },
     ],
     calda: ["/api/agenti"],
   },

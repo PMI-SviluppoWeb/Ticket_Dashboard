@@ -112,7 +112,8 @@ export async function invocaModello(opts: {
     if (opts.sessionId) headers["X-Hermes-Session-Id"] = opts.sessionId;
     if (opts.sessionKey) headers["X-Hermes-Session-Key"] = opts.sessionKey;
     body = {
-      model: process.env.HERMES_MODEL ?? "hermes-agent",
+      model:
+        process.env.HERMES_MODEL ?? "deepseek/deepseek-v4.1-flash-1017",
       messages,
       stream: false,
     };
@@ -127,7 +128,10 @@ export async function invocaModello(opts: {
       "X-Title": "Ticket Dashboard Agents",
     };
     body = {
-      model: opts.modello || process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      model:
+        opts.modello ||
+        process.env.OPENROUTER_MODEL ||
+        "deepseek/deepseek-v4.1-flash-1017",
       temperature: 0.3,
       messages,
       // "Cloud senza conservazione": OpenRouter instrada solo verso provider

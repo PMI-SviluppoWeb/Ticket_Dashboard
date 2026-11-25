@@ -213,7 +213,7 @@ export default function AgenteForm({ agente, onSalvato, onAnnulla }: Props) {
             value={form.modello ?? ""}
             onChange={(e) => setForm({ ...form, modello: e.target.value })}
             className="w-full rounded-control border border-crema-contorno px-3 py-2 font-mono text-xs text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-            placeholder="vuoto = default di sistema"
+            placeholder="vuoto = DeepSeek v4.1 flash (default)"
           />
         </div>
         <label className="flex items-center gap-2 text-xs text-caldo-testo sm:col-span-2">

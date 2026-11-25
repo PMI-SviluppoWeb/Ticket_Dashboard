@@ -4,7 +4,7 @@
 // o piu' tool reali in lib/agenti-tools.ts (i nomi devono combaciare).
 
 export interface GruppoStrumentiDef {
-  id: "ticket" | "clienti" | "statistiche";
+  id: "ticket" | "clienti" | "statistiche" | "operazioni";
   label: string;
   descrizione: string;
   tools: string[];
@@ -28,6 +28,13 @@ export const GRUPPI_STRUMENTI: GruppoStrumentiDef[] = [
     label: "Statistiche",
     descrizione: "KPI della dashboard: totali per stato e priorità.",
     tools: ["statistiche_dashboard"],
+  },
+  {
+    id: "operazioni",
+    label: "Operazioni",
+    descrizione:
+      "Propone la creazione di progetti e attività. Non scrive nulla: serve l'approvazione umana.",
+    tools: ["proponi_progetto_con_task"],
   },
 ];
 

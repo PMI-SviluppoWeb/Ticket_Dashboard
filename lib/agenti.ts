@@ -41,7 +41,8 @@ import type {
   VoceTraccia,
 } from "./types";
 
-const MODELLO_DEFAULT = process.env.AI_MODEL_DEFAULT ?? "openai/gpt-4o-mini";
+const MODELLO_DEFAULT =
+  process.env.AI_MODEL_DEFAULT ?? "deepseek/deepseek-v4.1-flash-1017";
 
 // Limite di turni del loop strumenti (1 turno = 1 chiamata modello).
 // Oltre: un'ultima chiamata FORZATA senza tools per produrre la risposta.
@@ -963,7 +964,12 @@ export async function eseguiAgente(opts: {
           } catch {
             args = {};
           }
-          const risultato = await eseguiStrumento(tc.name, args);
+          const risultato = await eseguiStrumento(tc.name, args, {
+            agenteId: agente.id,
+            esecuzioneId: id,
+            operatoreId: opts.operatoreId ?? null,
+            conversazioneId: opts.conversazioneId ?? null,
+          });
           voci.push({
             turno,
             tool: tc.name,

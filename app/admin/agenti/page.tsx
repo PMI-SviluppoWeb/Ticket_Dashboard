@@ -559,10 +559,10 @@ export default function AgentiPage() {
                     value={form.modello ?? ""}
                     onChange={(e) => setForm({ ...form, modello: e.target.value })}
                     className="w-full rounded-control border border-crema-contorno px-3 py-2 font-mono text-xs text-inchiostro placeholder:text-caldo-testo focus:border-inchiostro focus:outline-none focus:ring-1 focus:ring-inchiostro"
-                    placeholder="es. openai/gpt-4o-mini (vuoto = default di sistema)"
+                    placeholder="es. deepseek/deepseek-v4.1-flash-1017 (vuoto = default di sistema)"
                   />
                   <p className="mt-1 text-xs text-caldo-testo">
-                    ID modello OpenRouter (vuoto = predefinito).
+                    ID modello OpenRouter/Hermes (vuoto = DeepSeek v4.1 flash).
                   </p>
                 </div>
                 <div className="flex items-end pb-1">
@@ -652,7 +652,7 @@ export default function AgentiPage() {
                             <p className="mt-0.5 line-clamp-1 text-xs text-caldo-testo">{a.descrizione}</p>
                           )}
                           <p className="mt-0.5 font-mono text-[10px] text-caldo-testo">
-                            {a.modello || "default di sistema"}
+                            {a.modello || "default (DeepSeek v4.1 flash)"}
                           </p>
                         </td>
                         <td className="px-5 py-3 text-caldo-testo">

@@ -14,6 +14,7 @@ import type {
   AgenteConversazione,
   AgenteEsecuzione,
   AgentePerOperatore,
+  AgenteProposta,
 } from "@/lib/types";
 import { useContestoPagina, type ContestoPagina } from "./contesto";
 
@@ -46,6 +47,9 @@ interface CopilotContextValue {
   selezionaAgente: (id: string) => void;
   conversazioneId: string | null;
   messaggi: MessaggioCopilot[];
+  // Proposte di progetto create dall'agente in questa conversazione.
+  proposte: AgenteProposta[];
+  ricaricaProposte: () => Promise<void>;
   invia: (testo: string) => Promise<void>;
   nuovaConversazione: () => void;
   apriConversazione: (conversazione: AgenteConversazione) => Promise<void>;
@@ -104,6 +108,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const [agenteId, setAgenteId] = useState<string | null>(null);
   const [conversazioneId, setConversazioneId] = useState<string | null>(null);
   const [messaggi, setMessaggi] = useState<MessaggioCopilot[]>([]);
+  const [proposte, setProposte] = useState<AgenteProposta[]>([]);
   const [inCorso, setInCorso] = useState(false);
   const [errore, setErrore] = useState<string | null>(null);
 
@@ -148,12 +153,49 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     [agenti, agenteId]
   );
 
+  const caricaProposte = useCallback(async (convId: string | null) => {
+    if (!convId) {
+      setProposte([]);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/agenti/proposte?conversazione_id=${encodeURIComponent(convId)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) {
+        setProposte([]);
+        return;
+      }
+      const data = (await res.json()) as { proposte?: AgenteProposta[] };
+      setProposte(data.proposte ?? []);
+    } catch {
+      setProposte([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void caricaProposte(conversazioneId);
+  }, [conversazioneId, caricaProposte]);
+
+  // Riaprendo il Copilot si riallineano le proposte (potrebbero essere state
+  // approvate dalla pagina dedicata nel frattempo).
+  useEffect(() => {
+    if (aperto) void caricaProposte(conversazioneId);
+  }, [aperto, conversazioneId, caricaProposte]);
+
+  const ricaricaProposte = useCallback(
+    () => caricaProposte(conversazioneId),
+    [caricaProposte, conversazioneId]
+  );
+
   const apri = useCallback((id?: string) => {
     setAperto(true);
     if (id) {
       setAgenteId(id);
       setConversazioneId(null);
       setMessaggi([]);
+      setProposte([]);
       setErrore(null);
     }
   }, []);
@@ -165,12 +207,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setAgenteId(id);
     setConversazioneId(null);
     setMessaggi([]);
+    setProposte([]);
     setErrore(null);
   }, []);
 
   const nuovaConversazione = useCallback(() => {
     setConversazioneId(null);
     setMessaggi([]);
+    setProposte([]);
     setErrore(null);
   }, []);
 
@@ -188,12 +232,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { messaggi?: AgenteEsecuzione[] };
         setMessaggi(messaggiDaEsecuzioni(data.messaggi ?? []));
+        void caricaProposte(conversazione.id);
       } catch {
         setMessaggi([]);
         setErrore("Impossibile caricare la conversazione.");
       }
     },
-    []
+    [caricaProposte]
   );
 
   const invia = useCallback(
@@ -254,6 +299,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             esecuzione: es,
           },
         ]);
+        // L'agente può aver creato una proposta durante il turno.
+        await caricaProposte(convId);
       } catch (err) {
         const messaggio =
           err instanceof Error ? err.message : "Esecuzione non riuscita.";
@@ -266,7 +313,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         setInCorso(false);
       }
     },
-    [agenteId, conversazioneId, contesto, inCorso]
+    [agenteId, conversazioneId, contesto, inCorso, caricaProposte]
   );
 
   const value = useMemo<CopilotContextValue>(
@@ -282,6 +329,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       selezionaAgente,
       conversazioneId,
       messaggi,
+      proposte,
+      ricaricaProposte,
       invia,
       nuovaConversazione,
       apriConversazione,
@@ -302,6 +351,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       selezionaAgente,
       conversazioneId,
       messaggi,
+      proposte,
+      ricaricaProposte,
       invia,
       nuovaConversazione,
       apriConversazione,

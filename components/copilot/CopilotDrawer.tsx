@@ -10,6 +10,7 @@ import {
 } from "@/components/icons";
 import { etichettaContesto } from "./contesto";
 import { useCopilot } from "./CopilotContext";
+import PropostaProgettoCard from "./PropostaProgettoCard";
 
 const STATO_PROVIDER: Record<string, string> = {
   hermes: "Hermes · memoria persistente",
@@ -26,6 +27,8 @@ export default function CopilotDrawer() {
     agenteSel,
     selezionaAgente,
     messaggi,
+    proposte,
+    ricaricaProposte,
     invia,
     nuovaConversazione,
     inCorso,
@@ -246,6 +249,21 @@ export default function CopilotDrawer() {
               </div>
             );
           })}
+
+          {proposte.length > 0 && (
+            <div className="space-y-2 border-t border-crema-bordo pt-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-caldo-testo">
+                Proposte di progetto
+              </p>
+              {proposte.map((p) => (
+                <PropostaProgettoCard
+                  key={p.id}
+                  proposta={p}
+                  onAggiornata={() => void ricaricaProposte()}
+                />
+              ))}
+            </div>
+          )}
 
           {inCorso && (
             <div className="flex items-center gap-2 text-xs text-caldo-testo">

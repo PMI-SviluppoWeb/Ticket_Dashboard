@@ -575,12 +575,15 @@ CREATE TABLE IF NOT EXISTS agenti_proposte (
   id             TEXT PRIMARY KEY,
   esecuzione_id  TEXT,
   agente_id      TEXT,
+  conversazione_id TEXT,
+  progetto_id    TEXT,
   tipo           TEXT NOT NULL,
   payload        TEXT NOT NULL,
   stato          TEXT NOT NULL DEFAULT 'in_attesa'
                  CHECK (stato IN ('in_attesa','approvata','rifiutata')),
   proposta_da    TEXT,
   deciso_da      TEXT,
+  errore         TEXT,
   data_creazione TEXT NOT NULL,
   data_decisione TEXT
 );
@@ -852,13 +855,6 @@ async function initSchema(): Promise<void> {
     } catch { /* Column already exists */ }
   }
 
-  // Modello fisso rimosso: gli agenti che puntavano al vecchio default
-  // vengono riportati a "usa il default di sistema" (configurabile da env).
-  try {
-    await getClient().execute(
-      "UPDATE agenti SET modello = '' WHERE modello = 'deepseek/deepseek-v4.1-flash-1017'"
-    );
-  } catch { /* tabella agenti non ancora presente */ }
   const indiciAggiuntivi = [
     "CREATE INDEX IF NOT EXISTS idx_tickets_operatore_id ON tickets (operatore_id)",
     "CREATE INDEX IF NOT EXISTS idx_tickets_cliente_id ON tickets (cliente_id)",
@@ -879,6 +875,12 @@ async function initSchema(): Promise<void> {
     // Direzione: le voci APERTE (fine NULL) si cercano per tutti gli operatori.
     // L'indice esistente parte da operatore_id, quindi non aiuta questa query.
     "CREATE INDEX IF NOT EXISTS idx_voci_tempo_fine ON voci_tempo (fine)",
+    // Proposte agente: collegamento al thread Copilot e stato di errore.
+    "ALTER TABLE agenti_proposte ADD COLUMN conversazione_id TEXT",
+    "ALTER TABLE agenti_proposte ADD COLUMN errore TEXT",
+    "ALTER TABLE agenti_proposte ADD COLUMN progetto_id TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_agenti_proposte_conversazione ON agenti_proposte (conversazione_id, data_creazione)",
+    "CREATE INDEX IF NOT EXISTS idx_agenti_proposte_operatore ON agenti_proposte (proposta_da, stato, data_creazione)",
   ];
   for (const sql of indiciAggiuntivi) {
     try {
@@ -1007,6 +1009,16 @@ async function initSchema(): Promise<void> {
     console.error("Backfill struttura ticket non applicato:", err);
   }
 
+  // v4: nuovo default degli agenti. Chi era sul vecchio default gpt-4o-mini
+  // passa a DeepSeek; gli altri modelli restano invariati.
+  try {
+    await getClient().execute(
+      "UPDATE agenti SET modello = 'deepseek/deepseek-v4.1-flash-1017' WHERE modello = 'openai/gpt-4o-mini'"
+    );
+  } catch (err) {
+    console.error("Migrazione modello agenti non applicata:", err);
+  }
+
   // Solo se tutte le migrazioni sono andate a termine si registra la versione:
   // in caso di errore il prossimo avvio le ritenta.
   try {
@@ -1027,7 +1039,8 @@ async function initSchema(): Promise<void> {
 // si riestrae tutto.
 // v3: colonne strutturate (operatore_id, cliente_id, date ISO), storico stati,
 // registro attivita', chiavi API, contatore ticket. Backfill per nome esatto.
-const SCHEMA_VERSION = 3;
+// v4: default modello agenti DeepSeek; i vecchi gpt-4o-mini vengono migrati.
+const SCHEMA_VERSION = 4;
 
 // Accetta i formati che convivono nella tabella: ISO e "dd/mm/yyyy, hh:mm"
 // (quello scritto da tickets.now()). Restituisce ISO UTC, oppure null se non

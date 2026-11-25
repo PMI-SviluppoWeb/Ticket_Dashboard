@@ -1070,7 +1070,11 @@ export type ProviderAgente = "auto" | "openrouter" | "hermes";
 
 // Gruppi di strumenti (dati dell'app, sola lettura) selezionabili in UI.
 // Ogni gruppo abilita uno piu' tool di lib/agenti-tools.ts.
-export type GruppoStrumenti = "ticket" | "clienti" | "statistiche";
+export type GruppoStrumenti =
+  | "ticket"
+  | "clienti"
+  | "statistiche"
+  | "operazioni";
 
 export interface Agente {
   id: string;
@@ -1146,6 +1150,60 @@ export interface AgenteEsecuzione {
 export interface EsecuzioneAgenteInput {
   input: string;
   contesto?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Proposte degli agenti (scritture con approvazione umana)
+// ---------------------------------------------------------------------------
+
+export type StatoProposta = "in_attesa" | "approvata" | "rifiutata";
+
+export interface PropostaAttivita {
+  titolo: string;
+  descrizione: string;
+  priorita: Priorita;
+  data_scadenza: string | null;
+  assegnatario: string | null;
+  persone: string[];
+}
+
+export interface PropostaProgetto {
+  nome: string;
+  descrizione: string;
+  // Puo' mancare alla creazione (l'agente non lo conosce): serve
+  // obbligatoriamente al momento dell'approvazione.
+  cliente_id: string | null;
+  cliente_nome: string | null;
+  priorita: Priorita;
+  responsabile: string | null;
+  data_inizio: string | null;
+  data_fine: string | null;
+  note: string;
+}
+
+export interface PropostaProgettoPayload {
+  progetto: PropostaProgetto;
+  attivita: PropostaAttivita[];
+}
+
+export interface AgenteProposta {
+  id: string;
+  esecuzione_id: string | null;
+  agente_id: string | null;
+  conversazione_id: string | null;
+  // Valorizzato solo dopo l'approvazione.
+  progetto_id: string | null;
+  tipo: string;
+  payload: PropostaProgettoPayload;
+  stato: StatoProposta;
+  proposta_da: string | null;
+  deciso_da: string | null;
+  errore: string | null;
+  data_creazione: string;
+  data_decisione: string | null;
+  // Risolti in lettura per la UI.
+  agente_nome?: string | null;
+  operatore_nome?: string | null;
 }
 
 // Agente con il flag di "pinnato" per l'operatore corrente (barra rapida del

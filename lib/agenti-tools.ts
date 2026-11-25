@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { getStats, getTicket, getTicketByNumero, listTickets } from "./tickets";
 import { getCliente, listClienti } from "./clienti";
+import { creaProposta } from "./proposte";
 import { TUTTI_STRUMENTI } from "./agenti-tools-def";
 import "server-only";
 
@@ -12,8 +13,10 @@ import "server-only";
 // Nessun MCP, nessun accesso esterno ai dati: i dati escono solo come
 // contesto nel prompt (come per la classificazione email).
 //
-// Tutti gli strumenti sono A SOLA LETTURA. Ogni risultato viene troncato
-// (cap qui sotto) per non gonfiare i token a ogni turno del loop.
+// Tutti gli strumenti sono A SOLA LETTURA tranne `proponi_progetto_con_task`,
+// che NON scrive progetti: crea una proposta in agenti_proposte in attesa di
+// approvazione umana. Ogni risultato viene troncato (cap qui sotto) per non
+// gonfiare i token a ogni turno del loop.
 // ===========================================================================
 
 export interface DefinizioneStrumento {
@@ -27,6 +30,15 @@ export interface DefinizioneStrumento {
       required?: string[];
     };
   };
+}
+
+// Contesto di esecuzione passato da lib/agenti.ts. Serve ai tool che devono
+// sapere chi sta proponendo, in quale esecuzione e in quale conversazione.
+export interface ContestoStrumento {
+  agenteId?: string | null;
+  esecuzioneId?: string | null;
+  operatoreId?: string | null;
+  conversazioneId?: string | null;
 }
 
 // Cap di un singolo risultato serializzato (caratteri). Oltre: si taglia
@@ -109,6 +121,66 @@ export const STRUMENTI: DefinizioneStrumento[] = [
         "Statistiche aggregate dei ticket: totali, per stato (nuovi/in corso/risolti/chiusi), " +
         "per priorità e numero di ticket aperti. Nessun argomento.",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "proponi_progetto_con_task",
+      description:
+        "Crea una PROPOSTA di progetto con le sue attività. Non crea nulla nell'app: " +
+        "la proposta deve essere approvata da un umano. Usalo solo quando l'operatore " +
+        "chiede esplicitamente di creare un progetto, di organizzare il lavoro o di " +
+        "trasformare in task le richieste di un ticket/email. Non inventare date o " +
+        "assegnatari: lascia vuoto ciò che non è noto. Dopo la chiamata non dire di " +
+        "aver creato il progetto: di' che la proposta è pronta per l'approvazione.",
+      parameters: {
+        type: "object",
+        properties: {
+          progetto: {
+            type: "object",
+            description: "Dati del progetto da proporre.",
+            properties: {
+              nome: { type: "string", description: "Nome breve e chiaro del progetto" },
+              descrizione: { type: "string", description: "Contesto e obiettivo del progetto" },
+              cliente_id: {
+                type: "string",
+                description: "Id del cliente, se noto dal contesto o da cerca_clienti",
+              },
+              cliente_nome: {
+                type: "string",
+                description: "Ragione sociale del cliente, se l'id non è noto",
+              },
+              priorita: { type: "string", enum: ["BASSA", "MEDIA", "ALTA"] },
+              responsabile: { type: "string" },
+              data_inizio: { type: "string", description: "Formato YYYY-MM-DDTHH:mm" },
+              data_fine: { type: "string", description: "Formato YYYY-MM-DDTHH:mm" },
+              note: { type: "string" },
+            },
+            required: ["nome"],
+          },
+          attivita: {
+            type: "array",
+            description: "Attività operative da creare dentro il progetto.",
+            items: {
+              type: "object",
+              properties: {
+                titolo: { type: "string" },
+                descrizione: { type: "string" },
+                priorita: { type: "string", enum: ["BASSA", "MEDIA", "ALTA"] },
+                data_scadenza: {
+                  type: "string",
+                  description: "Formato YYYY-MM-DDTHH:mm, solo se presente nel ticket/email",
+                },
+                assegnatario: { type: "string" },
+                persone: { type: "array", items: { type: "string" } },
+              },
+              required: ["titolo"],
+            },
+          },
+        },
+        required: ["progetto", "attivita"],
+      },
     },
   },
 ];
@@ -230,7 +302,11 @@ async function eseguiGetCliente(id: string): Promise<unknown> {
 // stringa (JSON) da rimettere nei messages del loop. Gli errori NON
 // esplodono: vengono restituiti come risultato {"errore": ...} così il
 // modello può correggersi al turno successivo invece di fallire tutto.
-export async function eseguiStrumento(nome: string, argomenti: unknown): Promise<string> {
+export async function eseguiStrumento(
+  nome: string,
+  argomenti: unknown,
+  contesto?: ContestoStrumento
+): Promise<string> {
   if (!TUTTI_STRUMENTI.includes(nome)) {
     return serializza({ errore: `Strumento "${nome}" non esistente.` });
   }
@@ -252,6 +328,29 @@ export async function eseguiStrumento(nome: string, argomenti: unknown): Promise
         return serializza(await eseguiGetCliente(String(args.id ?? "")));
       case "statistiche_dashboard":
         return serializza(await getStats());
+      case "proponi_progetto_con_task": {
+        if (!contesto?.operatoreId) {
+          return serializza({
+            errore: "Contesto operatore mancante: impossibile creare la proposta.",
+          });
+        }
+        const esito = await creaProposta({
+          agenteId: contesto.agenteId,
+          esecuzioneId: contesto.esecuzioneId,
+          conversazioneId: contesto.conversazioneId,
+          operatoreId: contesto.operatoreId,
+          payload: args,
+        });
+        if (!esito.ok) return serializza({ errore: esito.error });
+        return serializza({
+          ok: true,
+          proposta_id: esito.proposta.id,
+          messaggio:
+            "Proposta creata e in attesa di approvazione. Non dire che il progetto è stato creato.",
+          progetto: esito.proposta.payload.progetto.nome,
+          attivita: esito.proposta.payload.attivita.length,
+        });
+      }
       default:
         return serializza({ errore: `Strumento "${nome}" non implementato.` });
     }
