@@ -32,6 +32,11 @@ hermes-gmail-*.json
 # Output di graphify (rigenerabile con `graphify update .`)
 graphify-out/
 
+# Wiki del grafo dentro il vault: generata da `npm run docs:grafo`.
+# Si versiona solo la nota che spiega come rigenerarla.
+docs/_grafo/*
+!docs/_grafo/_generato.md
+
 # Stato locale del hook impeccable (config del rilevatore, cache).
 # La configurazione vera e condivisa vive altrove; questa e' macchina-specifica
 # e non deve finire nei commit degli altri.

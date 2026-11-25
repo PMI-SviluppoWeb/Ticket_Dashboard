@@ -11,6 +11,10 @@
     "test": "tsx --test \"lib/__tests__/**/*.test.ts\"",
     "backup-db": "tsx scripts/backup-turso.ts",
     "pulizia-email": "tsx scripts/pulizia-email.ts",
+    "docs": "npm run docs:riferimenti && npm run docs:grafo && npm run docs:stato",
+    "docs:riferimenti": "tsx scripts/docs/genera-riferimenti.ts",
+    "docs:grafo": "tsx scripts/docs/esporta-grafo.ts",
+    "docs:stato": "tsx scripts/docs/stato.ts",
     "worker": "npx tsx scripts/start-worker.ts",
     "poll-mail": "tsx scripts/poll-mail.ts",
     "sync-clienti": "npx tsx scripts/sync-clienti.ts"

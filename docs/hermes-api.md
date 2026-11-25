@@ -1,3 +1,15 @@
+---
+title: API macchina Hermes
+aliases:
+  - API Hermes
+  - Bot WhatsApp
+tags:
+  - riferimento
+  - area/ai
+verificato_al_commit: 81b3f92
+created: 2026-07-01
+---
+
 # API macchina per il bot WhatsApp (Hermes)
 
 L'app espone una piccola API HTTP per il bot che gira su **Hermes**. Il bot non

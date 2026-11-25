@@ -1,3 +1,14 @@
+---
+title: Migrazione API Arca
+aliases:
+  - Migrazione clienti Arca
+tags:
+  - riferimento
+  - area/clienti
+verificato_al_commit: 81b3f92
+created: 2026-07-01
+---
+
 # Guida: Passaggio da SQL Server a API Arca per Anagrafiche Clienti
 
 ## Contesto attuale
