@@ -24,7 +24,8 @@ export async function GET(
     const idCliente = params.id;
     const nomeCliente = cliente.ragione_sociale;
 
-    const [ticketRes, oreRes, moduliRes, contattiRes] = await db.batchRead([
+    const [ticketRes, oreRes, moduliRes, contattiRes, progettiRes, rapportiniRes] =
+      await db.batchRead([
       {
         sql: `SELECT id, numero, stato, priorita, sommario_problema, modulo_software,
                      contatto, telefono, email, creato_il, chiuso_il, canale
@@ -61,6 +62,20 @@ export async function GET(
               ORDER BY n DESC LIMIT 20`,
         params: { id: idCliente, nome: nomeCliente },
       },
+      {
+        sql: `SELECT id, codice, nome, stato
+              FROM progetti
+              WHERE cliente_id = @id
+              ORDER BY data_creazione DESC LIMIT 50`,
+        params: { id: idCliente },
+      },
+      {
+        sql: `SELECT id, numero, stato, data_creazione, minuti_totali
+              FROM rapportini
+              WHERE cliente_id = @id
+              ORDER BY data_creazione DESC LIMIT 50`,
+        params: { id: idCliente },
+      },
     ]);
 
     return NextResponse.json({
@@ -72,6 +87,19 @@ export async function GET(
       },
       moduli: moduliRes.map((r) => ({ nome: String(r.nome ?? "—"), n: Number(r.n) })),
       contatti: contattiRes,
+      progetti: progettiRes.map((r) => ({
+        id: String(r.id),
+        codice: String(r.codice ?? ""),
+        nome: String(r.nome ?? ""),
+        stato: String(r.stato ?? ""),
+      })),
+      rapportini: rapportiniRes.map((r) => ({
+        id: String(r.id),
+        numero: String(r.numero ?? ""),
+        stato: String(r.stato ?? ""),
+        data_creazione: String(r.data_creazione ?? ""),
+        minuti_totali: Number(r.minuti_totali ?? 0),
+      })),
     });
   } catch (err) {
     console.error("GET /api/clienti/[id]/scheda", err);

@@ -333,6 +333,189 @@ export interface ClienteInput {
 }
 
 // ---------------------------------------------------------------------------
+// Gestione clienti: scheda commerciale, questionari, inventario
+// ---------------------------------------------------------------------------
+
+export type StatoClienteCommerciale = "attivo" | "prospect" | "a_rischio" | "perso";
+export type PrioritaCommerciale = "alta" | "media" | "bassa";
+
+export interface ClienteCommerciale {
+  cliente_id: string;
+  referente_tecnico: string | null;
+  referente_decisionale: string | null;
+  email_decisionale: string | null;
+  telefono_decisionale: string | null;
+  stato_cliente: StatoClienteCommerciale;
+  settore: string | null;
+  dimensione_aziendale: string | null;
+  priorita_commerciale: PrioritaCommerciale;
+  note_commerciali: string | null;
+  data_aggiornamento: string;
+}
+
+export interface ClienteCommercialeInput {
+  referente_tecnico?: string | null;
+  referente_decisionale?: string | null;
+  email_decisionale?: string | null;
+  telefono_decisionale?: string | null;
+  stato_cliente?: StatoClienteCommerciale;
+  settore?: string | null;
+  dimensione_aziendale?: string | null;
+  priorita_commerciale?: PrioritaCommerciale;
+  note_commerciali?: string | null;
+}
+
+// Riga dell'elenco clienti admin (con metriche aggregate).
+export interface ClientePanoramica {
+  id: string;
+  ragione_sociale: string;
+  nome_contatto: string | null;
+  email: string | null;
+  telefono: string | null;
+  citta: string | null;
+  provincia: string | null;
+  stato_cliente: StatoClienteCommerciale;
+  priorita_commerciale: PrioritaCommerciale;
+  settore: string | null;
+  ticket_aperti: number;
+  ore_minuti: number;
+  questionari_compilati: number;
+  ultimo_questionario: string | null;
+}
+
+export type StatoQuestionario =
+  | "creato"
+  | "inviato"
+  | "compilato"
+  | "scaduto"
+  | "annullato";
+
+export interface SoftwareInventario {
+  nome: string;
+  versione: string;
+  licenze: number | null;
+  fornitore: string;
+  scadenza: string;
+  note: string;
+}
+
+export interface RisposteQuestionario {
+  azienda: {
+    referente: string;
+    ruolo: string;
+    email: string;
+    telefono: string;
+  };
+  parco_pc: {
+    computer: number;
+    server: number;
+    postazioni: number;
+    anni_medi: number | null;
+    note: string;
+  };
+  software: SoftwareInventario[];
+  arca: {
+    versione: string;
+    licenze: number;
+    moduli: string[];
+    ultimo_aggiornamento: string;
+    assistenza: string;
+  };
+  infrastruttura: {
+    backup: string;
+    antivirus: string;
+    cloud: string;
+    vpn: string;
+    sicurezza: string;
+  };
+  esigenze: {
+    criticita: string;
+    obiettivi: string;
+    priorita: string;
+  };
+  soddisfazione: {
+    nps: number | null;
+    commenti: string;
+  };
+  consenso_privacy: boolean;
+}
+
+export interface Questionario {
+  id: string;
+  cliente_id: string;
+  stato: StatoQuestionario;
+  titolo: string;
+  messaggio: string | null;
+  destinatario: string | null;
+  scadenza: string | null;
+  inviato_il: string | null;
+  compilato_il: string | null;
+  esito_invio: string | null;
+  errore_invio: string | null;
+  creato_da: string | null;
+  data_creazione: string;
+  data_aggiornamento: string;
+  // Presente solo per i questionari compilati.
+  risposta: RisposteQuestionario | null;
+  data_compilazione: string | null;
+}
+
+// Dati minimi restituiti al form pubblico (nessun dato interno).
+export interface QuestionarioTokenInfo {
+  azienda: string;
+  titolo: string;
+  messaggio: string | null;
+  stato: StatoQuestionario;
+  scadenza: string | null;
+}
+
+// Proiezione della scheda cliente usata dalla pagina /clienti/[id].
+export interface ClienteSchedaTicket {
+  id: string;
+  numero: string;
+  stato: StatoTicket;
+  priorita: Priorita;
+  sommario_problema: string;
+  modulo_software: string;
+  contatto: string | null;
+  telefono: string | null;
+  email: string | null;
+  creato_il: string | null;
+  chiuso_il: string | null;
+  canale: string | null;
+}
+
+export interface ClienteSchedaProgetto {
+  id: string;
+  codice: string;
+  nome: string;
+  stato: string;
+}
+
+export interface ClienteSchedaRapportino {
+  id: string;
+  numero: string;
+  stato: string;
+  data_creazione: string;
+  minuti_totali: number;
+}
+
+export interface ClienteScheda {
+  cliente: Cliente;
+  tickets: ClienteSchedaTicket[];
+  ore: { voci: number; minuti: number };
+  moduli: Array<{ nome: string; n: number }>;
+  contatti: Array<{
+    contatto: string | null;
+    telefono: string | null;
+    email: string | null;
+    n: number;
+  }>;
+  progetti: ClienteSchedaProgetto[];
+  rapportini: ClienteSchedaRapportino[];
+}
+
+// ---------------------------------------------------------------------------
 // Progetti e calendario
 //
 // Convenzione date del modulo:

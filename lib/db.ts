@@ -157,6 +157,71 @@ CREATE TABLE IF NOT EXISTS clienti (
 CREATE INDEX IF NOT EXISTS idx_clienti_ragione_sociale ON clienti (ragione_sociale);
 CREATE INDEX IF NOT EXISTS idx_clienti_citta           ON clienti (citta);
 
+-- Scheda commerciale del cliente: dati LOCALI (referenti, stato, priorita').
+-- L'anagrafica resta quella sincronizzata da Arca: qui non si scrive nulla.
+CREATE TABLE IF NOT EXISTS clienti_commerciale (
+  cliente_id             TEXT PRIMARY KEY,
+  referente_tecnico      TEXT,
+  referente_decisionale  TEXT,
+  email_decisionale      TEXT,
+  telefono_decisionale   TEXT,
+  stato_cliente          TEXT NOT NULL DEFAULT 'attivo'
+                         CHECK (stato_cliente IN ('attivo','prospect','a_rischio','perso')),
+  settore                TEXT,
+  dimensione_aziendale   TEXT,
+  priorita_commerciale   TEXT NOT NULL DEFAULT 'media'
+                         CHECK (priorita_commerciale IN ('alta','media','bassa')),
+  note_commerciali       TEXT,
+  data_aggiornamento     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clienti_commerciale_stato
+  ON clienti_commerciale (stato_cliente, priorita_commerciale);
+
+-- Questionari inviati ai clienti. Il token NON si salva in chiaro: nel DB
+-- resta solo l'hash SHA-256, il link completo viene mostrato una volta.
+CREATE TABLE IF NOT EXISTS questionari (
+  id                TEXT PRIMARY KEY,
+  cliente_id        TEXT NOT NULL,
+  token_hash        TEXT NOT NULL UNIQUE,
+  stato             TEXT NOT NULL DEFAULT 'creato'
+                    CHECK (stato IN ('creato','inviato','compilato','scaduto','annullato')),
+  titolo            TEXT NOT NULL,
+  messaggio         TEXT,
+  destinatario      TEXT,
+  scadenza          TEXT,
+  inviato_il        TEXT,
+  compilato_il      TEXT,
+  esito_invio       TEXT,
+  errore_invio      TEXT,
+  creato_da         TEXT,
+  data_creazione    TEXT NOT NULL,
+  data_aggiornamento TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_questionari_cliente
+  ON questionari (cliente_id, data_creazione DESC);
+CREATE INDEX IF NOT EXISTS idx_questionari_stato
+  ON questionari (stato, data_creazione DESC);
+
+-- Risposte del questionario: JSON completo + colonne chiave per l'analisi.
+CREATE TABLE IF NOT EXISTS questionari_risposte (
+  questionario_id   TEXT PRIMARY KEY,
+  cliente_id        TEXT NOT NULL,
+  risposte          TEXT NOT NULL,
+  n_computer        INTEGER,
+  n_server          INTEGER,
+  arca_versione     TEXT,
+  arca_licenze      INTEGER,
+  n_software        INTEGER,
+  nps               INTEGER,
+  consenso_privacy  INTEGER NOT NULL DEFAULT 0,
+  data_compilazione TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_questionari_risposte_cliente
+  ON questionari_risposte (cliente_id, data_compilazione DESC);
+
 CREATE TABLE IF NOT EXISTS email_inbox (
   id             TEXT PRIMARY KEY,
   message_id     TEXT NOT NULL UNIQUE,

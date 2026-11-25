@@ -9,6 +9,7 @@ import {
   MailIcon,
   SettingsIcon,
   SparklesIcon,
+  UserIcon,
 } from "@/components/icons";
 
 // ===========================================================================
@@ -85,6 +86,18 @@ export const AREE: NavArea[] = [
     gruppo: "lavoro",
     children: [{ href: "/progetti", label: "Progetti" }],
     calda: ["/api/clienti"],
+  },
+  {
+    // Gestione clienti: area commerciale riservata all'admin. Gli operatori
+    // continuano ad aprire /clienti/[id] dai ticket, ma senza dati commerciali.
+    id: "clienti",
+    label: "Clienti",
+    icon: UserIcon,
+    href: "/clienti",
+    gruppo: "lavoro",
+    adminOnly: true,
+    children: [{ href: "/clienti", label: "Clienti" }],
+    calda: ["/api/clienti/panoramica"],
   },
   {
     // Posta in arrivo: visibile a tutti. Un operatore vede solo le email delle

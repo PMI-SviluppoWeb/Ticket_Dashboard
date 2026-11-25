@@ -242,3 +242,38 @@ export function emailAutoReply(opts: {
     </p>
   `);
 }
+
+// Questionario conoscitivo inviato al cliente: link pubblico con scadenza.
+export function emailQuestionario(opts: {
+  azienda: string;
+  titolo: string;
+  messaggio: string | null;
+  link: string;
+  scadenza: string;
+}): string {
+  return wrap(opts.titolo, `
+    <p style="margin:0 0 12px;font-size:14px">Gentile <strong>${esc(opts.azienda)}</strong>,</p>
+    <p style="margin:0 0 16px;font-size:14px">
+      per conoscerci meglio e capire come possiamo esserti utile, ti chiediamo
+      qualche minuto per compilare questo breve questionario.
+    </p>
+    ${opts.messaggio ? `<p style="margin:0 0 16px;font-size:14px;white-space:pre-wrap">${esc(opts.messaggio)}</p>` : ""}
+    <p style="margin:0 0 20px;text-align:center">
+      <a href="${esc(opts.link)}"
+         style="display:inline-block;background:#151515;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:999px;font-size:14px;font-weight:600">
+        Compila il questionario
+      </a>
+    </p>
+    <p style="margin:0 0 8px;font-size:13px;color:#64748b">
+      Il link e' valido fino al <strong>${esc(opts.scadenza)}</strong>.
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#94a3b8;word-break:break-all">
+      Se il pulsante non funziona, copia e incolla questo indirizzo nel browser:<br>
+      ${esc(opts.link)}
+    </p>
+    <p style="margin:0;font-size:12px;color:#64748b">
+      I dati inseriti saranno utilizzati solo per migliorare il servizio e
+      non saranno condivisi con terzi.
+    </p>
+  `);
+}

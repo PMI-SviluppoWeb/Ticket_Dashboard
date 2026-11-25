@@ -16,6 +16,9 @@ const PUBLIC_PATHS = new Set([
   "/api/auth/logout",
   "/api/auth/me",
   "/api/auth/register",
+  // Questionario cliente: link pubblico con token, nessuna sessione.
+  "/questionario",
+  "/api/questionario",
   "/api/hooks/email",
   // Ritorno da Google: non puo' passare dalla sessione (una sessione scaduta
   // durante il consenso sprecherebbe il codice monouso). La protezione e' il
